@@ -1,0 +1,41 @@
+# Local development override — adds PostgreSQL so the stack runs
+# standalone without Dokploy. This file is automatically merged by
+# ``podman compose`` / ``docker-compose`` when present.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: adjudicauy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: adjudicauy
+      POSTGRES_PASSWORD: adjudicauy_dev
+      POSTGRES_DB: adjudicauy
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - adjudicauy
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U adjudicauy"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  app:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://adjudicauy:adjudicauy_dev@postgres:5432/adjudicauy
+
+  worker:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://adjudicauy:adjudicauy_dev@postgres:5432/adjudicauy
+
+volumes:
+  postgres_data:
