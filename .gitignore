@@ -1,0 +1,18 @@
+# atl
+.atl/
+
+# openspec
+openspec/
+
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+.env.local
