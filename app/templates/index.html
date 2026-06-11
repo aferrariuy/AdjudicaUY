@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{# Index page: filter form + results container + chart panels.
+   The form posts to /adjudications via HTMX, and the partial is
+   swapped into #results. The chart canvases are also inside #results
+   so they re-render with the new data after every filter change. #}
+
+{% block title %}Adjudicaciones — AdjudicaUY{% endblock %}
+
+{% block content %}
+  <section aria-labelledby="filters-heading" class="bg-white border border-slate-200 rounded-lg p-4 sm:p-6 mb-6">
+    <h2 id="filters-heading" class="text-lg font-semibold mb-4">Filtros</h2>
+
+    {# The form has no action: HTMX intercepts the submit/change events
+       and turns them into a GET against /adjudications. #}
+    <form
+      hx-get="/adjudications"
+      hx-target="#results"
+      hx-trigger="change, submit"
+      hx-swap="innerHTML"
+      class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+    >
+      <div>
+        <label for="filter-article" class="block text-sm font-medium text-slate-700 mb-1">Artículo</label>
+        <input
+          id="filter-article"
+          type="text"
+          name="article"
+          value="{{ filters.article or '' }}"
+          placeholder="Ej: laptop"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+      </div>
+
+      <div>
+        <label for="filter-company" class="block text-sm font-medium text-slate-700 mb-1">Empresa adjudicataria</label>
+        <input
+          id="filter-company"
+          type="text"
+          name="company"
+          value="{{ filters.company or '' }}"
+          placeholder="Ej: Empresa SA"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+      </div>
+
+      <div>
+        <label for="filter-organism" class="block text-sm font-medium text-slate-700 mb-1">Organismo</label>
+        <input
+          id="filter-organism"
+          type="text"
+          name="organism"
+          value="{{ filters.organism or '' }}"
+          placeholder="Ej: Ministerio de Interior"
+          list="organism-suggestions"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+        <datalist id="organism-suggestions">
+          {% for name in organisms %}
+            <option value="{{ name }}"></option>
+          {% endfor %}
+        </datalist>
+      </div>
+
+      <div>
+        <label for="filter-date-from" class="block text-sm font-medium text-slate-700 mb-1">Desde</label>
+        <input
+          id="filter-date-from"
+          type="date"
+          name="date_from"
+          value="{{ filters.date_from.isoformat() if filters.date_from else '' }}"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+      </div>
+
+      <div>
+        <label for="filter-date-to" class="block text-sm font-medium text-slate-700 mb-1">Hasta</label>
+        <input
+          id="filter-date-to"
+          type="date"
+          name="date_to"
+          value="{{ filters.date_to.isoformat() if filters.date_to else '' }}"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+      </div>
+
+      <div class="flex items-end gap-2">
+        <button
+          type="submit"
+          class="inline-flex items-center rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
+        >Aplicar</button>
+        <a
+          href="/"
+          class="inline-flex items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+        >Limpiar</a>
+      </div>
+    </form>
+  </section>
+
+  <div id="results">
+    {% include "partials/_results.html" %}
+  </div>
+{% endblock %}

@@ -1,0 +1,27 @@
+{# Wrapper partial rendered into the #results container on every filter
+   change. It composes the three child partials (results table, ranking
+   chart, temporal chart) and the small "showing N of M" header.
+
+   This file is a Jinja2 partial only — it is not an HTML document. #}
+
+<div class="space-y-6">
+  <div class="flex items-center justify-between text-sm text-slate-600">
+    <p>
+      {% if total == 0 %}
+        Sin resultados
+      {% else %}
+        Mostrando <span class="font-semibold text-slate-800">{{ shown }}</span>
+        de <span class="font-semibold text-slate-800">{{ total }}</span>
+        {% if filters.has_any() %}
+          adjudicaciones que coinciden con los filtros
+        {% else %}
+          adjudicaciones
+        {% endif %}
+      {% endif %}
+    </p>
+  </div>
+
+  {% include "partials/_results_table.html" %}
+  {% include "partials/_ranking_chart.html" %}
+  {% include "partials/_temporal_chart.html" %}
+</div>

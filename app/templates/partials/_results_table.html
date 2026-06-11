@@ -1,0 +1,63 @@
+{# Adjudications results table. Shows a "no results" panel when the
+   filter set produced zero rows. The columns mirror the model's
+   display fields, except for the linked license_url and the formatted
+   amount_uyu. #}
+
+<section aria-labelledby="results-heading" class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+  <h2 id="results-heading" class="sr-only">Resultados</h2>
+
+  {% if not results %}
+    <div class="p-6 text-center">
+      <p class="text-slate-600">No se encontraron adjudicaciones con los filtros aplicados.</p>
+    </div>
+  {% else %}
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50">
+          <tr>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Fecha</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Organismo</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Empresa</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Artículo</th>
+            <th scope="col" class="px-4 py-2 text-right font-medium text-slate-600">Monto</th>
+            <th scope="col" class="px-4 py-2 text-right font-medium text-slate-600">UYU</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Tipo</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Documento</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Licitación</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 bg-white">
+          {% for row in results %}
+            <tr class="hover:bg-slate-50">
+              <td class="px-4 py-2 whitespace-nowrap text-slate-700">{{ row.date.isoformat() }}</td>
+              <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.organism }}">{{ row.organism }}</td>
+              <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.winning_company }}">{{ row.winning_company }}</td>
+              <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.article }}">{{ row.article }}</td>
+              <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">
+                {{ "{:,.2f}".format(row.amount or 0) }} {{ row.currency }}
+              </td>
+              <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">
+                {% if row.amount_uyu is not none %}
+                  {{ "{:,.0f}".format(row.amount_uyu) }}
+                {% else %}
+                  <span class="text-slate-400" title="Moneda no convertible a UYU">N/D</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-2 text-slate-700 whitespace-nowrap">{{ row.license_type or '' }}</td>
+              <td class="px-4 py-2 text-slate-700 whitespace-nowrap">
+                {% if row.company_document %}
+                  {{ row.company_document_type or '' }} {{ row.company_document }}
+                {% endif %}
+              </td>
+              <td class="px-4 py-2 whitespace-nowrap">
+                {% if row.license_link %}
+                  <a href="{{ row.license_link }}" target="_blank" rel="noopener" class="text-blue-700 hover:underline">Ver</a>
+                {% endif %}
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% endif %}
+</section>

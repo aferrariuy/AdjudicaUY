@@ -1,0 +1,42 @@
+# Local virtualenv and cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# Local env
+.env
+.env.local
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Tests are not needed in the production image.
+tests/
+
+# SDD artifacts and tooling.
+openspec/
+.atl/
+
+# Git metadata.
+.git/
+.gitignore
+.gitattributes
+
+# Documentation at the repo root.
+README.md
+*.md
+!app/**/*.md
+!scraper/**/*.md
+
+# Misc
+Dockerfile.bak
+docker-compose.bak

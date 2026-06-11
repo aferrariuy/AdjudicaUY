@@ -27,6 +27,8 @@ def upgrade() -> None:
         sa.Column("currency", sa.String(length=3), nullable=False),
         sa.Column("amount_uyu", sa.Numeric(12, 2), nullable=True),
         sa.Column("winning_company", sa.String(length=255), nullable=False),
+        sa.Column("company_document", sa.String(length=20), nullable=True),
+        sa.Column("company_document_type", sa.String(length=10), nullable=True),
         sa.Column("organism", sa.String(length=255), nullable=False),
         sa.Column("date", sa.Date(), nullable=False),
         sa.Column("license_type", sa.String(length=100), nullable=True),

@@ -1,0 +1,10 @@
+# AdjudicaUY — development and test dependencies
+#
+# Installed alongside ``requirements.txt`` in any environment that runs
+# the test suite (CI, developer workstations, the pre-merge job). Pin
+# versions to keep the build reproducible.
+
+# Test runner
+pytest==9.0.3
+pytest-asyncio==1.4.0
+respx==0.23.1

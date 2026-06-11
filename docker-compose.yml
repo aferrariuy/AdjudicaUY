@@ -1,0 +1,59 @@
+# AdjudicaUY — Dokploy stack
+#
+# Defines the two services deployed by Dokploy:
+#   * app    — FastAPI + uvicorn, port 8000
+#   * worker — scraper (one-shot, triggered by Dokploy's Scheduled Job)
+#
+# PostgreSQL is managed directly by Dokploy (not declared here). The app
+# and worker connect to it via the DATABASE_URL env var. See
+# ``.env.example`` for the full list of required variables.
+#
+# Scheduled Job configuration (set in Dokploy UI, not in this file):
+#   * Service:  worker
+#   * Schedule: 0 2 * * *   (02:00 UTC = 23:00 Montevideo)
+#   * Command:  python -m scraper.main   (matches the service's command below)
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: adjudicauy-app:latest
+    container_name: adjudicauy-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    networks:
+      - adjudicauy
+    healthcheck:
+      # Hit the homepage to confirm uvicorn is up and Jinja2 templates load.
+      # ``urlopen`` raises on 4xx/5xx and on connection errors, which makes
+      # the healthcheck fail loudly when the service is broken.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: adjudicauy-worker:latest
+    container_name: adjudicauy-worker
+    # The worker is a one-shot job. Dokploy's Scheduled Job creates a fresh
+    # container per run; ``restart: no`` avoids a tight loop if the scrape
+    # crashes.
+    restart: "no"
+    env_file:
+      - .env
+    networks:
+      - adjudicauy
+    # Override the Dockerfile's default CMD with the scraper entry point.
+    command: ["python", "-m", "scraper.main"]
+
+networks:
+  adjudicauy:
+    driver: bridge

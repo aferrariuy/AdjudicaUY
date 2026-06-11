@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}AdjudicaUY — Adjudicaciones del Estado{% endblock %}</title>
+
+  {# Tailwind via Play CDN (no build step required for the MVP). Pinned
+     to a known-good version; bump deliberately when the design changes. #}
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+
+  {# HTMX 1.9 — partial page swaps, no SPA framework needed. #}
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+
+  {# Chart.js 4.4 — client-side rendering from the ``data-chart`` JSON
+     payloads that the partials emit on the canvas elements. #}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer></script>
+
+  <style>
+    /* Disable transitions on Tailwind utility toggles to keep HTMX swaps snappy. */
+    .htmx-swapping { opacity: 0; transition: opacity 100ms ease-out; }
+    .htmx-settling { opacity: 1; transition: opacity 100ms ease-out; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+  <header class="bg-white border-b border-slate-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold tracking-tight">AdjudicaUY</h1>
+        <p class="text-sm text-slate-500">Adjudicaciones del Estado uruguayo</p>
+      </div>
+      <a href="https://github.com/" class="text-sm text-slate-500 hover:text-slate-700" aria-label="Repositorio">
+        <span aria-hidden="true">Fuente</span>
+      </a>
+    </div>
+  </header>
+
+  <main class="flex-1">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      {% block content %}{% endblock %}
+    </div>
+  </main>
+
+  <footer class="bg-white border-t border-slate-200 mt-auto">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 text-xs text-slate-500">
+      Datos publicados por la Agencia de Compras y Contrataciones del Estado (ACCE). Conversión a UYU según cotización del BCU en la fecha de adjudicación.
+    </div>
+  </footer>
+
+  <script>
+    // Re-attach Chart.js instances after every HTMX swap. The partials
+    // emit canvases with a ``data-chart`` JSON payload describing the
+    // chart (type, labels, datasets). The global Chart object is loaded
+    // with ``defer`` so it is available by the time this script runs.
+    (function () {
+      const PALETTE = [
+        '#1d4ed8', '#b91c1c', '#15803d', '#a16207', '#7c3aed',
+        '#0e7490', '#be185d', '#365314', '#9333ea', '#0f766e',
+      ];
+
+      const FORMAT_CACHE = { currency: 'UYU', locale: 'es-UY' };
+
+      function formatUYU(value) {
+        // Spanish (Uruguay) locale: dot as thousands separator, no decimals
+        // by default. We use Intl.NumberFormat for the rendering.
+        return new Intl.NumberFormat(FORMAT_CACHE.locale, {
+          style: 'currency',
+          currency: FORMAT_CACHE.currency,
+          maximumFractionDigits: 0,
+        }).format(value || 0);
+      }
+
+      function makeChart(canvas) {
+        if (!canvas || !canvas.dataset.chart) return null;
+        let spec;
+        try {
+          spec = JSON.parse(canvas.dataset.chart);
+        } catch (err) {
+          console.error('Invalid data-chart payload', err, canvas);
+          return null;
+        }
+        // The :format object is for the tooltip; we keep Chart.js's
+        // default tick formatter and customize the tooltip callback.
+        return new Chart(canvas, {
+          type: spec.type || 'bar',
+          data: {
+            labels: spec.labels || [],
+            datasets: (spec.datasets || []).map((ds, i) => {
+              // Apply a default color if the dataset didn't pick one
+              if (!ds.backgroundColor) ds.backgroundColor = PALETTE[i % PALETTE.length];
+              if (!ds.borderColor) ds.borderColor = ds.backgroundColor;
+              return ds;
+            }),
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { position: 'bottom' },
+              tooltip: {
+                callbacks: {
+                  label: function (ctx) {
+                    const label = ctx.dataset.label || '';
+                    return `${label}: ${formatUYU(ctx.parsed.y ?? ctx.parsed)}`;
+                  },
+                },
+              },
+            },
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  callback: function (value) { return formatUYU(value); },
+                },
+              },
+            },
+          },
+        });
+      }
+
+      function mountAll() {
+        document.querySelectorAll('canvas[data-chart]').forEach((c) => makeChart(c));
+      }
+
+      // Re-mount on every HTMX swap (initial load + filter changes).
+      document.body.addEventListener('htmx:afterSwap', mountAll);
+      // And once on the first load (no swap fires for direct GETs).
+      if (document.readyState !== 'loading') mountAll();
+      else document.addEventListener('DOMContentLoaded', mountAll);
+    })();
+  </script>
+</body>
+</html>
