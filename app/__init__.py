@@ -1,0 +1,1 @@
+"""AdjudicaUY application package."""
