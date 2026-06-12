@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -66,7 +65,7 @@ def _build_cotizaciones_envelope(bcu_code: int, on_date: date) -> bytes:
     date_str = on_date.isoformat()
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
-        '<soapenv:Envelope '
+        "<soapenv:Envelope "
         'xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" '
         f'xmlns:tns="{_SOAP_NAMESPACE}">'
         "<soapenv:Header/>"
@@ -83,7 +82,7 @@ def _build_cotizaciones_envelope(bcu_code: int, on_date: date) -> bytes:
         "</tns:wsbcucotizaciones.Execute>"
         "</soapenv:Body>"
         "</soapenv:Envelope>"
-    ).encode("utf-8")
+    ).encode()
 
 
 def _first_text(root: etree._Element, suffix: str) -> str | None:
@@ -95,7 +94,8 @@ def _first_text(root: etree._Element, suffix: str) -> str | None:
 
     for element in root.iter():
         if element.tag.endswith(suffix) and element.text is not None:
-            return element.text.strip()
+            text: str = element.text
+            return text.strip()
     return None
 
 
@@ -131,11 +131,10 @@ def _parse_monedas_response(response_xml: bytes) -> list[BcuCurrency]:
 
     currencies: list[BcuCurrency] = []
     for item in root.iter():
+        # The ``monedas`` servlet emits ``<moneda>`` elements; older
+        # versions used ``<item>``. Match both.
         if not item.tag.endswith("item") and not item.tag.endswith("moneda"):
-            # The ``monedas`` servlet emits ``<moneda>`` elements; older
-            # versions used ``<item>``. Match both.
-            if not item.tag.endswith("moneda"):
-                continue
+            continue
         codigo_raw = None
         nombre = None
         codigo_iso = None
@@ -146,7 +145,11 @@ def _parse_monedas_response(response_xml: bytes) -> list[BcuCurrency]:
             if not text:
                 continue
             tag = child.tag
-            if tag.endswith("Codigo") or tag.endswith("Moneda") or tag.endswith("CodigoBCU"):
+            if (
+                tag.endswith("Codigo")
+                or tag.endswith("Moneda")
+                or tag.endswith("CodigoBCU")
+            ):
                 codigo_raw = text
             elif tag.endswith("Nombre") or tag.endswith("Descripcion"):
                 nombre = text
@@ -158,7 +161,9 @@ def _parse_monedas_response(response_xml: bytes) -> list[BcuCurrency]:
             codigo = int(codigo_raw)
         except ValueError:
             continue
-        currencies.append(BcuCurrency(codigo=codigo, nombre=nombre, codigo_iso=codigo_iso))
+        currencies.append(
+            BcuCurrency(codigo=codigo, nombre=nombre, codigo_iso=codigo_iso)
+        )
 
     return currencies
 
@@ -231,12 +236,17 @@ class BcuClient:
                 if days_back > 0:
                     logger.info(
                         "BCU fallback: using %s (TCC=%s) %d day(s) before %s",
-                        bcu_code, rate, days_back, on_date,
+                        bcu_code,
+                        rate,
+                        days_back,
+                        on_date,
                     )
                 return rate
         logger.warning(
             "BCU rate unavailable: bcu_code=%s on_date=%s within %d-day lookback",
-            bcu_code, on_date, max_lookback_days,
+            bcu_code,
+            on_date,
+            max_lookback_days,
         )
         return None
 
@@ -265,7 +275,9 @@ class BcuClient:
             except (httpx.HTTPError, BcuError) as exc:
                 logger.warning("BCU monedas attempt %d failed: %s", attempt + 1, exc)
                 if attempt == len(_BACKOFF_SCHEDULE):
-                    raise BcuError(f"BCU monedas endpoint failed after retries: {exc}") from exc
+                    raise BcuError(
+                        f"BCU monedas endpoint failed after retries: {exc}"
+                    ) from exc
 
         return []  # unreachable; loop always returns or raises
 
@@ -297,7 +309,10 @@ class BcuClient:
             if delay:
                 logger.info(
                     "BCU cotizaciones retry %d for code=%s date=%s after %ds backoff",
-                    attempt, bcu_code, target_date, delay,
+                    attempt,
+                    bcu_code,
+                    target_date,
+                    delay,
                 )
                 time.sleep(delay)
             try:
@@ -315,7 +330,10 @@ class BcuClient:
                 last_exc = exc
                 logger.warning(
                     "BCU cotizaciones attempt %d failed for code=%s date=%s: %s",
-                    attempt + 1, bcu_code, target_date, exc,
+                    attempt + 1,
+                    bcu_code,
+                    target_date,
+                    exc,
                 )
 
         raise BcuError(

@@ -1,0 +1,33 @@
+[project]
+name = "adjudica-uy"
+requires-python = ">=3.13"
+
+# ---------------------------------------------------------------------------
+# Ruff — linter + formatter (replaces flake8, black, isort, pyupgrade)
+# ---------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "S", "A", "C4", "SIM", "TCH"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]  # allow assert in tests
+
+# ---------------------------------------------------------------------------
+# mypy — static type checker
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.13"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+exclude = ["migrations/", ".venv/"]
+
+# ---------------------------------------------------------------------------
+# Bandit — security linter for Python
+# ---------------------------------------------------------------------------
+[tool.bandit]
+exclude_dirs = ["tests", "migrations", ".venv"]
+skips = ["B101"]  # skip assert warnings

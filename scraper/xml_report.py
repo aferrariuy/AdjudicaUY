@@ -35,14 +35,16 @@ skipped and logged so a partial failure never aborts a run.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
-from typing import Any
+from typing import TYPE_CHECKING
 
 import httpx
 from lxml import etree
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -139,7 +141,9 @@ def _parse_date(value: str | None) -> date | None:
             return datetime.strptime(candidate, fmt).date()
         except ValueError:
             continue
-    logger.warning("Could not parse fecha_pub_adj=%r; expected one of %s", candidate, _DATE_FORMATS)
+    logger.warning(
+        "Could not parse fecha_pub_adj=%r; expected one of %s", candidate, _DATE_FORMATS
+    )
     return None
 
 
@@ -197,12 +201,16 @@ def _normalize_compra(compra: etree._Element) -> tuple[str, date, str, int] | No
 
     parsed_date = _parse_date(fecha_raw)
     if parsed_date is None:
-        logger.warning("Skipping <compra id_compra=%s> with invalid fecha_pub_adj", id_compra)
+        logger.warning(
+            "Skipping <compra id_compra=%s> with invalid fecha_pub_adj", id_compra
+        )
         return None
 
     id_moneda_monto_adj = _parse_int(id_moneda_monto_adj_raw)
     if id_moneda_monto_adj is None:
-        logger.warning("Skipping <compra id_compra=%s> with invalid id_moneda_monto_adj", id_compra)
+        logger.warning(
+            "Skipping <compra id_compra=%s> with invalid id_moneda_monto_adj", id_compra
+        )
         return None
 
     return id_compra, parsed_date, id_tipocompra, id_moneda_monto_adj
@@ -223,7 +231,8 @@ def _normalize_adjudicacion(
 
     if not nombre_comercial or not desc_articulo:
         logger.warning(
-            "Skipping <adjudicacion> under id_compra=%s: missing nombre_comercial/desc_articulo",
+            "Skipping <adjudicacion> under id_compra=%s: "
+            "missing nombre_comercial/desc_articulo",
             id_compra,
         )
         return None
@@ -278,7 +287,9 @@ def parse_xml_report(xml_text: str) -> Iterator[XmlAdjudication]:
     """
 
     try:
-        root = etree.fromstring(xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text)
+        root = etree.fromstring(
+            xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text
+        )
     except etree.XMLSyntaxError as exc:
         logger.error("XML payload is malformed: %s", exc)
         return

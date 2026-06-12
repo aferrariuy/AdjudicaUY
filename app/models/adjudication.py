@@ -9,10 +9,17 @@ collisions from different sources remain distinct (see data-storage spec,
 
 from __future__ import annotations
 
-from datetime import date, datetime
-from decimal import Decimal
-
-from sqlalchemy import Column, Date, DateTime, Index, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy import (
+    Column,
+    Date,
+    DateTime,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+    func,
+)
 
 from app.database import Base
 

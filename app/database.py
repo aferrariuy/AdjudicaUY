@@ -8,22 +8,25 @@ metadata without touching the DB).
 
 from __future__ import annotations
 
-from collections.abc import Generator
-from typing import Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+    from sqlalchemy.engine import Engine
 
 
 class Base(DeclarativeBase):
     """Declarative base shared by every ORM model in the project."""
 
 
-_engine: Optional[Engine] = None
-_SessionLocal: Optional[sessionmaker[Session]] = None
+_engine: Engine | None = None
+_SessionLocal: sessionmaker[Session] | None = None
 
 
 def get_engine() -> Engine:
@@ -56,7 +59,7 @@ def get_session_factory() -> sessionmaker[Session]:
     return _SessionLocal
 
 
-def get_db() -> Generator[Session, None, None]:
+def get_db() -> Generator[Session]:
     """FastAPI dependency yielding a request-scoped ``Session``."""
 
     db = get_session_factory()()

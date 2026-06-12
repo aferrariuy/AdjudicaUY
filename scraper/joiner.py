@@ -14,13 +14,16 @@ mismatched side is logged and the matched side proceeds.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date
-from decimal import Decimal
+from typing import TYPE_CHECKING
 
-from scraper.rss_feed import RssItem
-from scraper.xml_report import XmlAdjudication
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from datetime import date
+    from decimal import Decimal
+
+    from scraper.rss_feed import RssItem
+    from scraper.xml_report import XmlAdjudication
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +93,8 @@ def join_records(
         rss_match = rss_by_id.get(xml_record.id_compra)
         if rss_match is None:
             logger.warning(
-                "XML record id_compra=%s has no RSS match; skipping (organism required)",
+                "XML record id_compra=%s has no RSS match; "
+                "skipping (organism required)",
                 xml_record.id_compra,
             )
             continue
@@ -125,7 +129,9 @@ def join_records(
 
     logger.info(
         "Join complete: %d XML records, %d RSS items, %d joined",
-        sum(1 for _ in xml_records) if not isinstance(xml_records, list) else len(xml_records),
+        sum(1 for _ in xml_records)
+        if not isinstance(xml_records, list)
+        else len(xml_records),
         len(rss_by_id),
         len(joined),
     )

@@ -26,12 +26,14 @@ from __future__ import annotations
 
 import logging
 import re
-from collections.abc import Iterator
 from dataclasses import dataclass
-from urllib.parse import urlparse
+from typing import TYPE_CHECKING
 
 import httpx
 from lxml import etree
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -130,8 +132,14 @@ def _normalize_item(item_el: etree._Element) -> RssItem | None:
         if title_el is not None and link_el is not None:
             break
 
-    title = (title_el.text or "").strip() if title_el is not None and title_el.text else None
-    link = (link_el.text or "").strip() if link_el is not None and link_el.text else None
+    title = (
+        (title_el.text or "").strip()
+        if title_el is not None and title_el.text
+        else None
+    )
+    link = (
+        (link_el.text or "").strip() if link_el is not None and link_el.text else None
+    )
 
     id_compra = _extract_id_from_link(link)
     organism = _extract_organism_from_title(title)
@@ -166,7 +174,9 @@ def parse_rss_feed(xml_text: str) -> Iterator[RssItem]:
     """
 
     try:
-        root = etree.fromstring(xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text)
+        root = etree.fromstring(
+            xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text
+        )
     except etree.XMLSyntaxError as exc:
         logger.error("RSS payload is malformed: %s", exc)
         return

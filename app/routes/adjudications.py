@@ -23,15 +23,13 @@ from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, Response
-from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.adjudication_service import (
-    AdjudicationFilters,
     count_adjudications,
     distinct_organisms,
     filters_from_query_params,
@@ -39,6 +37,9 @@ from app.services.adjudication_service import (
     ranking_by_company,
     temporal_by_organism,
 )
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +61,7 @@ PARTIALS_DIR = TEMPLATES_DIR / "partials"
 PAGE_SIZE = 50
 RANKING_LIMIT = 10
 ORGANISM_SUGGEST_LIMIT = 200
+
 
 # JSON encoder for Decimal — Chart.js expects plain numbers, not
 # ``Decimal('1.250.000')`` strings.
@@ -182,7 +184,9 @@ def _build_temporal_chart_payload(
 # ---------------------------------------------------------------------------
 
 
-def _render(template_name: str, request: Request, context: dict[str, Any]) -> HTMLResponse:
+def _render(
+    template_name: str, request: Request, context: dict[str, Any]
+) -> HTMLResponse:
     """Render ``template_name`` with ``context`` using the app's Jinja env."""
 
     templates = request.app.state.templates
@@ -248,7 +252,9 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
 
     logger.info(
         "HTMX partial render: htmx=%s filters=%s total=%d",
-        is_htmx, filters, total,
+        is_htmx,
+        filters,
+        total,
     )
 
     return _render(

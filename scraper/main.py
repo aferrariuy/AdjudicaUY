@@ -24,14 +24,12 @@ from __future__ import annotations
 
 import logging
 import sys
-from collections.abc import Iterable
 from datetime import date, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_session_factory
@@ -41,6 +39,11 @@ from scraper.joiner import join_records
 from scraper.normalizer import NormalizedRecord, normalize_record
 from scraper.rss_feed import fetch_rss_feed, parse_rss_feed
 from scraper.xml_report import fetch_xml_report, parse_xml_report
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +193,10 @@ def _run_scrape_for_day(
     log = logging.getLogger("scraper.run_scrape")
 
     url_a = build_source_a_url(
-        source_a_base_url, target_day, start_hour, end_hour,
+        source_a_base_url,
+        target_day,
+        start_hour,
+        end_hour,
     )
     url_b = build_source_b_url(source_b_base_url, range_start, range_end)
 
@@ -218,7 +224,9 @@ def _run_scrape_for_day(
     rss_items = list(parse_rss_feed(rss_text))
     log.info(
         "Parsed %d XML adjudications, %d RSS items for %s",
-        len(xml_records), len(rss_items), target_day,
+        len(xml_records),
+        len(rss_items),
+        target_day,
     )
 
     if not xml_records:
@@ -255,11 +263,15 @@ def _run_scrape_for_day(
         except Exception as exc:  # BcuError, malformed data, etc.
             log.warning(
                 "Normalization failed for id_compra=%s on %s: %s",
-                record.id_compra, target_day, exc,
+                record.id_compra,
+                target_day,
+                exc,
             )
 
     if not normalized:
-        log.info("No records survived normalization for %s; nothing to insert", target_day)
+        log.info(
+            "No records survived normalization for %s; nothing to insert", target_day
+        )
         return 0
 
     # ------------------------------------------------------------------
@@ -330,7 +342,10 @@ def run_scrape(
 
     log.info(
         "Scraper run starting: range=%s..%s start_hour=%d end_hour=%d",
-        start_date, end_date, start_hour, end_hour,
+        start_date,
+        end_date,
+        start_hour,
+        end_hour,
     )
 
     owns_session = session is None
@@ -360,7 +375,9 @@ def run_scrape(
 
         log.info(
             "Scraper run complete: %d records submitted to DB across %s..%s",
-            total_inserted, start_date, end_date,
+            total_inserted,
+            start_date,
+            end_date,
         )
         return total_inserted
 

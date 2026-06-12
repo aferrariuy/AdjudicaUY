@@ -28,9 +28,11 @@ import enum
 import logging
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
+from typing import TYPE_CHECKING
 
-from scraper.bcu_client import BcuClient
-from scraper.joiner import JoinedRecord
+if TYPE_CHECKING:
+    from scraper.bcu_client import BcuClient
+    from scraper.joiner import JoinedRecord
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +44,8 @@ class ConversionMode(enum.Enum):
     """How a procurement currency ID is handled by the normalizer."""
 
     PASSTHROUGH = "passthrough"  # UYU — amount_uyu = amount
-    CONVERT = "convert"          # Mapped currency — amount_uyu = amount * TCC
-    NULL = "null"                # Non-convertible — amount_uyu = NULL
+    CONVERT = "convert"  # Mapped currency — amount_uyu = amount * TCC
+    NULL = "null"  # Non-convertible — amount_uyu = NULL
 
 
 # Mapping for ``id_moneda`` codes that convert via the BCU API.
@@ -52,18 +54,18 @@ CONVERSION_TABLE: dict[int, tuple[int, str]] = {
     20: (2224, "USD"),  # DOLAR INTERBANCARIO COMPRADOR
     37: (2224, "USD"),  # DLS. USA CABLE
     36: (2225, "USD"),  # DLS.USA BILLETE
-    1: (2222, "USD"),   # DOLAR PIZARRA VENDEDOR (deprecated 01/01/2025)
-    2: (2222, "USD"),   # DOLAR INTERBANCARIO VENDEDOR
+    1: (2222, "USD"),  # DOLAR PIZARRA VENDEDOR (deprecated 01/01/2025)
+    2: (2222, "USD"),  # DOLAR INTERBANCARIO VENDEDOR
     40: (2230, "USD"),  # DOLAR FONDO COMPRADOR
     47: (2230, "USD"),  # DOLAR PROMEDIO
     25: (1000, "BRL"),  # REAL
     15: (1111, "EUR"),  # EURO
-    8: (2309, "CAD"),   # DOLAR CANADIENSE
+    8: (2309, "CAD"),  # DOLAR CANADIENSE
     11: (2700, "GBP"),  # LIBRA ESTERLINA
     12: (3600, "JPY"),  # YEN
     21: (1300, "CLP"),  # PESO CHILENO
-    23: (500, "ARS"),   # PESO ARGENTINO
-    24: (105, "AUD"),   # DLS.AUSTRALIANOS
+    23: (500, "ARS"),  # PESO ARGENTINO
+    24: (105, "AUD"),  # DLS.AUSTRALIANOS
     27: (4150, "CNY"),  # YUANES RENMBI
     28: (1800, "DKK"),  # CORONAS DANESAS
     29: (4200, "MXN"),  # NVO. PSO. MEXICANO
@@ -75,7 +77,7 @@ CONVERSION_TABLE: dict[int, tuple[int, str]] = {
     44: (5500, "COP"),  # PESO COLOMBIANO
     46: (5700, "INR"),  # RUPIA INDIA
     48: (4900, "ISK"),  # CORONA ISLANDESA
-    17: (2, "XDR"),     # DER.ESP. DE GIRO (SDR)
+    17: (2, "XDR"),  # DER.ESP. DE GIRO (SDR)
 }
 
 # Pass-through: ``amount_uyu = amount``, no BCU call. Maps to display
@@ -88,8 +90,8 @@ PASSTHROUGH_TABLE: dict[int, str] = {
 # non-ISO 4217 placeholder (Uruguayan domestic units / historical codes)
 # — the database stores whatever 3-letter string is provided here.
 NON_CONVERTIBLE_TABLE: dict[int, str] = {
-    4: "UIX",   # UNIDAD INDEXADA
-    5: "URX",   # UNIDAD REAJUSTABLE
+    4: "UIX",  # UNIDAD INDEXADA
+    5: "URX",  # UNIDAD REAJUSTABLE
     22: "OHX",  # ORO (historical)
     39: "EUX",  # EURO TRANSFERENCIA (non-convertible via BCU)
 }
@@ -161,7 +163,9 @@ def _quantize_uyu(value: Decimal) -> Decimal:
     return value.quantize(_UYU_SCALE, rounding=ROUND_HALF_UP)
 
 
-def _try_resolve_unknown(id_moneda: int, bcu_client: BcuClient) -> tuple[int, str] | None:
+def _try_resolve_unknown(
+    id_moneda: int, bcu_client: BcuClient
+) -> tuple[int, str] | None:
     """Best-effort lookup of an unmapped ``id_moneda`` against the BCU catalogue.
 
     The procurement and BCU ID spaces are independent, so this only
@@ -181,7 +185,9 @@ def _try_resolve_unknown(id_moneda: int, bcu_client: BcuClient) -> tuple[int, st
             iso = entry.codigo_iso or "UNK"
             logger.info(
                 "Resolved unknown id_moneda=%s via BCU monedas -> bcu_code=%s ISO=%s",
-                id_moneda, entry.codigo, iso,
+                id_moneda,
+                entry.codigo,
+                iso,
             )
             return entry.codigo, iso[:3]  # ISO column is 3 chars
     return None
@@ -213,29 +219,32 @@ def normalize_record(
         amount_uyu = None
     else:  # CONVERT
         bcu_code, _ = CONVERSION_TABLE[id_moneda]
-        rate = bcu_client.get_tcc(bcu_code, record.fecha_pub_adj, max_lookback_days=max_lookback_days)
-        if rate is None:
-            amount_uyu = None
-        else:
-            amount_uyu = _quantize_uyu(amount * rate)
+        rate = bcu_client.get_tcc(
+            bcu_code, record.fecha_pub_adj, max_lookback_days=max_lookback_days
+        )
+        amount_uyu = None if rate is None else _quantize_uyu(amount * rate)
 
     # If we couldn't resolve ``id_moneda`` at all, try a BCU monedas lookup
     # as a last resort. This branch only runs for the small set of codes
     # that are not in the static tables.
-    if id_moneda not in PASSTHROUGH_TABLE and id_moneda not in NON_CONVERTIBLE_TABLE and id_moneda not in CONVERSION_TABLE:
+    if (
+        id_moneda not in PASSTHROUGH_TABLE
+        and id_moneda not in NON_CONVERTIBLE_TABLE
+        and id_moneda not in CONVERSION_TABLE
+    ):
         resolved = _try_resolve_unknown(id_moneda, bcu_client)
         if resolved is not None:
             bcu_code, iso = resolved
             currency = iso
-            rate = bcu_client.get_tcc(bcu_code, record.fecha_pub_adj, max_lookback_days=max_lookback_days)
-            if rate is None:
-                amount_uyu = None
-            else:
-                amount_uyu = _quantize_uyu(amount * rate)
+            rate = bcu_client.get_tcc(
+                bcu_code, record.fecha_pub_adj, max_lookback_days=max_lookback_days
+            )
+            amount_uyu = None if rate is None else _quantize_uyu(amount * rate)
         else:
             logger.warning(
                 "Unknown id_moneda=%s for id_compra=%s; setting amount_uyu=NULL",
-                id_moneda, record.id_compra,
+                id_moneda,
+                record.id_compra,
             )
             amount_uyu = None
             currency = "UNK"

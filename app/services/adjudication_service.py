@@ -18,14 +18,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Column, and_, func, select
-from sqlalchemy.orm import Session
 
 from app.models.adjudication import Adjudication
 
+if TYPE_CHECKING:
+    from decimal import Decimal
+
+    from sqlalchemy.orm import Session
 
 # ---------------------------------------------------------------------------
 # Filter value object
@@ -325,7 +327,9 @@ def distinct_organisms(
     ``limit`` to keep the datalist small.
     """
 
-    predicates = [p for p in _build_predicates(filters) if not _is_organism_predicate(p)]
+    predicates = [
+        p for p in _build_predicates(filters) if not _is_organism_predicate(p)
+    ]
 
     stmt = (
         select(Adjudication.organism)

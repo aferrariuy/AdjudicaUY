@@ -55,7 +55,9 @@ class Settings(BaseSettings):
     # External services
     bcu_api_url: str = Field(
         ...,
-        description="Endpoint of the BCU (Banco Central del Uruguay) exchange rate API.",
+        description=(
+            "Endpoint of the BCU (Banco Central del Uruguay) exchange rate API."
+        ),
     )
 
 
