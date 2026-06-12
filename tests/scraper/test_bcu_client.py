@@ -125,9 +125,9 @@ def test_get_tcc_posts_soap_envelope_with_currency_and_date() -> None:
 
     assert captured["url"] == "https://example.test/wsbcucotizaciones"
     assert "text/xml" in captured["ct"]
-    assert "<item>2224</item>" in captured["body"]
+    assert "<tns:item>2224</tns:item>" in captured["body"]
     assert "2024-03-10" in captured["body"]
-    assert "<Grupo>0</Grupo>" in captured["body"]
+    assert "<tns:Grupo>0</tns:Grupo>" in captured["body"]
 
 
 # ---------------------------------------------------------------------------

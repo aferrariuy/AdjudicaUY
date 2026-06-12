@@ -52,6 +52,10 @@ CONVERSION_TABLE: dict[int, tuple[int, str]] = {
     20: (2224, "USD"),  # DOLAR INTERBANCARIO COMPRADOR
     37: (2224, "USD"),  # DLS. USA CABLE
     36: (2225, "USD"),  # DLS.USA BILLETE
+    1: (2222, "USD"),   # DOLAR PIZARRA VENDEDOR (deprecated 01/01/2025)
+    2: (2222, "USD"),   # DOLAR INTERBANCARIO VENDEDOR
+    40: (2230, "USD"),  # DOLAR FONDO COMPRADOR
+    47: (2230, "USD"),  # DOLAR PROMEDIO
     25: (1000, "BRL"),  # REAL
     15: (1111, "EUR"),  # EURO
     8: (2309, "CAD"),   # DOLAR CANADIENSE

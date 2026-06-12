@@ -1,7 +1,7 @@
 """SOAP client for the BCU (Banco Central del Uruguay) exchange rate API.
 
 The BCU publishes historical buy (``TCC``) and sell (``TCV``) rates for every
-currency it tracks. The relevant endpoint is the SOAP ``wsbcucotizaciones``
+currency it tracks. The relevant endpoint is the SOAP ``wsbcucotizaciones``basirey
 servlet; the sibling ``awsbcumonedas`` servlet returns the currency catalogue.
 
 This client wraps both endpoints with:
@@ -49,15 +49,18 @@ class BcuCurrency:
 # ``1s``, then ``3s``, then ``9s`` before retrying.
 _BACKOFF_SCHEDULE: tuple[int, ...] = (1, 3, 9)
 
-_SOAP_NAMESPACE = "http://wsbcucotizaciones.cotizaciones.bcu.gub.uy"
+_SOAP_NAMESPACE = "Cotiza"
+_SOAP_ACTION = "Cotizaaction/AWSBCUCOTIZACIONES.Execute"
 _DEFAULT_TIMEOUT_SECONDS = 30.0
 
 
 def _build_cotizaciones_envelope(bcu_code: int, on_date: date) -> bytes:
     """Build the SOAP request body for a cotizaciones lookup.
 
-    The BCU servlet accepts a single ``<Moneda><item>{code}</item></Moneda>``
-    entry, a date range, and a ``<Grupo>0</Grupo>`` (full daily series).
+    The BCU servlet accepts a single ``<tns:item>{code}</tns:item>`` entry
+    inside a ``<tns:Moneda>`` array, a date range, and a ``<tns:Grupo>0</tns:Grupo>``
+    (all groups).  The WSDL (targetNamespace ``Cotiza``) expects the operation
+    element ``tns:wsbcucotizaciones.Execute`` wrapping the input parameters.
     """
 
     date_str = on_date.isoformat()
@@ -65,19 +68,19 @@ def _build_cotizaciones_envelope(bcu_code: int, on_date: date) -> bytes:
         '<?xml version="1.0" encoding="UTF-8"?>'
         '<soapenv:Envelope '
         'xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/" '
-        f'xmlns:ws="{_SOAP_NAMESPACE}">'
+        f'xmlns:tns="{_SOAP_NAMESPACE}">'
         "<soapenv:Header/>"
         "<soapenv:Body>"
-        "<ws:wsbcucotizaciones>"
-        "<ws:Entrada>"
-        "<Moneda>"
-        f"<item>{int(bcu_code)}</item>"
-        "</Moneda>"
-        f"<FechaDesde>{date_str}</FechaDesde>"
-        f"<FechaHasta>{date_str}</FechaHasta>"
-        "<Grupo>0</Grupo>"
-        "</ws:Entrada>"
-        "</ws:wsbcucotizaciones>"
+        "<tns:wsbcucotizaciones.Execute>"
+        "<tns:Entrada>"
+        "<tns:Moneda>"
+        f"<tns:item>{int(bcu_code)}</tns:item>"
+        "</tns:Moneda>"
+        f"<tns:FechaDesde>{date_str}</tns:FechaDesde>"
+        f"<tns:FechaHasta>{date_str}</tns:FechaHasta>"
+        "<tns:Grupo>0</tns:Grupo>"
+        "</tns:Entrada>"
+        "</tns:wsbcucotizaciones.Execute>"
         "</soapenv:Body>"
         "</soapenv:Envelope>"
     ).encode("utf-8")
@@ -244,11 +247,11 @@ class BcuClient:
         rarely; the BCU's own caching upstream is what matters here.
         """
 
-        monedas_url = f"{self._base_url[:-len('wsbcucotizaciones')]}awsbcumonedas"
-        # If the configured base URL does not end in ``wsbcucotizaciones``
-        # (e.g. it was set to a bare host), fall back to the canonical
-        # sibling path.
-        if not self._base_url.endswith("awsbcucotizaciones"):
+        # Replace the cotizaciones servlet name with the monedas servlet.
+        # The base URL always ends in ``.../servlet/awsbcucotizaciones``.
+        monedas_url = self._base_url.replace("awsbcucotizaciones", "awsbcumonedas")
+        if monedas_url == self._base_url:
+            # Fallback: bare host or unexpected path — use sibling path.
             monedas_url = f"{self._base_url}/awsbcumonedas"
 
         for attempt, delay in enumerate((0,) + _BACKOFF_SCHEDULE):
@@ -303,7 +306,7 @@ class BcuClient:
                     content=envelope,
                     headers={
                         "Content-Type": "text/xml; charset=utf-8",
-                        "SOAPAction": "",
+                        "SOAPAction": _SOAP_ACTION,
                     },
                 )
                 response.raise_for_status()
