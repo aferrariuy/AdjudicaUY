@@ -10,7 +10,6 @@ import pytest
 
 from scraper.xml_report import fetch_xml_report, parse_xml_report
 
-
 # ---------------------------------------------------------------------------
 # Fixture XML payloads
 # ---------------------------------------------------------------------------

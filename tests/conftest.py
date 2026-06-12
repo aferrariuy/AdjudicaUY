@@ -17,7 +17,9 @@ This conftest provides:
 from __future__ import annotations
 
 import os
-from collections.abc import Generator
+from collections.abc import (
+    Generator,  # noqa: TC003 — pytest evaluates fixture annotations at runtime
+)
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -25,7 +27,9 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine
+from sqlalchemy.engine import (
+    Engine,  # noqa: TC002 — pytest evaluates fixture annotations at runtime
+)
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -57,7 +61,7 @@ for key, value in _TEST_ENV.items():
 
 
 @pytest.fixture(scope="session")
-def engine() -> Generator[Engine, None, None]:
+def engine() -> Generator[Engine]:
     """A single in-memory SQLite engine shared across the test session.
 
     Using a shared connection (``StaticPool``) means the schema created
@@ -82,7 +86,7 @@ def engine() -> Generator[Engine, None, None]:
 
 
 @pytest.fixture
-def db_session(engine: Engine) -> Generator[Session, None, None]:
+def db_session(engine: Engine) -> Generator[Session]:
     """Yield a session and roll back any changes after the test.
 
     The in-memory engine is shared (see :func:`engine`), so wrapping
@@ -106,9 +110,9 @@ def db_session(engine: Engine) -> Generator[Session, None, None]:
         yield session
     finally:
         session.close()
-        try:
+        try:  # noqa: SIM105 — already rolled back by IntegrityError path
             transaction.rollback()
-        except Exception:  # noqa: BLE001 - already rolled back by an IntegrityError path
+        except Exception:  # noqa: BLE001, S110 — already rolled back by IntegrityError path
             pass
         connection.close()
 
@@ -119,7 +123,7 @@ def db_session(engine: Engine) -> Generator[Session, None, None]:
 
 
 @pytest.fixture
-def client(db_session: Session) -> Generator[TestClient, None, None]:
+def client(db_session: Session) -> Generator[TestClient]:
     """A FastAPI ``TestClient`` bound to the test database.
 
     The app's :func:`get_db` dependency is overridden to return the
@@ -132,7 +136,7 @@ def client(db_session: Session) -> Generator[TestClient, None, None]:
 
     app = create_app()
 
-    def _override_get_db() -> Generator[Session, None, None]:
+    def _override_get_db() -> Generator[Session]:
         try:
             yield db_session
         finally:

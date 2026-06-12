@@ -37,7 +37,6 @@ import argparse
 import logging
 import sys
 import time
-from typing import Any
 
 logger = logging.getLogger("smoke_test")
 
@@ -80,12 +79,17 @@ def _check_app_responsive(app_url: str, timeout: float, retries: int) -> None:
     for attempt in range(1, retries + 1):
         try:
             response = httpx.get(app_url, timeout=timeout)
-            if response.status_code == 200 and "text/html" in response.headers.get("content-type", ""):
+            if response.status_code == 200 and "text/html" in response.headers.get(
+                "content-type", ""
+            ):
                 logger.info("PASS: GET %s returned 200 HTML", app_url)
                 return
             logger.warning(
                 "Attempt %d: GET %s returned %d (%s)",
-                attempt, app_url, response.status_code, response.headers.get("content-type"),
+                attempt,
+                app_url,
+                response.status_code,
+                response.headers.get("content-type"),
             )
         except Exception as exc:  # noqa: BLE001 - we want to retry broadly
             last_exc = exc
@@ -103,10 +107,14 @@ def _check_partial_endpoint(app_url: str, timeout: float, retries: int) -> None:
     for attempt in range(1, retries + 1):
         try:
             response = httpx.get(url, timeout=timeout, headers={"HX-Request": "true"})
-            if response.status_code == 200 and "text/html" in response.headers.get("content-type", ""):
+            if response.status_code == 200 and "text/html" in response.headers.get(
+                "content-type", ""
+            ):
                 logger.info("PASS: GET %s returned 200 HTML", url)
                 return
-            logger.warning("Attempt %d: GET %s returned %d", attempt, url, response.status_code)
+            logger.warning(
+                "Attempt %d: GET %s returned %d", attempt, url, response.status_code
+            )
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
             logger.warning("Attempt %d failed: %s", attempt, exc)

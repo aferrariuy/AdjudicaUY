@@ -13,6 +13,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import get_settings
 from app.database import Base
+
 # Import models so their metadata is registered on Base before autogenerate.
 from app.models import adjudication  # noqa: F401
 

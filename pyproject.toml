@@ -13,7 +13,11 @@ line-length = 88
 select = ["E", "F", "I", "UP", "B", "S", "A", "C4", "SIM", "TCH"]
 
 [tool.ruff.lint.per-file-ignores]
+"app/**" = ["B008"]   # Depends() in FastAPI route defaults is the standard pattern
+"scraper/**" = ["S320"]  # lxml parsing is the core scraper functionality
 "tests/**" = ["S101"]  # allow assert in tests
+"tests/scraper/test_rss_feed.py" = ["E501"]  # XML test data strings are inherently long
+"tests/scraper/test_xml_report.py" = ["E501"]  # XML test data strings are inherently long
 
 # ---------------------------------------------------------------------------
 # mypy — static type checker
@@ -25,9 +29,4 @@ warn_unused_configs = true
 ignore_missing_imports = true
 exclude = ["migrations/", ".venv/"]
 
-# ---------------------------------------------------------------------------
-# Bandit — security linter for Python
-# ---------------------------------------------------------------------------
-[tool.bandit]
-exclude_dirs = ["tests", "migrations", ".venv"]
-skips = ["B101"]  # skip assert warnings
+

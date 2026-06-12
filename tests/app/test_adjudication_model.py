@@ -27,7 +27,6 @@ from app.services.adjudication_service import (
     list_adjudications,
 )
 
-
 # ---------------------------------------------------------------------------
 # Required-field validation
 # ---------------------------------------------------------------------------
@@ -371,25 +370,19 @@ def test_model_accepts_null_article_id(db_session, make_adjudication) -> None:
     assert fetched.article_id is None
 
 
-def test_filter_by_article_id_single_value(
-    db_session, make_adjudication
-) -> None:
+def test_filter_by_article_id_single_value(db_session, make_adjudication) -> None:
     """A single article_id filter MUST return only matching rows."""
 
     keep = make_adjudication(article_id="42851")
     make_adjudication(article_id="42852")
     make_adjudication(article_id=None)
 
-    rows = list_adjudications(
-        db_session, AdjudicationFilters(article_id="42851")
-    )
+    rows = list_adjudications(db_session, AdjudicationFilters(article_id="42851"))
 
     assert [row.id for row in rows] == [keep.id]
 
 
-def test_filter_by_article_id_comma_separated(
-    db_session, make_adjudication
-) -> None:
+def test_filter_by_article_id_comma_separated(db_session, make_adjudication) -> None:
     """A comma-separated list MUST match any of the IDs (IN set predicate)."""
 
     a = make_adjudication(article_id="42851")
@@ -405,17 +398,13 @@ def test_filter_by_article_id_comma_separated(
     assert returned == sorted([a.id, b.id])
 
 
-def test_filter_by_article_id_excludes_nulls(
-    db_session, make_adjudication
-) -> None:
+def test_filter_by_article_id_excludes_nulls(db_session, make_adjudication) -> None:
     """Rows with NULL ``article_id`` MUST NOT match the IN-set filter."""
 
     keep = make_adjudication(article_id="42851")
     make_adjudication(article_id=None)
 
-    rows = list_adjudications(
-        db_session, AdjudicationFilters(article_id="42851")
-    )
+    rows = list_adjudications(db_session, AdjudicationFilters(article_id="42851"))
 
     assert [row.id for row in rows] == [keep.id]
 
@@ -428,8 +417,6 @@ def test_filter_by_article_id_ignores_empty_entries(
     a = make_adjudication(article_id="42851")
     make_adjudication(article_id="42852")
 
-    rows = list_adjudications(
-        db_session, AdjudicationFilters(article_id=" 42851 , , ")
-    )
+    rows = list_adjudications(db_session, AdjudicationFilters(article_id=" 42851 , , "))
 
     assert [row.id for row in rows] == [a.id]

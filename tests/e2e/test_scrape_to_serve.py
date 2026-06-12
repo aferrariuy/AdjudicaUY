@@ -21,16 +21,18 @@ executes before deploying.
 from __future__ import annotations
 
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import httpx
-import pytest
-from fastapi.testclient import TestClient
 from sqlalchemy import select
 
-from app.database import Base, get_session_factory
+if TYPE_CHECKING:
+    import pytest
+    from fastapi.testclient import TestClient
+
+from app.database import Base
 from app.models.adjudication import Adjudication
 from scraper import main as scraper_main
-
 
 # ---------------------------------------------------------------------------
 # Canned payloads
@@ -108,9 +110,9 @@ def _make_bcu_transport() -> httpx.MockTransport:
     """Return a transport that always returns a TCC of 40.00."""
 
     body = (
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        "<root><datos><TCC>40.00</TCC></datos></root>"
-    ).encode("utf-8")
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b"<root><datos><TCC>40.00</TCC></datos></root>"
+    )
 
     def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
         return httpx.Response(200, content=body)
@@ -141,19 +143,19 @@ def test_scrape_store_query_serve_round_trip(
     # ------------------------------------------------------------------
     test_engine = client.app.dependency_overrides  # ensure app built
     # Get the actual test engine by accessing the override's session.
-    from app.database import _engine as _prod_engine  # noqa: F401
-
-    # Easier: use the conftest's db_session to create the test factory
-    # by borrowing its engine. We do this by reading from the active
-    # session in the dependency override closure.
-    from tests.conftest import _TEST_ENV  # noqa: F401  (used as anchor only)
-
     # We don't have a direct handle on the test engine, so we build
     # a session factory from the same in-memory URL used by the
     # conftest. The schema was already created on it.
     from sqlalchemy import create_engine
     from sqlalchemy.orm import sessionmaker
     from sqlalchemy.pool import StaticPool
+
+    from app.database import _engine as _prod_engine  # noqa: F401
+
+    # Easier: use the conftest's db_session to create the test factory
+    # by borrowing its engine. We do this by reading from the active
+    # session in the dependency override closure.
+    from tests.conftest import _TEST_ENV  # noqa: F401  (used as anchor only)
 
     test_engine = create_engine(
         "sqlite://",
@@ -199,7 +201,6 @@ def test_scrape_store_query_serve_round_trip(
 
         # Replace BcuClient with one that uses a mock transport.
         from scraper import bcu_client as bcu_module
-        from scraper.bcu_client import BcuClient
 
         original_bcu_client = bcu_module.BcuClient
         transport = _make_bcu_transport()
@@ -255,7 +256,11 @@ def test_scrape_store_query_serve_round_trip(
         response = client.get("/")
         assert response.status_code == 200
         body = response.text
-        for company in ("E2E-COMPANY-Laptop", "E2E-COMPANY-Monitor", "E2E-COMPANY-Limpieza"):
+        for company in (
+            "E2E-COMPANY-Laptop",
+            "E2E-COMPANY-Monitor",
+            "E2E-COMPANY-Limpieza",
+        ):
             assert company in body, f"Expected {company!r} in response body"
         assert 'id="chart-ranking"' in body
         assert 'id="chart-temporal"' in body
@@ -279,9 +284,7 @@ def test_scrape_store_query_serve_round_trip(
 # ---------------------------------------------------------------------------
 
 
-def test_serve_against_pre_populated_db(
-    client: TestClient, make_adjudication
-) -> None:
+def test_serve_against_pre_populated_db(client: TestClient, make_adjudication) -> None:
     """Insert a row directly, then verify GET /adjudications returns it.
 
     This is the cheapest smoke check for the "store → serve" boundary

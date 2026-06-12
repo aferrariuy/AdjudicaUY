@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Any
 
 import httpx
 import pytest
@@ -25,7 +24,6 @@ from scraper.normalizer import (
     _resolve_mode,
     normalize_record,
 )
-
 
 # ---------------------------------------------------------------------------
 # Test doubles
@@ -44,7 +42,7 @@ def _static_bcu_client(rate: Decimal | None = Decimal("38.50")) -> BcuClient:
                 "<root><datos>"
                 f"<TCC>{rate}</TCC>"
                 "</datos></root>"
-            ).encode("utf-8")
+            ).encode()
         return httpx.Response(200, content=body)
 
     transport = httpx.MockTransport(_handler)
@@ -66,18 +64,18 @@ def _static_bcu_client(rate: Decimal | None = Decimal("38.50")) -> BcuClient:
         # UYU pass-through
         (0, ConversionMode.PASSTHROUGH),
         # Convertible currencies — sample of the full table
-        (20, ConversionMode.CONVERT),   # USD cable
-        (37, ConversionMode.CONVERT),   # USD cable alt code
-        (36, ConversionMode.CONVERT),   # USD billete
-        (15, ConversionMode.CONVERT),   # EUR
-        (25, ConversionMode.CONVERT),   # BRL
-        (8, ConversionMode.CONVERT),    # CAD
-        (11, ConversionMode.CONVERT),   # GBP
-        (12, ConversionMode.CONVERT),   # JPY
-        (17, ConversionMode.CONVERT),   # XDR
+        (20, ConversionMode.CONVERT),  # USD cable
+        (37, ConversionMode.CONVERT),  # USD cable alt code
+        (36, ConversionMode.CONVERT),  # USD billete
+        (15, ConversionMode.CONVERT),  # EUR
+        (25, ConversionMode.CONVERT),  # BRL
+        (8, ConversionMode.CONVERT),  # CAD
+        (11, ConversionMode.CONVERT),  # GBP
+        (12, ConversionMode.CONVERT),  # JPY
+        (17, ConversionMode.CONVERT),  # XDR
         # Non-convertible — no BCU call, amount_uyu = NULL
-        (4, ConversionMode.NULL),   # UI
-        (5, ConversionMode.NULL),   # UR
+        (4, ConversionMode.NULL),  # UI
+        (5, ConversionMode.NULL),  # UR
         (22, ConversionMode.NULL),  # ORO
         (39, ConversionMode.NULL),  # EURO TRANSF.
         # Unknown — defaults to NULL
@@ -122,7 +120,9 @@ def test_normalize_uyu_does_not_call_bcu(make_joined_record) -> None:
         call_log.append(request.content.decode("utf-8"))
         return httpx.Response(
             200,
-            content=b"<?xml version='1.0'?><root><datos><TCC>99.99</TCC></datos></root>",
+            content=(
+                b"<?xml version='1.0'?><root><datos><TCC>99.99</TCC></datos></root>"
+            ),
         )
 
     transport = httpx.MockTransport(_handler)
@@ -159,7 +159,11 @@ def test_normalize_uyu_does_not_call_bcu(make_joined_record) -> None:
     ],
 )
 def test_normalize_converts_foreign_currency_to_uyu(
-    make_joined_record, id_moneda: int, amount: Decimal, rate: Decimal, expected_uyu: Decimal
+    make_joined_record,
+    id_moneda: int,
+    amount: Decimal,
+    rate: Decimal,
+    expected_uyu: Decimal,
 ) -> None:
     record = make_joined_record(id_moneda=id_moneda, precio_tot_imp=amount)
 
@@ -210,7 +214,9 @@ def test_normalize_non_convertible_does_not_call_bcu(make_joined_record) -> None
         call_log.append(request.content.decode("utf-8"))
         return httpx.Response(
             200,
-            content=b"<?xml version='1.0'?><root><datos><TCC>99.99</TCC></datos></root>",
+            content=(
+                b"<?xml version='1.0'?><root><datos><TCC>99.99</TCC></datos></root>"
+            ),
         )
 
     transport = httpx.MockTransport(_handler)

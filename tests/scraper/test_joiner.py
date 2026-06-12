@@ -5,21 +5,14 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
-import pytest
-
 from scraper.joiner import JoinedRecord, join_records
-from scraper.rss_feed import RssItem
-from scraper.xml_report import XmlAdjudication
-
 
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
 
 
-def test_join_matches_records_by_id_compra(
-    make_xml_record, make_rss_item
-) -> None:
+def test_join_matches_records_by_id_compra(make_xml_record, make_rss_item) -> None:
     xml = [
         make_xml_record(id_compra="1", nombre_comercial="A"),
         make_xml_record(id_compra="2", nombre_comercial="B"),
@@ -49,9 +42,7 @@ def test_join_attaches_source_url_to_every_record(
     assert joined[0].source_url == "https://example.test/source-A"
 
 
-def test_join_preserves_xml_field_values(
-    make_xml_record, make_rss_item
-) -> None:
+def test_join_preserves_xml_field_values(make_xml_record, make_rss_item) -> None:
     xml = [
         make_xml_record(
             id_compra="1",
@@ -85,9 +76,7 @@ def test_join_preserves_xml_field_values(
     assert record.id_moneda == 20
 
 
-def test_join_preserves_license_link_from_rss(
-    make_xml_record, make_rss_item
-) -> None:
+def test_join_preserves_license_link_from_rss(make_xml_record, make_rss_item) -> None:
     xml = [make_xml_record(id_compra="1")]
     rss = [
         make_rss_item(
@@ -99,9 +88,7 @@ def test_join_preserves_license_link_from_rss(
 
     joined = join_records(xml, rss, source_url="https://example.test/xml")
 
-    assert joined[0].license_link == (
-        "https://example.test/consultas/detalle/id/1"
-    )
+    assert joined[0].license_link == ("https://example.test/consultas/detalle/id/1")
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +130,7 @@ def test_join_with_empty_inputs_returns_empty_list() -> None:
     assert join_records([], [], source_url="https://example.test/xml") == []
 
 
-def test_join_returns_empty_when_no_ids_overlap(
-    make_xml_record, make_rss_item
-) -> None:
+def test_join_returns_empty_when_no_ids_overlap(make_xml_record, make_rss_item) -> None:
     xml = [make_xml_record(id_compra="xml-1")]
     rss = [make_rss_item(id_compra="rss-1")]
 

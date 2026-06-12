@@ -9,11 +9,15 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
-from fastapi.testclient import TestClient
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
-from app.services.adjudication_service import AdjudicationFilters, filters_from_query_params
-
+from app.services.adjudication_service import (
+    AdjudicationFilters,
+    filters_from_query_params,
+)
 
 # ---------------------------------------------------------------------------
 # GET / — full HTML page

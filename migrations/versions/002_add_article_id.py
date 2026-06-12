@@ -12,12 +12,16 @@ for exact-match filtering. Records whose XML element lacks the
 attribute are stored with ``NULL``; the column therefore MUST be
 nullable.
 """
+
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import sqlalchemy as sa
 from alembic import op
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
 revision: str = "002_add_article_id"

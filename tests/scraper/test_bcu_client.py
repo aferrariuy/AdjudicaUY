@@ -10,7 +10,6 @@ import pytest
 
 from scraper.bcu_client import BcuClient, BcuError
 
-
 # ---------------------------------------------------------------------------
 # Test doubles — in-memory httpx transports
 # ---------------------------------------------------------------------------
@@ -24,12 +23,7 @@ def _envelope_response(tcc: str | None) -> bytes:
     """
 
     if tcc is None:
-        return (
-            '<?xml version="1.0" encoding="UTF-8"?>'
-            "<root>"
-            "<datos></datos>"
-            "</root>"
-        ).encode("utf-8")
+        return b'<?xml version="1.0" encoding="UTF-8"?><root><datos></datos></root>'
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
         "<root>"
@@ -38,11 +32,11 @@ def _envelope_response(tcc: str | None) -> bytes:
         "<TCV>0</TCV>"
         "</datos>"
         "</root>"
-    ).encode("utf-8")
+    ).encode()
 
 
 def _make_transport(handler):
-    """Return a callable that builds an ``httpx.MockTransport`` for the given handler."""
+    """Build an ``httpx.MockTransport`` for the given handler."""
 
     def _factory():
         return httpx.MockTransport(handler)
@@ -65,8 +59,10 @@ def _ok_handler(tcc: str = "38.50", *, call_log: list[str] | None = None):
     return _handler
 
 
-def _503_then_ok_handler(tcc: str, *, fail_count: int = 1, call_log: list[int] | None = None):
-    """Return a handler that fails the first ``fail_count`` calls with 503, then succeeds."""
+def _503_then_ok_handler(
+    tcc: str, *, fail_count: int = 1, call_log: list[int] | None = None
+):
+    """Fail the first ``fail_count`` calls with 503, then succeed."""
 
     state = {"calls": 0}
 
@@ -190,7 +186,9 @@ def test_get_tcc_retries_on_503_then_succeeds(monkeypatch) -> None:
     """A 503 on the first attempt is retried with backoff and then succeeds."""
 
     call_log: list[int] = []
-    transport = httpx.MockTransport(_503_then_ok_handler("38.00", fail_count=1, call_log=call_log))
+    transport = httpx.MockTransport(
+        _503_then_ok_handler("38.00", fail_count=1, call_log=call_log)
+    )
 
     # Patch ``time.sleep`` so the test runs instantly — the production
     # backoff is 1s → 3s → 9s and we do not want to wait that long.
@@ -350,7 +348,11 @@ def test_list_monedas_parses_currency_catalogue() -> None:
         currencies = bcu.list_monedas()
 
     assert len(currencies) == 3
-    assert (currencies[0].codigo, currencies[0].nombre, currencies[0].codigo_iso) == (2224, "DOLAR USA", "USD")
+    assert (currencies[0].codigo, currencies[0].nombre, currencies[0].codigo_iso) == (
+        2224,
+        "DOLAR USA",
+        "USD",
+    )
     assert currencies[2].codigo_iso is None  # Bitcoin entry has no ISO code
 
 

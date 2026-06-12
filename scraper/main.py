@@ -338,7 +338,8 @@ def run_scrape(
     elif end_date is None:
         end_date = start_date
 
-    assert start_date is not None and end_date is not None  # for type checkers
+    if start_date is None or end_date is None:
+        raise RuntimeError("date range resolution failed — this should never happen")
 
     log.info(
         "Scraper run starting: range=%s..%s start_hour=%d end_hour=%d",

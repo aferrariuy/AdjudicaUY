@@ -2,8 +2,10 @@
 
 Each day: fetch XML + RSS with the same single-day range, join, normalize.
 
-Usage:
-    PYTHONPATH=. python scripts/scrape_day_by_day.py [--dry-run] [--start YYYY-MM-DD] [--end YYYY-MM-DD]
+Usage::
+
+    PYTHONPATH=. python scripts/scrape_day_by_day.py \\
+        [--dry-run] [--start YYYY-MM-DD] [--end YYYY-MM-DD]
 """
 
 from __future__ import annotations
@@ -12,16 +14,19 @@ import argparse
 import logging
 import time
 from datetime import date, timedelta
+from typing import TYPE_CHECKING
 
 import httpx
 from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_session_factory
 from app.models.adjudication import Adjudication
 from scraper.bcu_client import BcuClient
-from scraper.joiner import JoinedRecord, join_records
+from scraper.joiner import join_records
 from scraper.normalizer import NormalizedRecord, normalize_record
 from scraper.rss_feed import fetch_rss_feed, parse_rss_feed
 from scraper.xml_report import fetch_xml_report, parse_xml_report
@@ -88,7 +93,11 @@ def _bulk_insert(session: Session, records: list[NormalizedRecord]) -> int:
 # ── Main ────────────────────────────────────────────────────────────
 def main() -> None:
     parser = argparse.ArgumentParser(description="Scrape day-by-day")
-    parser.add_argument("--dry-run", action="store_true", help="Fetch and parse but don't insert into DB")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Fetch and parse but don't insert into DB",
+    )
     parser.add_argument("--start", default="2026-04-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default="2026-06-12", help="End date (YYYY-MM-DD)")
     args = parser.parse_args()
@@ -139,7 +148,12 @@ def main() -> None:
             # Join
             joined = join_records(xml_records, rss_items, source_url=url_a)
             if not joined:
-                log.info("%s: %d XML, %d RSS, 0 joined — skipping", current, len(xml_records), len(rss_items))
+                log.info(
+                    "%s: %d XML, %d RSS, 0 joined — skipping",
+                    current,
+                    len(xml_records),
+                    len(rss_items),
+                )
                 current += timedelta(days=1)
                 time.sleep(0.5)
                 continue
@@ -150,7 +164,9 @@ def main() -> None:
                 try:
                     normalized.append(normalize_record(record, bcu_client))
                 except Exception as exc:
-                    log.warning("Normalize failed id_compra=%s: %s", record.id_compra, exc)
+                    log.warning(
+                        "Normalize failed id_compra=%s: %s", record.id_compra, exc
+                    )
 
             if not normalized:
                 current += timedelta(days=1)
@@ -161,13 +177,23 @@ def main() -> None:
 
             # Insert or dry-run
             if args.dry_run:
-                log.info("[DRY RUN] %s: %d XML → %d joined → %d normalized",
-                         current, len(xml_records), len(joined), len(normalized))
+                log.info(
+                    "[DRY RUN] %s: %d XML → %d joined → %d normalized",
+                    current,
+                    len(xml_records),
+                    len(joined),
+                    len(normalized),
+                )
                 total += len(normalized)
             else:
                 inserted = _bulk_insert(session, normalized)
-                log.info("%s: %d XML → %d joined → %d inserted",
-                         current, len(xml_records), len(joined), inserted)
+                log.info(
+                    "%s: %d XML → %d joined → %d inserted",
+                    current,
+                    len(xml_records),
+                    len(joined),
+                    inserted,
+                )
                 total += inserted
 
             current += timedelta(days=1)
@@ -179,7 +205,9 @@ def main() -> None:
         bcu_client.close()
         session.close()
 
-    logger.info("═══ DONE: %d records from %d days with data ═══", total, days_with_data)
+    logger.info(
+        "═══ DONE: %d records from %d days with data ═══", total, days_with_data
+    )
 
 
 if __name__ == "__main__":

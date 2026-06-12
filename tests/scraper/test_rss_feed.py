@@ -7,7 +7,6 @@ import pytest
 
 from scraper.rss_feed import fetch_rss_feed, parse_rss_feed
 
-
 # ---------------------------------------------------------------------------
 # Fixture RSS payloads
 # ---------------------------------------------------------------------------
