@@ -76,6 +76,7 @@ class XmlAdjudication:
     precio_tot_imp: Decimal
     desc_articulo: str
     id_moneda: int
+    id_articulo: str | None
 
 
 _HEADERS = {
@@ -257,6 +258,7 @@ def _normalize_adjudicacion(
         precio_tot_imp=precio_tot_imp,
         desc_articulo=desc_articulo,
         id_moneda=id_moneda,
+        id_articulo=_attr(adj_el, "id_articulo"),
     )
 
 

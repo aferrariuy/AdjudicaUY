@@ -46,6 +46,7 @@ class AdjudicationFilters:
     company: str | None = None
     organism: str | None = None
     article: str | None = None
+    article_id: str | None = None
     date_from: date | None = None
     date_to: date | None = None
 
@@ -54,7 +55,14 @@ class AdjudicationFilters:
 
         return any(
             getattr(self, field) not in (None, "")
-            for field in ("company", "organism", "article", "date_from", "date_to")
+            for field in (
+                "company",
+                "organism",
+                "article",
+                "article_id",
+                "date_from",
+                "date_to",
+            )
         )
 
 
@@ -92,6 +100,7 @@ def filters_from_query_params(params: dict[str, str | None]) -> AdjudicationFilt
         company=_normalize(params.get("company")),
         organism=_normalize(params.get("organism")),
         article=_normalize(params.get("article")),
+        article_id=_normalize(params.get("article_id")),
         date_from=_maybe_date(params.get("date_from")),
         date_to=_maybe_date(params.get("date_to")),
     )
@@ -138,6 +147,15 @@ def _build_predicates(filters: AdjudicationFilters) -> list[Any]:
         predicates.append(Adjudication.organism.ilike(f"%{filters.organism}%"))
     if filters.article:
         predicates.append(Adjudication.article.ilike(f"%{filters.article}%"))
+    if filters.article_id:
+        # Comma-separated list of exact IDs → IN set predicate. Whitespace
+        # and empty entries are dropped so trailing commas ("1234, ") do
+        # not pollute the lookup. NULLs are excluded from IN by SQL
+        # semantics, matching the spec.
+        ids = [piece.strip() for piece in filters.article_id.split(",")]
+        ids = [piece for piece in ids if piece]
+        if ids:
+            predicates.append(Adjudication.article_id.in_(ids))
     if filters.date_from is not None:
         predicates.append(Adjudication.date >= filters.date_from)
     if filters.date_to is not None:

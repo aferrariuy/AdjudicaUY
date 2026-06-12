@@ -133,6 +133,7 @@ def _to_adjudication_dict(record: NormalizedRecord) -> dict[str, Any]:
         "license_type": record.license_type,
         "article": record.article,
         "article_quantity": record.article_quantity,
+        "article_id": record.article_id,
         "license_link": record.license_link,
         "source_url": record.source_url,
     }

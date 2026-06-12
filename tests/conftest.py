@@ -182,6 +182,7 @@ def make_adjudication(db_session: Session):
             "license_type": "CD",
             "article": "Laptop Dell Latitude",
             "article_quantity": Decimal("10.00"),
+            "article_id": f"{40000 + n}",
             "license_link": f"https://example.test/licitacion/{n}",
             "source_url": "https://example.test/xml",
         }
@@ -213,6 +214,7 @@ def make_xml_record():
         "precio_tot_imp": Decimal("1000.00"),
         "desc_articulo": "Laptop",
         "id_moneda": 20,
+        "id_articulo": "42851",
     }
 
     def _factory(**overrides: Any) -> XmlAdjudication:
@@ -260,6 +262,7 @@ def make_joined_record():
         "organism": "Ministerio de Interior",
         "license_link": "https://example.test/consultas/detalle/id/1319278",
         "source_url": "https://example.test/xml",
+        "id_articulo": "42851",
     }
 
     def _factory(**overrides: Any) -> JoinedRecord:

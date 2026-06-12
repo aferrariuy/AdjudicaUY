@@ -49,6 +49,7 @@ class JoinedRecord:
     organism: str
     license_link: str
     source_url: str
+    id_articulo: str | None
 
 
 def join_records(
@@ -111,6 +112,7 @@ def join_records(
                 organism=rss_match.organism,
                 license_link=rss_match.license_link,
                 source_url=source_url,
+                id_articulo=xml_record.id_articulo,
             )
         )
 

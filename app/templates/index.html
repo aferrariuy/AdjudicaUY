@@ -33,6 +33,18 @@
       </div>
 
       <div>
+        <label for="filter-article-id" class="block text-sm font-medium text-slate-700 mb-1">ID de artículo</label>
+        <input
+          id="filter-article-id"
+          type="text"
+          name="article_id"
+          value="{{ filters.article_id or '' }}"
+          placeholder="IDs separados por coma"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+      </div>
+
+      <div>
         <label for="filter-company" class="block text-sm font-medium text-slate-700 mb-1">Empresa adjudicataria</label>
         <input
           id="filter-company"

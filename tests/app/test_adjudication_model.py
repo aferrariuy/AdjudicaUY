@@ -6,6 +6,7 @@ cover the spec scenarios from ``data-storage``:
 * Required-field validation
 * Unique-constraint enforcement on (source_url, license_link, date)
 * Index presence on the four filter columns
+* ``article_id`` nullable acceptance and exact-match filter (single + multi)
 
 The migration's schema is the source of truth for indexes and
 constraints; the model itself only declares what the spec requires.
@@ -21,6 +22,10 @@ from sqlalchemy import inspect
 from sqlalchemy.exc import IntegrityError
 
 from app.models.adjudication import Adjudication
+from app.services.adjudication_service import (
+    AdjudicationFilters,
+    list_adjudications,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +299,13 @@ def test_index_on_article_exists(engine) -> None:
     assert any("article" in name for name in names)
 
 
+def test_index_on_article_id_exists(engine) -> None:
+    """The ``article_id`` B-tree index MUST exist (spec: data-storage)."""
+
+    names = _indexed_column_names(engine)
+    assert "ix_adjudications_article_id" in names
+
+
 # ---------------------------------------------------------------------------
 # Column metadata
 # ---------------------------------------------------------------------------
@@ -320,6 +332,104 @@ def test_model_columns_have_expected_types() -> None:
     assert columns["license_type"].nullable
     assert not columns["article"].nullable
     assert columns["article_quantity"].nullable
+    assert columns["article_id"].nullable
     assert columns["license_link"].nullable
     assert not columns["source_url"].nullable
     assert not columns["ingested_at"].nullable
+
+
+# ---------------------------------------------------------------------------
+# article_id — nullable acceptance + exact-match filter
+# ---------------------------------------------------------------------------
+
+
+def test_model_accepts_article_id_string(db_session, make_adjudication) -> None:
+    """An adjudication with a non-null ``article_id`` persists as-is."""
+
+    record = make_adjudication(article_id="42851")
+
+    assert record.id is not None
+    assert record.article_id == "42851"
+
+    db_session.expire_all()
+    fetched = db_session.get(Adjudication, record.id)
+    assert fetched is not None
+    assert fetched.article_id == "42851"
+
+
+def test_model_accepts_null_article_id(db_session, make_adjudication) -> None:
+    """``article_id`` MUST be nullable — XML may omit ``id_articulo``."""
+
+    record = make_adjudication(article_id=None)
+
+    assert record.id is not None
+    assert record.article_id is None
+
+    db_session.expire_all()
+    fetched = db_session.get(Adjudication, record.id)
+    assert fetched is not None
+    assert fetched.article_id is None
+
+
+def test_filter_by_article_id_single_value(
+    db_session, make_adjudication
+) -> None:
+    """A single article_id filter MUST return only matching rows."""
+
+    keep = make_adjudication(article_id="42851")
+    make_adjudication(article_id="42852")
+    make_adjudication(article_id=None)
+
+    rows = list_adjudications(
+        db_session, AdjudicationFilters(article_id="42851")
+    )
+
+    assert [row.id for row in rows] == [keep.id]
+
+
+def test_filter_by_article_id_comma_separated(
+    db_session, make_adjudication
+) -> None:
+    """A comma-separated list MUST match any of the IDs (IN set predicate)."""
+
+    a = make_adjudication(article_id="42851")
+    b = make_adjudication(article_id="42852")
+    make_adjudication(article_id="42853")
+    make_adjudication(article_id=None)
+
+    rows = list_adjudications(
+        db_session, AdjudicationFilters(article_id="42851, 42852")
+    )
+
+    returned = sorted(row.id for row in rows)
+    assert returned == sorted([a.id, b.id])
+
+
+def test_filter_by_article_id_excludes_nulls(
+    db_session, make_adjudication
+) -> None:
+    """Rows with NULL ``article_id`` MUST NOT match the IN-set filter."""
+
+    keep = make_adjudication(article_id="42851")
+    make_adjudication(article_id=None)
+
+    rows = list_adjudications(
+        db_session, AdjudicationFilters(article_id="42851")
+    )
+
+    assert [row.id for row in rows] == [keep.id]
+
+
+def test_filter_by_article_id_ignores_empty_entries(
+    db_session, make_adjudication
+) -> None:
+    """Trailing/empty comma entries MUST be ignored — no empty IN crash."""
+
+    a = make_adjudication(article_id="42851")
+    make_adjudication(article_id="42852")
+
+    rows = list_adjudications(
+        db_session, AdjudicationFilters(article_id=" 42851 , , ")
+    )
+
+    assert [row.id for row in rows] == [a.id]

@@ -285,6 +285,7 @@ def test_normalize_preserves_provenance_fields(make_joined_record) -> None:
         cant_adj=Decimal("2.00"),
         id_moneda=20,
         precio_tot_imp=Decimal("1000.00"),
+        id_articulo="42851",
     )
 
     result = normalize_record(record, _static_bcu_client(rate=Decimal("40.00")))
@@ -300,6 +301,7 @@ def test_normalize_preserves_provenance_fields(make_joined_record) -> None:
     assert result.article == "Silla"
     assert result.license_type == "CD"
     assert result.article_quantity == Decimal("2.00")
+    assert result.article_id == "42851"
     assert result.amount == Decimal("1000.00")
     assert result.amount_uyu == Decimal("40000.00")
 

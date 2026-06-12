@@ -36,6 +36,7 @@ class Adjudication(Base):
     license_type = Column(String(100), nullable=True)
     article = Column(String(255), nullable=False, index=True)
     article_quantity = Column(Numeric(10, 2), nullable=True)
+    article_id = Column(String(50), nullable=True, index=True)
 
     license_link = Column(String(512), nullable=True)
     source_url = Column(String(512), nullable=False)

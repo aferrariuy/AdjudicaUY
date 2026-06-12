@@ -124,6 +124,7 @@ class NormalizedRecord:
     license_type: str
     article: str
     article_quantity: Decimal | None
+    article_id: str | None
 
 
 def _resolve_mode(id_moneda: int) -> ConversionMode:
@@ -254,6 +255,7 @@ def normalize_record(
         license_type=record.id_tipocompra,
         article=record.desc_articulo,
         article_quantity=record.cant_adj,
+        article_id=record.id_articulo,
     )
 
 
