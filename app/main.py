@@ -47,8 +47,8 @@ def _validate_environment() -> None:
     logger.info(
         "Environment validated: database_url=%s source_a=%s source_b=%s bcu_api=%s",
         settings.database_url.split("@", 1)[-1],  # strip credentials
-        settings.source_a_url,
-        settings.source_b_url,
+        settings.source_a_base_url,
+        settings.source_b_base_url,
         settings.bcu_api_url,
     )
 

@@ -36,8 +36,8 @@ from sqlalchemy.pool import StaticPool
 
 _TEST_ENV: dict[str, str] = {
     "DATABASE_URL": "sqlite:///:memory:",
-    "SOURCE_A_URL": "https://example.test/xml",
-    "SOURCE_B_URL": "https://example.test/rss",
+    "SOURCE_A_BASE_URL": "https://example.test/xml",
+    "SOURCE_B_BASE_URL": "https://example.test/rss",
     "BCU_API_URL": (
         "https://cotizaciones.bcu.gub.uy/wscotizaciones/servlet/awsbcucotizaciones"
     ),

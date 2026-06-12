@@ -31,8 +31,26 @@ class Settings(BaseSettings):
     )
 
     # Scraping sources
-    source_a_url: str = Field(..., description="URL of XML adjudication source A.")
-    source_b_url: str = Field(..., description="URL of XML adjudication source B.")
+    # Both sources expose date-dependent endpoints; we store the BASE URL
+    # (without any date parameters) and have the scraper append the date
+    # range on every run. See :mod:`scraper.main` for the URL builders.
+    source_a_base_url: str = Field(
+        ...,
+        description=(
+            "Base URL of the XML adjudication source A, without date "
+            "query parameters. Example: "
+            "http://www.comprasestatales.gub.uy/comprasenlinea/jboss/generarReporte"
+        ),
+    )
+    source_b_base_url: str = Field(
+        ...,
+        description=(
+            "Base URL of the RSS adjudication source B, without the "
+            "``rango-fecha/<start>_<end>`` path segment. Example: "
+            "https://www.comprasestatales.gub.uy/consultas/rss/tipo-pub/ADJ"
+            "/tipo-doc/C/tipo-fecha/PUB/rango-fecha"
+        ),
+    )
 
     # External services
     bcu_api_url: str = Field(
