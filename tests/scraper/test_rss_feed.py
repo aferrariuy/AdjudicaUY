@@ -156,7 +156,7 @@ def test_parse_rss_handles_mixed_valid_and_invalid_items() -> None:
 
 def test_fetch_rss_propagates_http_errors() -> None:
     class _BoomClient:
-        def get(self, url: str):  # noqa: ARG002
+        def get(self, url: str, **kwargs):  # noqa: ARG002
             request = httpx.Request("GET", url)
             response = httpx.Response(503, request=request)
             raise httpx.HTTPStatusError("boom", request=request, response=response)
@@ -167,7 +167,7 @@ def test_fetch_rss_propagates_http_errors() -> None:
 
 def test_fetch_rss_returns_body_on_success() -> None:
     class _OkClient:
-        def get(self, url: str):  # noqa: ARG002
+        def get(self, url: str, **kwargs):  # noqa: ARG002
             request = httpx.Request("GET", url)
             return httpx.Response(200, request=request, text=VALID_RSS)
 
