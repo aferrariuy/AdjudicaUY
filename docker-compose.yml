@@ -2,16 +2,15 @@
 #
 # All three services are defined here:
 #   * app    — FastAPI + uvicorn, port 8000
-#   * worker — scraper (one-shot, triggered by Dokploy's Scheduled Job)
+#   * worker — scraper scheduler (long-running, executes scrape daily)
 #   * db     — PostgreSQL 16
 #
 # Environment variables are loaded from the .env file in the same directory.
 # For Dokploy: mount or copy the .env file to the server.
 #
-# Scheduled Job configuration (set in Dokploy UI):
-#   * Service:  worker
-#   * Schedule: 0 2 * * *   (02:00 UTC = 23:00 Montevideo)
-#   * Command:  python -m scraper.main
+# The worker runs a persistent scheduler that executes the scraper once
+# daily at SCRAPE_HOUR:SCRAPE_MINUTE UTC (default 02:00 = 23:00 Montevideo).
+# Override the schedule via Dokploy environment variables.
 
 services:
   db:
@@ -67,10 +66,10 @@ services:
       dockerfile: Dockerfile
     image: adjudicauy-worker:latest
     container_name: adjudicauy-worker
-    # The worker is a one-shot job. Dokploy's Scheduled Job creates a fresh
-    # container per run; ``restart: no`` avoids a tight loop if the scrape
-    # crashes.
-    restart: "no"
+    restart: unless-stopped
+    networks:
+      - default
+      - dokploy-network
     depends_on:
       db:
         condition: service_healthy
@@ -79,8 +78,12 @@ services:
       SOURCE_A_BASE_URL: ${SOURCE_A_BASE_URL}
       SOURCE_B_BASE_URL: ${SOURCE_B_BASE_URL}
       BCU_API_URL: ${BCU_API_URL}
-    # Override the Dockerfile's default CMD with the scraper entry point.
-    command: ["python", "-m", "scraper.main"]
+      SCRAPE_HOUR: ${SCRAPE_HOUR:-2}
+      SCRAPE_MINUTE: ${SCRAPE_MINUTE:-0}
+    # Long-running scheduler — runs the scraper once daily at the
+    # configured time. Dokploy needs a running container for its
+    # Scheduled Jobs feature (docker exec).
+    command: ["python", "-m", "scraper.scheduler"]
 
 volumes:
   adjudicauy-db-data:

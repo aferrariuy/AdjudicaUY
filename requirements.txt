@@ -21,3 +21,6 @@ pydantic-settings==2.7.0
 # Scraper (used by the worker service, imported from the shared venv)
 httpx==0.27.2
 lxml==6.1.0
+
+# Worker scheduler
+schedule==1.2.2
