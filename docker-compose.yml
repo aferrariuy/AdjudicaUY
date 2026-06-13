@@ -37,6 +37,9 @@ services:
     image: adjudicauy-app:latest
     container_name: adjudicauy-app
     restart: unless-stopped
+    networks:
+      - default
+      - dokploy-network
     depends_on:
       db:
         condition: service_healthy
@@ -78,3 +81,7 @@ services:
 
 volumes:
   pgdata:
+
+networks:
+  dokploy-network:
+    external: true
