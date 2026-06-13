@@ -37,8 +37,6 @@ services:
     image: adjudicauy-app:latest
     container_name: adjudicauy-app
     restart: unless-stopped
-    ports:
-      - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
