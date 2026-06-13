@@ -18,6 +18,9 @@ services:
     image: postgres:16-alpine
     container_name: adjudicauy-db-v2
     restart: unless-stopped
+    networks:
+      - default
+      - dokploy-network
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
