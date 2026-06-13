@@ -21,12 +21,8 @@ services:
     image: adjudicauy-app:latest
     container_name: adjudicauy-app
     restart: unless-stopped
-    ports:
-      - "8000:8000"
     env_file:
       - .env
-    networks:
-      - adjudicauy
     healthcheck:
       # Hit the homepage to confirm uvicorn is up and Jinja2 templates load.
       # ``urlopen`` raises on 4xx/5xx and on connection errors, which makes
@@ -49,11 +45,5 @@ services:
     restart: "no"
     env_file:
       - .env
-    networks:
-      - adjudicauy
     # Override the Dockerfile's default CMD with the scraper entry point.
     command: ["python", "-m", "scraper.main"]
-
-networks:
-  adjudicauy:
-    driver: bridge
