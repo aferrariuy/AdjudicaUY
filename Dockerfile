@@ -65,6 +65,7 @@ COPY --chown=app:app scraper/ ./scraper/
 COPY --chown=app:app migrations/ ./migrations/
 COPY --chown=app:app alembic.ini ./alembic.ini
 COPY --chown=app:app scripts/entrypoint.sh ./scripts/entrypoint.sh
+COPY --chown=app:app scripts/scrape_day_by_day.py ./scripts/scrape_day_by_day.py
 
 USER app
 
