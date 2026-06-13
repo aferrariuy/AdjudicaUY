@@ -23,7 +23,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB:-adjudicauy}
     volumes:
-      - pgdata2:/var/lib/postgresql/data
+      - pgdata3:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
@@ -80,7 +80,7 @@ services:
     command: ["python", "-m", "scraper.main"]
 
 volumes:
-  pgdata2:
+  pgdata3:
 
 networks:
   dokploy-network:
