@@ -23,8 +23,6 @@ services:
     restart: unless-stopped
     networks:
       - dokploy-network
-    env_file:
-      - .env
     healthcheck:
       # Hit the homepage to confirm uvicorn is up and Jinja2 templates load.
       # ``urlopen`` raises on 4xx/5xx and on connection errors, which makes
@@ -47,8 +45,6 @@ services:
     restart: "no"
     networks:
       - dokploy-network
-    env_file:
-      - .env
     # Override the Dockerfile's default CMD with the scraper entry point.
     command: ["python", "-m", "scraper.main"]
 
