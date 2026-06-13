@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections import defaultdict
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -35,7 +34,7 @@ from app.services.adjudication_service import (
     filters_from_query_params,
     list_adjudications,
     ranking_by_company,
-    temporal_by_organism,
+    ranking_by_organism,
 )
 
 if TYPE_CHECKING:
@@ -120,58 +119,32 @@ def _build_ranking_chart_payload(
     }
 
 
-def _build_temporal_chart_payload(
-    rows: list[tuple[str, str, Decimal]],
+def _build_organism_ranking_payload(
+    rows: list[tuple[str, Decimal]],
 ) -> dict[str, Any]:
-    """Shape temporal rows for a Chart.js multi-line chart.
+    """Shape organism ranking rows for a Chart.js bar chart.
 
-    Input rows are flat ``(organism, month_iso, total)`` tuples. We
-    pivot them into a ``{organism: {month: total}}`` map and then build
-    parallel arrays of labels and per-organism datasets. The X-axis is
-    the union of months that actually have data, in ascending order.
+    Returns a dict ready to be ``json.dumps``-ed into ``data-chart``:
 
-    See the temporal-visualization spec, "Time Granularity" requirement
-    — monthly aggregation caps the data points at 12 per year.
+    * ``labels`` — organism names, in the order returned by the service
+      (already sorted descending by total).
+    * ``datasets[0].data`` — the totals, parallel to ``labels``.
+    * ``format`` — a hint for the client-side tooltip/locale formatter.
+
+    See the organism-ranking-visualization spec, "Payload structure
+    matches company ranking" scenario for the ``es-UY`` locale
+    expectation.
     """
 
-    by_organism: dict[str, dict[str, float]] = defaultdict(dict)
-    months: set[str] = set()
-
-    for organism, month_iso, total in rows:
-        by_organism[organism][month_iso] = float(total)
-        months.add(month_iso)
-
-    sorted_months = sorted(months)
-
-    palette = [
-        "#1d4ed8",  # blue-700
-        "#b91c1c",  # red-700
-        "#15803d",  # green-700
-        "#a16207",  # amber-700
-        "#7c3aed",  # violet-600
-        "#0e7490",  # cyan-700
-        "#be185d",  # pink-700
-        "#365314",  # lime-800
-    ]
-
-    datasets = []
-    for index, organism in enumerate(sorted(by_organism)):
-        data = [by_organism[organism].get(month, 0.0) for month in sorted_months]
-        datasets.append(
-            {
-                "label": organism,
-                "data": data,
-                "borderColor": palette[index % len(palette)],
-                "backgroundColor": palette[index % len(palette)],
-                "tension": 0.2,
-                "spanGaps": True,
-            },
-        )
-
     return {
-        "type": "line",
-        "labels": sorted_months,
-        "datasets": datasets,
+        "type": "bar",
+        "labels": [organism for organism, _total in rows],
+        "datasets": [
+            {
+                "label": "Total adjudicado (UYU)",
+                "data": [float(total) for _organism, total in rows],
+            },
+        ],
         "format": {
             "locale": "es-UY",
             "currency": "UYU",
@@ -209,7 +182,7 @@ def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     results = list_adjudications(db, filters, limit=PAGE_SIZE, offset=0)
     total = count_adjudications(db, filters)
     ranking_rows = ranking_by_company(db, filters, limit=RANKING_LIMIT)
-    temporal_rows = temporal_by_organism(db, filters)
+    organism_rows = ranking_by_organism(db, filters, limit=RANKING_LIMIT)
     organisms = distinct_organisms(db, filters, limit=ORGANISM_SUGGEST_LIMIT)
 
     return _render(
@@ -223,11 +196,13 @@ def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
             "page_size": PAGE_SIZE,
             "ranking_payload": _build_ranking_chart_payload(ranking_rows),
             "ranking_json": _json_dumps(_build_ranking_chart_payload(ranking_rows)),
-            "temporal_payload": _build_temporal_chart_payload(temporal_rows),
-            "temporal_json": _json_dumps(_build_temporal_chart_payload(temporal_rows)),
+            "organism_ranking_payload": _build_organism_ranking_payload(organism_rows),
+            "organism_ranking_json": _json_dumps(
+                _build_organism_ranking_payload(organism_rows)
+            ),
             "organisms": organisms,
             "has_ranking_data": bool(ranking_rows),
-            "has_temporal_data": bool(temporal_rows),
+            "has_organism_ranking_data": bool(organism_rows),
         },
     )
 
@@ -248,7 +223,7 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
     results = list_adjudications(db, filters, limit=PAGE_SIZE, offset=0)
     total = count_adjudications(db, filters)
     ranking_rows = ranking_by_company(db, filters, limit=RANKING_LIMIT)
-    temporal_rows = temporal_by_organism(db, filters)
+    organism_rows = ranking_by_organism(db, filters, limit=RANKING_LIMIT)
 
     logger.info(
         "HTMX partial render: htmx=%s filters=%s total=%d",
@@ -268,10 +243,12 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
             "page_size": PAGE_SIZE,
             "ranking_payload": _build_ranking_chart_payload(ranking_rows),
             "ranking_json": _json_dumps(_build_ranking_chart_payload(ranking_rows)),
-            "temporal_payload": _build_temporal_chart_payload(temporal_rows),
-            "temporal_json": _json_dumps(_build_temporal_chart_payload(temporal_rows)),
+            "organism_ranking_payload": _build_organism_ranking_payload(organism_rows),
+            "organism_ranking_json": _json_dumps(
+                _build_organism_ranking_payload(organism_rows)
+            ),
             "has_ranking_data": bool(ranking_rows),
-            "has_temporal_data": bool(temporal_rows),
+            "has_organism_ranking_data": bool(organism_rows),
         },
     )
 

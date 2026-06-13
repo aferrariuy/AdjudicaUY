@@ -1,6 +1,6 @@
 {# Wrapper partial rendered into the #results container on every filter
    change. It composes the three child partials (results table, ranking
-   chart, temporal chart) and the small "showing N of M" header.
+   chart, organism ranking chart) and the small "showing N of M" header.
 
    This file is a Jinja2 partial only — it is not an HTML document. #}
 
@@ -23,5 +23,5 @@
 
   {% include "partials/_results_table.html" %}
   {% include "partials/_ranking_chart.html" %}
-  {% include "partials/_temporal_chart.html" %}
+  {% include "partials/_organism_ranking_chart.html" %}
 </div>

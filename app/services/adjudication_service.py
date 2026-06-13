@@ -251,57 +251,36 @@ def ranking_by_company(
     return [(row.company, row.total) for row in session.execute(stmt)]
 
 
-def _format_month_label(year: int, month: int) -> str:
-    """Format ``(year, month)`` as ``YYYY-MM-01`` for the chart X-axis.
-
-    Pulled out so the route layer can also use it (e.g. to fill in
-    gaps in the X-axis). Kept private because callers should not need to
-    reach in — they receive the formatted label from
-    :func:`temporal_by_organism`.
-    """
-
-    return f"{int(year):04d}-{int(month):02d}-01"
-
-
-def temporal_by_organism(
+def ranking_by_organism(
     session: Session,
     filters: AdjudicationFilters,
-) -> list[tuple[str, str, Decimal]]:
-    """Return monthly totals per organism, ordered by month then organism.
+    *,
+    limit: int = 10,
+) -> list[tuple[str, Decimal]]:
+    """Return the top organisms by total adjudicated amount in UYU.
 
-    The result is a flat list of ``(organism, month_label, total)``
-    tuples, where ``month_label`` is the first day of the month in ISO
-    format (``YYYY-MM-01``). Months with zero adjudications are NOT
-    emitted — the chart's X-axis is built from the union of all months
-    that actually have data (see temporal-visualization spec, "Monthly
-    aggregation" scenario).
+    The result is a list of ``(organism_name, total_amount_uyu)`` pairs,
+    sorted descending by amount. ``amount_uyu`` may be ``NULL`` in the
+    database (non-convertible currencies); those rows are excluded from
+    the ranking so they do not skew the totals.
 
-    Implementation note: ``EXTRACT(year|month FROM d)`` is the only
-    month-truncation primitive that is portable across PostgreSQL and
-    SQLite (the test suite uses SQLite). The ISO label is assembled in
-    Python so the SQL stays portable; PostgreSQL's ``date_trunc`` and
-    SQLite's ``strftime('%Y-%m-01', d)`` would also work but only on
-    one dialect each.
+    The ranking MUST reflect the same filters as the listing (see
+    organism-ranking-visualization spec, "Chart reflects active filters"
+    scenario).
     """
 
-    year_col = func.extract("year", Adjudication.date).label("year")
-    month_col = func.extract("month", Adjudication.date).label("month")
     stmt = (
         select(
             Adjudication.organism.label("organism"),
-            year_col,
-            month_col,
             func.coalesce(func.sum(Adjudication.amount_uyu), 0).label("total"),
         )
         .where(Adjudication.amount_uyu.is_not(None))
-        .group_by(Adjudication.organism, year_col, month_col)
-        .order_by(year_col.asc(), month_col.asc(), Adjudication.organism.asc())
+        .group_by(Adjudication.organism)
+        .order_by(func.sum(Adjudication.amount_uyu).desc())
+        .limit(limit)
     )
     stmt = _apply_filters(stmt, filters)
-    return [
-        (row.organism, _format_month_label(row.year, row.month), row.total)
-        for row in session.execute(stmt)
-    ]
+    return [(row.organism, row.total) for row in session.execute(stmt)]
 
 
 # ---------------------------------------------------------------------------
@@ -349,5 +328,5 @@ __all__ = [
     "filters_from_query_params",
     "list_adjudications",
     "ranking_by_company",
-    "temporal_by_organism",
+    "ranking_by_organism",
 ]

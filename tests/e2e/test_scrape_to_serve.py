@@ -263,7 +263,7 @@ def test_scrape_store_query_serve_round_trip(
         ):
             assert company in body, f"Expected {company!r} in response body"
         assert 'id="chart-ranking"' in body
-        assert 'id="chart-temporal"' in body
+        assert 'id="chart-organism-ranking"' in body
 
         # A filtered request also works.
         filtered = client.get("/adjudications?company=Laptop")

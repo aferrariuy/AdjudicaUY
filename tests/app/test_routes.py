@@ -74,7 +74,7 @@ def test_index_renders_chart_canvases(client: TestClient, make_adjudication) -> 
 
     # Both partials are rendered with their canvas elements.
     assert 'id="chart-ranking"' in body
-    assert 'id="chart-temporal"' in body
+    assert 'id="chart-organism-ranking"' in body
 
 
 def test_index_includes_distinct_organisms_in_datalist(
@@ -343,24 +343,21 @@ def test_ranking_chart_reflects_active_filters(
     assert "SmallCo" not in body
 
 
-def test_temporal_chart_aggregates_by_month(
+def test_organism_ranking_chart_aggregates_by_organism(
     client: TestClient, make_adjudication
 ) -> None:
     make_adjudication(
         organism="OSE",
-        date=date(2024, 1, 5),
         amount_uyu=Decimal("100.00"),
         winning_company="A",
     )
     make_adjudication(
         organism="OSE",
-        date=date(2024, 1, 20),
         amount_uyu=Decimal("200.00"),
         winning_company="A",
     )
     make_adjudication(
         organism="Ministerio de Interior",
-        date=date(2024, 1, 10),
         amount_uyu=Decimal("50.00"),
         winning_company="B",
     )
@@ -368,10 +365,12 @@ def test_temporal_chart_aggregates_by_month(
     response = client.get("/adjudications")
     body = response.text
 
-    # The chart payload groups by (organism, month). The temporal canvas
-    # is present and its data-chart payload contains 2024-01-01.
-    assert 'id="chart-temporal"' in body
-    assert "2024-01-01" in body
+    # The chart payload aggregates by organism. The organism ranking
+    # canvas is present and its data-chart payload contains both
+    # organism names.
+    assert 'id="chart-organism-ranking"' in body
+    assert "OSE" in body
+    assert "Ministerio de Interior" in body
 
 
 def test_ranking_excludes_null_amount_uyu_rows(
