@@ -64,11 +64,14 @@ COPY --chown=app:app app/ ./app/
 COPY --chown=app:app scraper/ ./scraper/
 COPY --chown=app:app migrations/ ./migrations/
 COPY --chown=app:app alembic.ini ./alembic.ini
+COPY --chown=app:app scripts/entrypoint.sh ./scripts/entrypoint.sh
 
 USER app
 
 EXPOSE 8000
 
-# Default command boots the web app. The ``worker`` service in
-# ``docker-compose.yml`` overrides this with ``python -m scraper.main``.
+# Entrypoint runs database migrations before the CMD.
+# The ``worker`` service in ``docker-compose.yml`` overrides CMD
+# with ``python -m scraper.main``; migrations still run first.
+ENTRYPOINT ["bash", "scripts/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
