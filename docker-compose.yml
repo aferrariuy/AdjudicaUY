@@ -1,19 +1,35 @@
-# AdjudicaUY — Dokploy stack
+# AdjudicaUY — Docker Compose stack
 #
-# Defines the two services deployed by Dokploy:
+# All three services are defined here:
 #   * app    — FastAPI + uvicorn, port 8000
 #   * worker — scraper (one-shot, triggered by Dokploy's Scheduled Job)
+#   * db     — PostgreSQL 16
 #
-# PostgreSQL is managed directly by Dokploy (not declared here). The app
-# and worker connect to it via the DATABASE_URL env var. See
-# ``.env.example`` for the full list of required variables.
+# Environment variables are loaded from the .env file in the same directory.
+# For Dokploy: mount or copy the .env file to the server.
 #
-# Scheduled Job configuration (set in Dokploy UI, not in this file):
+# Scheduled Job configuration (set in Dokploy UI):
 #   * Service:  worker
 #   * Schedule: 0 2 * * *   (02:00 UTC = 23:00 Montevideo)
-#   * Command:  python -m scraper.main   (matches the service's command below)
+#   * Command:  python -m scraper.main
 
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: adjudicauy-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-adjudicauy}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   app:
     build:
       context: .
@@ -21,10 +37,16 @@ services:
     image: adjudicauy-app:latest
     container_name: adjudicauy-app
     restart: unless-stopped
-    networks:
-      - dokploy-network
-    env_file:
-      - ${DOKPLOY_DIR:-.}/.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-adjudicauy}
+      SOURCE_A_BASE_URL: ${SOURCE_A_BASE_URL}
+      SOURCE_B_BASE_URL: ${SOURCE_B_BASE_URL}
+      BCU_API_URL: ${BCU_API_URL}
     healthcheck:
       # Hit the homepage to confirm uvicorn is up and Jinja2 templates load.
       # ``urlopen`` raises on 4xx/5xx and on connection errors, which makes
@@ -45,13 +67,16 @@ services:
     # container per run; ``restart: no`` avoids a tight loop if the scrape
     # crashes.
     restart: "no"
-    networks:
-      - dokploy-network
-    env_file:
-      - ${DOKPLOY_DIR:-.}/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg2://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-adjudicauy}
+      SOURCE_A_BASE_URL: ${SOURCE_A_BASE_URL}
+      SOURCE_B_BASE_URL: ${SOURCE_B_BASE_URL}
+      BCU_API_URL: ${BCU_API_URL}
     # Override the Dockerfile's default CMD with the scraper entry point.
     command: ["python", "-m", "scraper.main"]
 
-networks:
-  dokploy-network:
-    external: true
+volumes:
+  pgdata:
