@@ -21,6 +21,8 @@ services:
     image: adjudicauy-app:latest
     container_name: adjudicauy-app
     restart: unless-stopped
+    networks:
+      - dokploy-network
     env_file:
       - .env
     healthcheck:
@@ -43,7 +45,13 @@ services:
     # container per run; ``restart: no`` avoids a tight loop if the scrape
     # crashes.
     restart: "no"
+    networks:
+      - dokploy-network
     env_file:
       - .env
     # Override the Dockerfile's default CMD with the scraper entry point.
     command: ["python", "-m", "scraper.main"]
+
+networks:
+  dokploy-network:
+    external: true
