@@ -6,8 +6,9 @@
   <h2 id="ranking-heading" class="text-lg font-semibold mb-4">Ranking de empresas</h2>
 
   {% if has_ranking_data %}
-    <div class="h-72 sm:h-96">
+    <div class="relative h-72 sm:h-96 w-full">
       <canvas
+        class="block w-full"
         id="chart-ranking"
         data-chart='{{ ranking_json | safe }}'
         aria-label="Top empresas por monto adjudicado en UYU"

@@ -53,40 +53,40 @@
     // chart (type, labels, datasets). The global Chart object is loaded
     // with ``defer`` so it is available by the time this script runs.
     (function () {
-      const PALETTE = [
+      /* ---------------------------------------------------------------
+       * Palette & formatting
+       * --------------------------------------------------------------- */
+      var PALETTE = [
         '#1d4ed8', '#b91c1c', '#15803d', '#a16207', '#7c3aed',
         '#0e7490', '#be185d', '#365314', '#9333ea', '#0f766e',
       ];
 
-      const FORMAT_CACHE = { currency: 'UYU', locale: 'es-UY' };
+      var FMT_CACHE = { currency: 'UYU', locale: 'es-UY' };
 
       function formatUYU(value) {
-        // Spanish (Uruguay) locale: dot as thousands separator, no decimals
-        // by default. We use Intl.NumberFormat for the rendering.
-        return new Intl.NumberFormat(FORMAT_CACHE.locale, {
+        return new Intl.NumberFormat(FMT_CACHE.locale, {
           style: 'currency',
-          currency: FORMAT_CACHE.currency,
+          currency: FMT_CACHE.currency,
           maximumFractionDigits: 0,
         }).format(value || 0);
       }
 
+      /* ---------------------------------------------------------------
+       * Chart lifecycle
+       * --------------------------------------------------------------- */
+
       function makeChart(canvas) {
         if (!canvas || !canvas.dataset.chart) return null;
-        let spec;
-        try {
-          spec = JSON.parse(canvas.dataset.chart);
-        } catch (err) {
-          console.error('Invalid data-chart payload', err, canvas);
-          return null;
-        }
-        // The :format object is for the tooltip; we keep Chart.js's
-        // default tick formatter and customize the tooltip callback.
-        return new Chart(canvas, {
+
+        var spec;
+        try { spec = JSON.parse(canvas.dataset.chart); }
+        catch (e) { console.error('Invalid data-chart payload', e, canvas); return null; }
+
+        var chart = new Chart(canvas, {
           type: spec.type || 'bar',
           data: {
             labels: spec.labels || [],
-            datasets: (spec.datasets || []).map((ds, i) => {
-              // Apply a default color if the dataset didn't pick one
+            datasets: (spec.datasets || []).map(function (ds, i) {
               if (!ds.backgroundColor) ds.backgroundColor = PALETTE[i % PALETTE.length];
               if (!ds.borderColor) ds.borderColor = ds.backgroundColor;
               return ds;
@@ -95,13 +95,14 @@
           options: {
             responsive: true,
             maintainAspectRatio: false,
+            animation: false,
             plugins: {
               legend: { position: 'bottom' },
               tooltip: {
                 callbacks: {
                   label: function (ctx) {
-                    const label = ctx.dataset.label || '';
-                    return `${label}: ${formatUYU(ctx.parsed.y ?? ctx.parsed)}`;
+                    var label = ctx.dataset.label || '';
+                    return label + ': ' + formatUYU(ctx.parsed.y || ctx.parsed);
                   },
                 },
               },
@@ -116,17 +117,73 @@
             },
           },
         });
+
+        // Force the first paint with explicit dimensions taken from the
+        // (now-stable) parent, NOT from Chart.js's internal measurement.
+        // This is the key fix: chart.resize() without arguments relies on
+        // Chart.js measuring the parent internally, which may still return
+        // unstable geometry on Firefox.
+        var parent = canvas.parentElement;
+        if (parent) {
+          var rect = parent.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            chart.resize(Math.floor(rect.width), Math.floor(rect.height));
+          }
+        }
+        chart.update('none');
+
+        return chart;
       }
 
-      function mountAll() {
-        document.querySelectorAll('canvas[data-chart]').forEach((c) => makeChart(c));
-      }
+      /* ---------------------------------------------------------------
+       * HTMX event wiring
+       * --------------------------------------------------------------- */
 
-      // Re-mount on every HTMX swap (initial load + filter changes).
-      document.body.addEventListener('htmx:afterSwap', mountAll);
-      // And once on the first load (no swap fires for direct GETs).
-      if (document.readyState !== 'loading') mountAll();
-      else document.addEventListener('DOMContentLoaded', mountAll);
+      // Destroy charts BEFORE HTMX removes the old canvas from the DOM.
+      // htmx:beforeCleanupElement fires for each DOM node being removed
+      // during an innerHTML swap.
+      document.body.addEventListener('htmx:beforeCleanupElement', function (evt) {
+        var el = evt.target;
+        if (!el) return;
+        if (el.querySelectorAll) {
+          el.querySelectorAll('canvas[data-chart]').forEach(function (c) {
+            var inst = Chart.getChart(c);
+            if (inst) inst.destroy();
+          });
+        }
+        if (el.matches && el.matches('canvas[data-chart]')) {
+          var inst = Chart.getChart(el);
+          if (inst) inst.destroy();
+        }
+      });
+
+      // Mount charts after HTMX has fully settled the DOM and any
+      // transitions have completed.  afterSettle is safer than afterSwap
+      // for layout-dependent widgets like Chart.js.
+      document.body.addEventListener('htmx:afterSettle', function () {
+        requestAnimationFrame(function () {
+          document.querySelectorAll('canvas[data-chart]').forEach(function (c) {
+            makeChart(c);
+          });
+        });
+      });
+
+      // First-load bootstrap (no HTMX swap fires for a direct GET).
+      if (document.readyState !== 'loading') {
+        requestAnimationFrame(function () {
+          document.querySelectorAll('canvas[data-chart]').forEach(function (c) {
+            makeChart(c);
+          });
+        });
+      } else {
+        document.addEventListener('DOMContentLoaded', function () {
+          requestAnimationFrame(function () {
+            document.querySelectorAll('canvas[data-chart]').forEach(function (c) {
+              makeChart(c);
+            });
+          });
+        });
+      }
     })();
   </script>
 </body>

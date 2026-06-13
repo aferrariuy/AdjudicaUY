@@ -6,8 +6,9 @@
   <h2 id="temporal-heading" class="text-lg font-semibold mb-4">Evolución temporal por organismo</h2>
 
   {% if has_temporal_data %}
-    <div class="h-72 sm:h-96">
+    <div class="relative h-72 sm:h-96 w-full">
       <canvas
+        class="block w-full"
         id="chart-temporal"
         data-chart='{{ temporal_json | safe }}'
         aria-label="Monto adjudicado mensual por organismo"
