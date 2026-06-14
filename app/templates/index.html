@@ -101,10 +101,11 @@
           type="submit"
           class="inline-flex items-center rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
         >Aplicar</button>
-        <a
-          href="/"
+        <button
+          type="button"
+          onclick="limpiarFiltros()"
           class="inline-flex items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-        >Limpiar</a>
+        >Limpiar</button>
       </div>
     </form>
   </section>
@@ -112,4 +113,32 @@
   <div id="results">
     {% include "partials/_results.html" %}
   </div>
+
+  <script>
+    // Reset the date inputs to the current calendar year and re-submit
+    // the form via HTMX. The state stays in the form (no URL params),
+    // so the user sees the same view as a cold load: current year,
+    // text filters preserved. We use a button (not an <a href="/">) so
+    // the page never navigates and the partial swap stays smooth.
+    (function () {
+      function currentYearBounds() {
+        var y = new Date().getFullYear();
+        return [y + '-01-01', y + '-12-31'];
+      }
+
+      window.limpiarFiltros = function () {
+        var form = document.querySelector('form[hx-get="/adjudications"]');
+        if (!form) return;
+        var from = form.querySelector('input[name="date_from"]');
+        var to = form.querySelector('input[name="date_to"]');
+        var bounds = currentYearBounds();
+        if (from) from.value = bounds[0];
+        if (to) to.value = bounds[1];
+        // HTMX will re-issue the GET against /adjudications with the
+        // reset date values, swap into #results, and the route will
+        // return the current-year rows.
+        htmx.trigger(form, 'submit');
+      };
+    })();
+  </script>
 {% endblock %}

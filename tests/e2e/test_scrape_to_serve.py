@@ -20,6 +20,7 @@ executes before deploying.
 
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -253,7 +254,9 @@ def test_scrape_store_query_serve_round_trip(
         # --------------------------------------------------------------
         # 4. Serve: the FastAPI app must return the inserted data.
         # --------------------------------------------------------------
-        response = client.get("/")
+        # The canned XML carries 2024 dates; pass explicit date params
+        # to bypass the route's current-year default filter.
+        response = client.get("/?date_from=2024-01-01&date_to=2024-12-31")
         assert response.status_code == 200
         body = response.text
         for company in (
@@ -266,7 +269,9 @@ def test_scrape_store_query_serve_round_trip(
         assert 'id="chart-organism-ranking"' in body
 
         # A filtered request also works.
-        filtered = client.get("/adjudications?company=Laptop")
+        filtered = client.get(
+            "/adjudications?company=Laptop&date_from=2024-01-01&date_to=2024-12-31"
+        )
         assert filtered.status_code == 200
         assert "E2E-COMPANY-Laptop" in filtered.text
         assert "E2E-COMPANY-Monitor" not in filtered.text
@@ -296,6 +301,7 @@ def test_serve_against_pre_populated_db(client: TestClient, make_adjudication) -
         winning_company="DIRECT-INSERT-CO",
         organism="DIRECT-INSERT-ORG",
         article="DIRECT-INSERT-ARTICLE",
+        date=date(date.today().year, 3, 1),
     )
 
     response = client.get("/adjudications")

@@ -19,6 +19,14 @@ from app.services.adjudication_service import (
     filters_from_query_params,
 )
 
+# The route layer defaults the date range to the current calendar year
+# on cold load (no date params). Tests that don't pass explicit date
+# params in the URL MUST use a current-year date for their fixtures,
+# otherwise the new default filter will hide them.
+CURRENT_YEAR = date.today().year
+NEXT_YEAR = CURRENT_YEAR + 1
+PREV_YEAR = CURRENT_YEAR - 1
+
 # ---------------------------------------------------------------------------
 # GET / — full HTML page
 # ---------------------------------------------------------------------------
@@ -45,6 +53,7 @@ def test_index_renders_results_table_when_data_exists(
         winning_company="INDEX-COMPANY-Acme",
         organism="INDEX-ORG-OSE",
         article="INDEX-ARTICLE-Laptop",
+        date=date(CURRENT_YEAR, 3, 1),
     )
 
     response = client.get("/")
@@ -67,7 +76,7 @@ def test_index_renders_no_results_message_when_db_is_empty(
 
 
 def test_index_renders_chart_canvases(client: TestClient, make_adjudication) -> None:
-    make_adjudication(amount_uyu=Decimal("1000.00"))
+    make_adjudication(amount_uyu=Decimal("1000.00"), date=date(CURRENT_YEAR, 3, 1))
 
     response = client.get("/")
     body = response.text
@@ -80,8 +89,8 @@ def test_index_renders_chart_canvases(client: TestClient, make_adjudication) -> 
 def test_index_includes_distinct_organisms_in_datalist(
     client: TestClient, make_adjudication
 ) -> None:
-    make_adjudication(organism="DLIST-MIN-INTERIOR")
-    make_adjudication(organism="DLIST-OSE")
+    make_adjudication(organism="DLIST-MIN-INTERIOR", date=date(CURRENT_YEAR, 3, 1))
+    make_adjudication(organism="DLIST-OSE", date=date(CURRENT_YEAR, 3, 2))
 
     response = client.get("/")
 
@@ -98,8 +107,12 @@ def test_index_includes_distinct_organisms_in_datalist(
 def test_adjudications_partial_returns_results_fragment(
     client: TestClient, make_adjudication
 ) -> None:
-    make_adjudication(winning_company="PARTIAL-COMPANY-A")
-    make_adjudication(winning_company="PARTIAL-COMPANY-B")
+    make_adjudication(
+        winning_company="PARTIAL-COMPANY-A", date=date(CURRENT_YEAR, 3, 1)
+    )
+    make_adjudication(
+        winning_company="PARTIAL-COMPANY-B", date=date(CURRENT_YEAR, 3, 2)
+    )
 
     response = client.get("/adjudications")
 
@@ -158,8 +171,14 @@ def test_adjudications_partial_logs_htmx_false_for_plain_get(
 def test_article_filter_applies_case_insensitive_partial_match(
     client: TestClient, make_adjudication
 ) -> None:
-    make_adjudication(article="Laptop Dell Latitude", winning_company="A")
-    make_adjudication(article="Monitor LG 24", winning_company="B")
+    make_adjudication(
+        article="Laptop Dell Latitude",
+        winning_company="A",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    make_adjudication(
+        article="Monitor LG 24", winning_company="B", date=date(CURRENT_YEAR, 3, 2)
+    )
 
     response = client.get("/adjudications?article=laptop")
 
@@ -172,8 +191,16 @@ def test_article_filter_applies_case_insensitive_partial_match(
 def test_company_filter_applies_case_insensitive_partial_match(
     client: TestClient, make_adjudication
 ) -> None:
-    make_adjudication(winning_company="COMPANY-1", article="COMPANY-1-article")
-    make_adjudication(winning_company="COMPANY-2", article="COMPANY-2-article")
+    make_adjudication(
+        winning_company="COMPANY-1",
+        article="COMPANY-1-article",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    make_adjudication(
+        winning_company="COMPANY-2",
+        article="COMPANY-2-article",
+        date=date(CURRENT_YEAR, 3, 2),
+    )
 
     response = client.get("/adjudications?company=COMPANY")
 
@@ -186,8 +213,12 @@ def test_company_filter_applies_case_insensitive_partial_match(
 def test_company_filter_exact_match_excludes_other_companies(
     client: TestClient, make_adjudication
 ) -> None:
-    make_adjudication(winning_company="ACME-CORP", article="X")
-    make_adjudication(winning_company="GLOBEX-INC", article="Y")
+    make_adjudication(
+        winning_company="ACME-CORP", article="X", date=date(CURRENT_YEAR, 3, 1)
+    )
+    make_adjudication(
+        winning_company="GLOBEX-INC", article="Y", date=date(CURRENT_YEAR, 3, 2)
+    )
 
     response = client.get("/adjudications?company=ACME")
 
@@ -199,9 +230,13 @@ def test_company_filter_exact_match_excludes_other_companies(
 def test_organism_filter_applies_partial_match(
     client: TestClient, make_adjudication
 ) -> None:
-    make_adjudication(organism="Ministerio de Interior", article="X")
-    make_adjudication(organism="Ministerio de Salud", article="Y")
-    make_adjudication(organism="OSE", article="Z")
+    make_adjudication(
+        organism="Ministerio de Interior", article="X", date=date(CURRENT_YEAR, 3, 1)
+    )
+    make_adjudication(
+        organism="Ministerio de Salud", article="Y", date=date(CURRENT_YEAR, 3, 2)
+    )
+    make_adjudication(organism="OSE", article="Z", date=date(CURRENT_YEAR, 3, 3))
 
     response = client.get("/adjudications?organism=ministerio")
 
@@ -291,18 +326,37 @@ def test_combined_filters_apply_and_logic(
     assert "FILTER-WRONG-DATE" not in body
 
 
-def test_empty_filters_return_all_records(
+def test_no_filters_returns_current_year(
     client: TestClient, make_adjudication
 ) -> None:
-    make_adjudication(winning_company="ALLFILTER-A")
-    make_adjudication(winning_company="ALLFILTER-B")
-    make_adjudication(winning_company="ALLFILTER-C")
+    """Cold load with no params returns only current-year rows.
+
+    The route injects ``date_from={year}-01-01`` and ``date_to={year}-12-31``
+    when BOTH date params are absent. Older data must be excluded.
+    """
+
+    make_adjudication(
+        winning_company="OLDFILTER-PREV", date=date(PREV_YEAR, 6, 1)
+    )
+    make_adjudication(
+        winning_company="CURRENTFILTER-A", date=date(CURRENT_YEAR, 3, 1)
+    )
+    make_adjudication(
+        winning_company="CURRENTFILTER-B", date=date(CURRENT_YEAR, 6, 1)
+    )
+    make_adjudication(
+        winning_company="CURRENTFILTER-C", date=date(CURRENT_YEAR, 9, 1)
+    )
 
     response = client.get("/adjudications")
 
+    assert response.status_code == 200
     body = response.text
-    for company in ("ALLFILTER-A", "ALLFILTER-B", "ALLFILTER-C"):
-        assert company in body
+    # Current-year rows must be present.
+    for company in ("CURRENTFILTER-A", "CURRENTFILTER-B", "CURRENTFILTER-C"):
+        assert company in body, f"Expected {company!r} in body"
+    # Prior-year row must be filtered out by the default date range.
+    assert "OLDFILTER-PREV" not in body
 
 
 def test_filters_with_no_matching_results_render_no_results_message(
@@ -328,11 +382,13 @@ def test_ranking_chart_reflects_active_filters(
         winning_company="TopCorp",
         amount_uyu=Decimal("100000.00"),
         organism="OSE",
+        date=date(CURRENT_YEAR, 3, 1),
     )
     make_adjudication(
         winning_company="SmallCo",
         amount_uyu=Decimal("500.00"),
         organism="Ministerio de Interior",
+        date=date(CURRENT_YEAR, 3, 2),
     )
 
     response = client.get("/adjudications?organism=OSE")
@@ -350,16 +406,19 @@ def test_organism_ranking_chart_aggregates_by_organism(
         organism="OSE",
         amount_uyu=Decimal("100.00"),
         winning_company="A",
+        date=date(CURRENT_YEAR, 3, 1),
     )
     make_adjudication(
         organism="OSE",
         amount_uyu=Decimal("200.00"),
         winning_company="A",
+        date=date(CURRENT_YEAR, 3, 2),
     )
     make_adjudication(
         organism="Ministerio de Interior",
         amount_uyu=Decimal("50.00"),
         winning_company="B",
+        date=date(CURRENT_YEAR, 3, 3),
     )
 
     response = client.get("/adjudications")
@@ -381,10 +440,12 @@ def test_ranking_excludes_null_amount_uyu_rows(
     make_adjudication(
         winning_company="ConvertibleCo",
         amount_uyu=Decimal("100.00"),
+        date=date(CURRENT_YEAR, 3, 1),
     )
     make_adjudication(
         winning_company="NonConvertibleCo",
         amount_uyu=None,
+        date=date(CURRENT_YEAR, 3, 2),
     )
 
     response = client.get("/adjudications")
@@ -470,8 +531,141 @@ def test_index_includes_chartjs(client: TestClient) -> None:
 def test_index_renders_datalist_for_organism_suggestions(
     client: TestClient, make_adjudication
 ) -> None:
-    make_adjudication(organism="DLIST2-MIN-INDUSTRIA")
+    make_adjudication(organism="DLIST2-MIN-INDUSTRIA", date=date(CURRENT_YEAR, 3, 1))
     response = client.get("/")
     assert response.status_code == 200
     assert 'id="organism-suggestions"' in response.text
     assert "DLIST2-MIN-INDUSTRIA" in response.text
+
+
+# ---------------------------------------------------------------------------
+# Default year filter — cold-load injection, validation, Limpiar reset
+# ---------------------------------------------------------------------------
+
+
+def test_default_year_injection_on_cold_load(
+    client: TestClient, make_adjudication
+) -> None:
+    """Cold GET / renders form inputs at current-year bounds and returns
+    only current-year rows (no other-year data leaks through)."""
+
+    make_adjudication(
+        winning_company="COLD-OLD", date=date(PREV_YEAR, 6, 1)
+    )
+    make_adjudication(
+        winning_company="COLD-NEW-A", date=date(CURRENT_YEAR, 1, 15)
+    )
+    make_adjudication(
+        winning_company="COLD-NEW-B", date=date(CURRENT_YEAR, 8, 20)
+    )
+
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+
+    # Form inputs reflect the injected current-year bounds.
+    assert (
+        f'value="{CURRENT_YEAR}-01-01"' in body
+    ), f"Expected date_from input bound to {CURRENT_YEAR}-01-01"
+    assert (
+        f'value="{CURRENT_YEAR}-12-31"' in body
+    ), f"Expected date_to input bound to {CURRENT_YEAR}-12-31"
+
+    # Results panel: current-year rows visible, older year filtered out.
+    assert "COLD-NEW-A" in body
+    assert "COLD-NEW-B" in body
+    assert "COLD-OLD" not in body
+
+
+def test_date_from_after_date_to_returns_422(client: TestClient) -> None:
+    """Reversed date range returns 422 with a Spanish error fragment."""
+
+    response = client.get("/adjudications?date_from=2025-12-01&date_to=2025-01-01")
+
+    assert response.status_code == 422
+    body = response.text
+    # The inline error fragment is an alert role with a Spanish message.
+    assert 'role="alert"' in body
+    assert "Desde" in body
+    assert "Hasta" in body
+
+
+def test_invalid_date_format_returns_422(client: TestClient) -> None:
+    """Garbage date strings return 422 with a Spanish error fragment."""
+
+    response = client.get("/adjudications?date_from=not-a-date")
+
+    assert response.status_code == 422
+    body = response.text
+    assert 'role="alert"' in body
+    # Spanish hint about ISO format.
+    assert "AAAA-MM-DD" in body
+
+
+def test_limpiar_resets_to_current_year(client: TestClient) -> None:
+    """The Limpiar control is a button that wires a JS reset to current
+    year (NOT an <a href="/"> that would navigate)."""
+
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+
+    # The old <a href="/">Limpiar</a> is gone.
+    assert ">Limpiar</a>" not in body
+    # The new <button onclick="limpiarFiltros()">Limpiar</button> is present.
+    assert 'onclick="limpiarFiltros()"' in body
+    assert ">Limpiar</button>" in body
+    # The reset function is wired onto window so the inline onclick can
+    # call it. The implementation assigns an anonymous function expression.
+    assert "window.limpiarFiltros" in body
+    assert "htmx.trigger" in body
+    # JS computes the current-year bounds at runtime, not hardcoded.
+    assert "getFullYear" in body
+
+
+# ---------------------------------------------------------------------------
+# Direct coverage of the pure ``validate_date_params`` helper
+# ---------------------------------------------------------------------------
+
+
+def test_validate_date_params_accepts_missing_keys() -> None:
+    from app.services.adjudication_service import validate_date_params
+
+    # Empty / absent params are the route's default-injection concern,
+    # not a validation error.
+    validate_date_params({})
+    validate_date_params({"date_from": "", "date_to": None})
+
+
+def test_validate_date_params_accepts_valid_iso() -> None:
+    from app.services.adjudication_service import validate_date_params
+
+    validate_date_params(
+        {"date_from": "2024-01-15", "date_to": "2024-12-31"}
+    )
+
+
+def test_validate_date_params_rejects_garbage_string() -> None:
+    import pytest
+
+    from app.services.adjudication_service import (
+        DateValidationError,
+        validate_date_params,
+    )
+
+    with pytest.raises(DateValidationError, match="AAAA-MM-DD"):
+        validate_date_params({"date_from": "not-a-date"})
+
+
+def test_validate_date_params_rejects_reversed_range() -> None:
+    import pytest
+
+    from app.services.adjudication_service import (
+        DateValidationError,
+        validate_date_params,
+    )
+
+    with pytest.raises(DateValidationError, match="Desde"):
+        validate_date_params(
+            {"date_from": "2025-12-01", "date_to": "2025-01-01"}
+        )

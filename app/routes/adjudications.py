@@ -22,19 +22,21 @@ import logging
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, Response
 
 from app.database import get_db
 from app.services.adjudication_service import (
+    DateValidationError,
     count_adjudications,
     distinct_organisms,
     filters_from_query_params,
     list_adjudications,
     ranking_by_company,
     ranking_by_organism,
+    validate_date_params,
 )
 
 if TYPE_CHECKING:
@@ -60,6 +62,39 @@ PARTIALS_DIR = TEMPLATES_DIR / "partials"
 PAGE_SIZE = 50
 RANKING_LIMIT = 10
 ORGANISM_SUGGEST_LIMIT = 200
+
+# Inline error fragment for 422 responses. Kept as a constant so both
+# routes share the exact same markup; the message is injected as plain
+# text (the validator already produces Spanish strings).
+_ERROR_FRAGMENT_TEMPLATE = (
+    '<div class="bg-red-50 border border-red-300 rounded-lg p-4" role="alert">'
+    '<p class="text-red-800 text-sm">{message}</p>'
+    '</div>'
+)
+
+
+def _inject_default_year_params(params: dict[str, str | None]) -> None:
+    """Default the date range to the current calendar year when absent.
+
+    Mutates ``params`` in place. Only fires when BOTH ``date_from`` and
+    ``date_to`` are missing or empty — a single explicit param is left
+    alone (see the spec, "Only one date param provided — no default
+    injection" scenario).
+    """
+
+    if not params.get("date_from") and not params.get("date_to"):
+        today = date.today()
+        params["date_from"] = f"{today.year}-01-01"
+        params["date_to"] = f"{today.year}-12-31"
+
+
+def _validation_error_response(message: str) -> HTMLResponse:
+    """Build a 422 response with the inline error fragment."""
+
+    return HTMLResponse(
+        _ERROR_FRAGMENT_TEMPLATE.format(message=message),
+        status_code=422,
+    )
 
 
 # JSON encoder for Decimal — Chart.js expects plain numbers, not
@@ -177,7 +212,13 @@ def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     negligible at the data volumes the scraper produces.
     """
 
-    filters = filters_from_query_params(dict(request.query_params))
+    params = cast("dict[str, str | None]", dict(request.query_params))
+    _inject_default_year_params(params)
+    try:
+        validate_date_params(params)
+    except DateValidationError as exc:
+        return _validation_error_response(exc.message)
+    filters = filters_from_query_params(params)
 
     results = list_adjudications(db, filters, limit=PAGE_SIZE, offset=0)
     total = count_adjudications(db, filters)
@@ -218,7 +259,13 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
     """
 
     is_htmx = request.headers.get("HX-Request") == "true"
-    filters = filters_from_query_params(dict(request.query_params))
+    params = cast("dict[str, str | None]", dict(request.query_params))
+    _inject_default_year_params(params)
+    try:
+        validate_date_params(params)
+    except DateValidationError as exc:
+        return _validation_error_response(exc.message)
+    filters = filters_from_query_params(params)
 
     results = list_adjudications(db, filters, limit=PAGE_SIZE, offset=0)
     total = count_adjudications(db, filters)
