@@ -95,8 +95,16 @@ def _bulk_insert(session: Session, records: list[NormalizedRecord]) -> int:
     stmt = stmt.on_conflict_do_nothing(
         index_elements=["source_url", "license_link", "date"],
     )
-    session.execute(stmt)
-    session.commit()
+    try:
+        session.execute(stmt)
+        session.commit()
+    except Exception as exc:
+        session.rollback()
+        # SQLAlchemy dumps the full SQL + all parameters on failure —
+        # useless with 1000+ rows. Log only the cause.
+        orig = exc.orig if hasattr(exc, "orig") else exc
+        logger.error("DB insert failed (%d rows): %s", len(rows), orig)
+        return 0
     return len(rows)
 
 
