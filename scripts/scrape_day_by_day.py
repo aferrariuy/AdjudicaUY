@@ -36,7 +36,7 @@ from scraper.rss_feed import (
     fetch_rss_feed,
     parse_rss_feed,
 )
-from scraper.xml_report import fetch_xml_report, parse_xml_report
+from scraper.xml_report import XmlAdjudication, fetch_xml_report, parse_xml_report
 
 logging.basicConfig(
     level=logging.INFO,
@@ -180,31 +180,67 @@ def main() -> None:
             t_xml = t_rss = t_parse = t_join = 0.0
             t_fallback = t_normalize = t_insert = 0.0
 
-            # Fetch both sources for the same day
-            t0 = time.perf_counter()
-            try:
-                xml_text = fetch_xml_report(url_a, client=client)
-            except httpx.HTTPError as exc:
-                log.warning("XML failed: %s — skipping", exc)
-                current += timedelta(days=1)
-                time.sleep(1.0)
-                continue
-            t_xml = time.perf_counter() - t0
+            # Fetch both sources for the same day, in parallel. The two
+            # endpoints are independent — XML (Source A) and RSS (Source B)
+            # hit different servers — so a 2-worker thread pool cuts
+            # wall-clock time from t_xml + t_rss to max(t_xml, t_rss).
+            # Partial failures don't abort the day: the surviving source is
+            # still parsed so downstream phases (joiner, fallback, normalize)
+            # can use whatever data is available.
+            xml_text: str | None = None
+            rss_text: str | None = None
+            t_xml = 0.0
+            t_rss = 0.0
 
-            t0 = time.perf_counter()
-            try:
-                rss_text = fetch_rss_feed(url_b, client=client)
-            except httpx.HTTPError as exc:
-                log.warning("RSS failed: %s — skipping", exc)
-                current += timedelta(days=1)
-                time.sleep(1.0)
-                continue
-            t_rss = time.perf_counter() - t0
+            def _fetch_xml(url: str) -> str:
+                return fetch_xml_report(url, client=client)
 
-            # Parse
+            def _fetch_rss(url: str) -> str:
+                return fetch_rss_feed(url, client=client)
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                t0_xml = time.perf_counter()
+                t0_rss = time.perf_counter()
+                futures = {
+                    executor.submit(_fetch_xml, url_a): "xml",
+                    executor.submit(_fetch_rss, url_b): "rss",
+                }
+                for future in as_completed(futures):
+                    source = futures[future]
+                    try:
+                        result = future.result()
+                        if source == "xml":
+                            xml_text = result
+                        else:
+                            rss_text = result
+                    except httpx.HTTPError as exc:
+                        log.warning("%s fetch failed: %s", source.upper(), exc)
+                    if source == "xml":
+                        t_xml = time.perf_counter() - t0_xml
+                    else:
+                        t_rss = time.perf_counter() - t0_rss
+
+            # If both fetches failed, skip this day
+            if xml_text is None and rss_text is None:
+                log.warning("Both XML and RSS failed for %s — skipping", current)
+                current += timedelta(days=1)
+                time.sleep(0.1)  # brief back-off; Commit 6 will replace
+                continue
+
+            # Parse — fall back to empty lists when one source failed so the
+            # downstream pipeline still runs and can use whatever data is
+            # available.
             t0 = time.perf_counter()
-            xml_records = list(parse_xml_report(xml_text))
-            rss_items = list(parse_rss_feed(rss_text))
+            if xml_text is None:
+                log.warning("%s: XML failed — processing with 0 XML records", current)
+                xml_records: list[XmlAdjudication] = []
+            else:
+                xml_records = list(parse_xml_report(xml_text))
+            if rss_text is None:
+                log.warning("%s: RSS failed — processing with 0 RSS items", current)
+                rss_items: list[RssItem] = []
+            else:
+                rss_items = list(parse_rss_feed(rss_text))
             t_parse = time.perf_counter() - t0
 
             if not xml_records:
