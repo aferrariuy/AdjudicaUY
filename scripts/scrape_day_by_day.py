@@ -127,6 +127,18 @@ def main() -> None:
         help="Per-request HTTP timeout in seconds (default: 30.0)",
     )
     parser.add_argument(
+        "--pool-size",
+        type=int,
+        default=20,
+        help="Max connections in pool (default: 20)",
+    )
+    parser.add_argument(
+        "--pool-keepalive",
+        type=int,
+        default=10,
+        help="Max keepalive connections (default: 10)",
+    )
+    parser.add_argument(
         "--fallback-workers",
         type=int,
         default=5,
@@ -182,6 +194,8 @@ def main() -> None:
     # Shared httpx.Client — connection pooling + keep-alive for all fetches.
     # Conservative pool (20 max / 10 keepalive) to be polite to the
     # government server; thread-safe for the parallel phases that follow.
+    # Pool limits are exposed via --pool-size / --pool-keepalive so the
+    # operator can tune them without editing the script.
     client = httpx.Client(
         timeout=args.client_timeout,
         headers={
@@ -191,8 +205,8 @@ def main() -> None:
             ),
         },
         limits=httpx.Limits(
-            max_connections=20,
-            max_keepalive_connections=10,
+            max_connections=args.pool_size,
+            max_keepalive_connections=args.pool_keepalive,
             keepalive_expiry=30,
         ),
     )
