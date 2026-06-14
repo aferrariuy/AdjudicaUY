@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
@@ -125,6 +126,16 @@ def main() -> None:
         default=30.0,
         help="Per-request HTTP timeout in seconds (default: 30.0)",
     )
+    parser.add_argument(
+        "--fallback-workers",
+        type=int,
+        default=5,
+        help=(
+            "Max concurrent per-compra RSS fetches in the fallback phase "
+            "(default: 5). Conservative default to avoid rate-limiting "
+            "the government server."
+        ),
+    )
     args = parser.parse_args()
 
     t_overall_start = time.perf_counter()
@@ -215,6 +226,11 @@ def main() -> None:
             # every row wastes the connection: the same URL returns the
             # same body. Collect unique keys first, fetch each URL once,
             # then map the result back to every record in the group.
+            #
+            # Fetches run in parallel with a capped ThreadPoolExecutor:
+            # the shared httpx.Client is thread-safe, so 5 concurrent
+            # workers reuse pooled TCP connections instead of paying
+            # per-fetch handshake cost.
             t0 = time.perf_counter()
             matched_ids = {r.id_compra for r in joined}
             unmatched = [r for r in xml_records if r.id_compra not in matched_ids]
@@ -231,21 +247,46 @@ def main() -> None:
                 key = (xml_record.num_compra, xml_record.anio_compra)
                 unique_compras.setdefault(key, []).append(xml_record)
 
-            url_cache: dict[tuple[str, str], RssItem | None] = {}
-            for num, anio in unique_compras:
+            def _fetch_per_compra(
+                num_anio: tuple[str, str],
+            ) -> tuple[tuple[str, str], RssItem | None]:
+                num, anio = num_anio
                 per_compra_url = build_per_compra_rss_url(RSS_BASE_URL, num, anio)
-                rss_match = fetch_and_parse_per_compra_rss(
+                return (num, anio), fetch_and_parse_per_compra_rss(
                     per_compra_url, client=client
                 )
-                url_cache[(num, anio)] = rss_match
-                if rss_match is None:
-                    log.warning(
-                        "Per-compra RSS failed for num=%s, anio=%s "
-                        "— skipping %d records",
-                        num,
-                        anio,
-                        len(unique_compras[(num, anio)]),
-                    )
+
+            url_cache: dict[tuple[str, str], RssItem | None] = {}
+            if unique_compras:
+                with ThreadPoolExecutor(
+                    max_workers=max(1, args.fallback_workers)
+                ) as executor:
+                    futures = {
+                        executor.submit(_fetch_per_compra, key): key
+                        for key in unique_compras
+                    }
+                    for future in as_completed(futures):
+                        key = futures[future]
+                        try:
+                            _key, rss_match = future.result()
+                        except Exception as exc:
+                            log.warning(
+                                "Per-compra RSS error for num=%s, anio=%s: %s",
+                                key[0],
+                                key[1],
+                                exc,
+                            )
+                            url_cache[key] = None
+                            continue
+                        url_cache[_key] = rss_match
+                        if rss_match is None:
+                            log.warning(
+                                "Per-compra RSS failed for num=%s, anio=%s "
+                                "— skipping %d records",
+                                _key[0],
+                                _key[1],
+                                len(unique_compras[_key]),
+                            )
 
             for (num, anio), xml_records_group in unique_compras.items():
                 rss_match = url_cache.get((num, anio))
