@@ -118,6 +118,12 @@ def main() -> None:
     )
     parser.add_argument("--start", default="2026-04-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default="2026-06-12", help="End date (YYYY-MM-DD)")
+    parser.add_argument(
+        "--client-timeout",
+        type=float,
+        default=30.0,
+        help="Per-request HTTP timeout in seconds (default: 30.0)",
+    )
     args = parser.parse_args()
 
     t_overall_start = time.perf_counter()
@@ -128,7 +134,24 @@ def main() -> None:
 
     settings = get_settings()
     session = get_session_factory()()
-    bcu_client = BcuClient(settings.bcu_api_url)
+    # Shared httpx.Client — connection pooling + keep-alive for all fetches.
+    # Conservative pool (20 max / 10 keepalive) to be polite to the
+    # government server; thread-safe for the parallel phases that follow.
+    client = httpx.Client(
+        timeout=args.client_timeout,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+        },
+        limits=httpx.Limits(
+            max_connections=20,
+            max_keepalive_connections=10,
+            keepalive_expiry=30,
+        ),
+    )
+    bcu_client = BcuClient(settings.bcu_api_url, timeout=args.client_timeout, client=client)
     total = 0
     days_with_data = 0
 
@@ -146,7 +169,7 @@ def main() -> None:
             # Fetch both sources for the same day
             t0 = time.perf_counter()
             try:
-                xml_text = fetch_xml_report(url_a)
+                xml_text = fetch_xml_report(url_a, client=client)
             except httpx.HTTPError as exc:
                 log.warning("XML failed: %s — skipping", exc)
                 current += timedelta(days=1)
@@ -156,7 +179,7 @@ def main() -> None:
 
             t0 = time.perf_counter()
             try:
-                rss_text = fetch_rss_feed(url_b)
+                rss_text = fetch_rss_feed(url_b, client=client)
             except httpx.HTTPError as exc:
                 log.warning("RSS failed: %s — skipping", exc)
                 current += timedelta(days=1)
@@ -197,7 +220,7 @@ def main() -> None:
                 per_compra_url = build_per_compra_rss_url(
                     RSS_BASE_URL, xml_record.num_compra, xml_record.anio_compra
                 )
-                rss_match = fetch_and_parse_per_compra_rss(per_compra_url)
+                rss_match = fetch_and_parse_per_compra_rss(per_compra_url, client=client)
                 if rss_match is None:
                     log.warning(
                         "Per-compra RSS failed for id_compra=%s "
@@ -309,6 +332,7 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     finally:
+        client.close()
         bcu_client.close()
         session.close()
 
