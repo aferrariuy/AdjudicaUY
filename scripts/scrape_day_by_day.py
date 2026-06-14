@@ -150,6 +150,25 @@ def main() -> None:
         action="store_true",
         help="Skip all inter-day sleeps (useful for benchmarks).",
     )
+    parser.add_argument(
+        "--flush-interval",
+        type=int,
+        default=7,
+        help=(
+            "Flush the insert buffer every N days (default: 7). Whichever "
+            "threshold (days or records) is reached first triggers the flush."
+        ),
+    )
+    parser.add_argument(
+        "--flush-size",
+        type=int,
+        default=1000,
+        help=(
+            "Flush the insert buffer every N records (default: 1000). "
+            "Whichever threshold (days or records) is reached first "
+            "triggers the flush."
+        ),
+    )
     args = parser.parse_args()
 
     t_overall_start = time.perf_counter()
@@ -182,6 +201,13 @@ def main() -> None:
     )
     total = 0
     days_with_data = 0
+    # Batch insert buffer: instead of committing after every day, accumulate
+    # normalized records and flush when either the day count or record count
+    # threshold is reached. This shrinks commit overhead from O(days) to
+    # O(days/flush-interval); the 7-day / 1000-record defaults cap crash
+    # data loss at ~700 records. on_conflict_do_nothing makes re-runs safe.
+    buffer: list[NormalizedRecord] = []
+    days_since_flush = 0
 
     # Adaptive sleep replaces the fixed time.sleep() calls between days.
     # The base delay is the floor; on consecutive HTTP errors the delay
@@ -446,7 +472,10 @@ def main() -> None:
 
             days_with_data += 1
 
-            # Insert or dry-run
+            # Insert or dry-run. Records accumulate in a buffer that flushes
+            # when either the day or record threshold is hit; this shrinks
+            # commit overhead from O(days) to O(days/flush-interval).
+            # Dry-run skips the buffer entirely — we just count records.
             t0 = time.perf_counter()
             if args.dry_run:
                 log.info(
@@ -458,15 +487,31 @@ def main() -> None:
                 )
                 total += len(normalized)
             else:
-                inserted = _bulk_insert(session, normalized)
+                buffer.extend(normalized)
+                days_since_flush += 1
                 log.info(
-                    "%s: %d XML → %d joined → %d inserted",
+                    "%s: %d XML → %d joined → %d normalized "
+                    "(buffered=%d, days_since_flush=%d)",
                     current,
                     len(xml_records),
                     len(joined),
-                    inserted,
+                    len(normalized),
+                    len(buffer),
+                    days_since_flush,
                 )
-                total += inserted
+                if (
+                    len(buffer) >= args.flush_size
+                    or days_since_flush >= args.flush_interval
+                ):
+                    inserted = _bulk_insert(session, buffer)
+                    log.info(
+                        "Flushed %d records (total=%d)",
+                        inserted,
+                        total + inserted,
+                    )
+                    total += inserted
+                    buffer.clear()
+                    days_since_flush = 0
             t_insert = time.perf_counter() - t0
 
             t_day = time.perf_counter() - t_day_start
@@ -493,6 +538,15 @@ def main() -> None:
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     finally:
+        # Final flush: anything left in the buffer must be committed so a
+        # graceful exit (or a crash right after) doesn't lose data. The
+        # on_conflict_do_nothing on _bulk_insert keeps a re-run idempotent
+        # in case the process was killed between commit and process exit.
+        if buffer and not args.dry_run:
+            inserted = _bulk_insert(session, buffer)
+            total += inserted
+            logger.info("Final flush: %d records (%d total)", inserted, total)
+            buffer.clear()
         client.close()
         bcu_client.close()
         session.close()
