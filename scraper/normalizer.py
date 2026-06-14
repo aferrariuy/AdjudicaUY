@@ -255,7 +255,7 @@ def normalize_record(
         license_link=record.license_link,
         date=record.fecha_pub_adj,
         organism=record.organism,
-        amount=amount,
+        amount=_quantize_uyu(amount),
         currency=currency,
         amount_uyu=amount_uyu,
         winning_company=record.nombre_comercial,
@@ -263,7 +263,7 @@ def normalize_record(
         company_document_type=record.tipo_doc_prov,
         license_type=record.id_tipocompra,
         article=record.desc_articulo,
-        article_quantity=record.cant_adj,
+        article_quantity=_quantize_uyu(record.cant_adj) if record.cant_adj is not None else None,
         article_id=record.id_articulo,
     )
 
