@@ -50,7 +50,7 @@ def build_source_a_url(d: date) -> str:
         "http://www.comprasestatales.gub.uy/comprasenlinea/jboss/generarReporte"
         f"?tipo_publicacion=a"
         f"&dia_inicial={d.day}&mes_inicial={d.month}&anio_inicial={d.year}&hora_inicial=0"
-        f"&dia_final={d.day}&mes_final={d.month}&anio_final={d.year}&hora_final=1"
+        f"&dia_final={d.day}&mes_final={d.month}&anio_final={d.year}&hora_final=23"
     )
 
 
