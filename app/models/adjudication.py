@@ -34,7 +34,7 @@ class Adjudication(Base):
     amount_uyu = Column(Numeric(12, 2), nullable=True)
 
     winning_company = Column(String(255), nullable=False)
-    company_document = Column(String(20), nullable=True)
+    company_document = Column(String(50), nullable=True)
     company_document_type = Column(String(10), nullable=True)
     organism = Column(String(255), nullable=False)
 
