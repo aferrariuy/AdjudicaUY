@@ -120,6 +120,8 @@ def main() -> None:
     parser.add_argument("--end", default="2026-06-12", help="End date (YYYY-MM-DD)")
     args = parser.parse_args()
 
+    t_overall_start = time.perf_counter()
+
     start = date.fromisoformat(args.start)
     end = date.fromisoformat(args.end)
     logger.info("Range: %s to %s (%d days)", start, end, (end - start).days + 1)
@@ -137,7 +139,12 @@ def main() -> None:
             url_a = build_source_a_url(current)
             url_b = build_source_b_url(current)
 
+            t_day_start = time.perf_counter()
+            t_xml = t_rss = t_parse = t_join = 0.0
+            t_fallback = t_normalize = t_insert = 0.0
+
             # Fetch both sources for the same day
+            t0 = time.perf_counter()
             try:
                 xml_text = fetch_xml_report(url_a)
             except httpx.HTTPError as exc:
@@ -145,7 +152,9 @@ def main() -> None:
                 current += timedelta(days=1)
                 time.sleep(1.0)
                 continue
+            t_xml = time.perf_counter() - t0
 
+            t0 = time.perf_counter()
             try:
                 rss_text = fetch_rss_feed(url_b)
             except httpx.HTTPError as exc:
@@ -153,10 +162,13 @@ def main() -> None:
                 current += timedelta(days=1)
                 time.sleep(1.0)
                 continue
+            t_rss = time.perf_counter() - t0
 
             # Parse
+            t0 = time.perf_counter()
             xml_records = list(parse_xml_report(xml_text))
             rss_items = list(parse_rss_feed(rss_text))
+            t_parse = time.perf_counter() - t0
 
             if not xml_records:
                 current += timedelta(days=1)
@@ -164,9 +176,12 @@ def main() -> None:
                 continue
 
             # Join
+            t0 = time.perf_counter()
             joined = join_records(xml_records, rss_items, source_url=url_a)
+            t_join = time.perf_counter() - t0
 
             # Fallback: per-compra RSS for unmatched XML records
+            t0 = time.perf_counter()
             matched_ids = {r.id_compra for r in joined}
             for xml_record in xml_records:
                 if xml_record.id_compra in matched_ids:
@@ -218,6 +233,7 @@ def main() -> None:
                     "Fallback resolved id_compra=%s via per-compra RSS",
                     xml_record.id_compra,
                 )
+            t_fallback = time.perf_counter() - t0
 
             if not joined:
                 log.info(
@@ -231,6 +247,7 @@ def main() -> None:
                 continue
 
             # Normalize
+            t0 = time.perf_counter()
             normalized: list[NormalizedRecord] = []
             for record in joined:
                 try:
@@ -239,6 +256,7 @@ def main() -> None:
                     log.warning(
                         "Normalize failed id_compra=%s: %s", record.id_compra, exc
                     )
+            t_normalize = time.perf_counter() - t0
 
             if not normalized:
                 current += timedelta(days=1)
@@ -248,6 +266,7 @@ def main() -> None:
             days_with_data += 1
 
             # Insert or dry-run
+            t0 = time.perf_counter()
             if args.dry_run:
                 log.info(
                     "[DRY RUN] %s: %d XML → %d joined → %d normalized",
@@ -267,6 +286,22 @@ def main() -> None:
                     inserted,
                 )
                 total += inserted
+            t_insert = time.perf_counter() - t0
+
+            t_day = time.perf_counter() - t_day_start
+            log.info(
+                "TIMING %s: day=%.2fs xml=%.2fs rss=%.2fs parse=%.2fs "
+                "join=%.2fs fallback=%.2fs normalize=%.2fs insert=%.2fs",
+                current,
+                t_day,
+                t_xml,
+                t_rss,
+                t_parse,
+                t_join,
+                t_fallback,
+                t_normalize,
+                t_insert,
+            )
 
             current += timedelta(days=1)
             time.sleep(1.0)
@@ -280,6 +315,10 @@ def main() -> None:
     logger.info(
         "═══ DONE: %d records from %d days with data ═══", total, days_with_data
     )
+    logger.info("═══ TIMING SUMMARY ═══")
+    logger.info("Total wall time: %.2fs", time.perf_counter() - t_overall_start)
+    logger.info("Days with data: %d", days_with_data)
+    logger.info("Total records: %d", total)
 
 
 if __name__ == "__main__":
