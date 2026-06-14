@@ -184,6 +184,17 @@
           });
         });
       }
+
+      // HTMX 1.9 aborts swaps on 4xx/5xx by default. We use HTTP 422
+      // to signal validation errors (e.g. reversed date range) and
+      // want the response body — an inline HTML fragment — to land in
+      // #results so the user sees the message in place. Allow 422
+      // through; the 5xx case is handled at the network layer.
+      document.body.addEventListener('htmx:beforeSwap', function (evt) {
+        if (evt.detail && evt.detail.xhr && evt.detail.xhr.status === 422) {
+          evt.detail.shouldSwap = true;
+        }
+      });
     })();
   </script>
 </body>

@@ -77,6 +77,60 @@ def _normalize(text: str | None) -> str | None:
     return stripped or None
 
 
+class DateValidationError(ValueError):
+    """Raised when ``date_from`` or ``date_to`` are present but invalid.
+
+    The route layer catches this and returns HTTP 422 with an HTML
+    fragment suitable for HTMX swap. We use ``ValueError`` as the base
+    so callers that broadly handle ``ValueError`` continue to work.
+    """
+
+    def __init__(self, message: str) -> None:
+        self.message = message
+        super().__init__(message)
+
+
+def validate_date_params(params: dict[str, str | None]) -> None:
+    """Validate raw ``date_from``/``date_to`` query parameters.
+
+    Raises :class:`DateValidationError` when either value is present but
+    not a valid ISO 8601 ``YYYY-MM-DD`` date, or when both are present
+    and ``date_from > date_to``.
+
+    Silent on missing/empty params — that is the route layer's
+    default-injection job (see ``app.routes.adjudications``). Validating
+    raw strings (instead of the parsed ``AdjudicationFilters``) lets us
+    distinguish "user typed garbage" from "user typed nothing", which the
+    parsed form collapses into ``None``.
+    """
+
+    # 1. Reject unparseable date strings.
+    for key in ("date_from", "date_to"):
+        raw = params.get(key)
+        if raw is None:
+            continue
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        try:
+            date.fromisoformat(stripped)
+        except ValueError as exc:
+            raise DateValidationError(
+                "Formato de fecha inválido. Use AAAA-MM-DD."
+            ) from exc
+
+    # 2. Reject reversed range.
+    dfrom_raw = params.get("date_from")
+    dto_raw = params.get("date_to")
+    if dfrom_raw and dfrom_raw.strip() and dto_raw and dto_raw.strip():
+        dfrom = date.fromisoformat(dfrom_raw.strip())
+        dto = date.fromisoformat(dto_raw.strip())
+        if dfrom > dto:
+            raise DateValidationError(
+                "La fecha 'Desde' no puede ser posterior a la fecha 'Hasta'."
+            )
+
+
 def filters_from_query_params(params: dict[str, str | None]) -> AdjudicationFilters:
     """Build an :class:`AdjudicationFilters` from raw query parameters.
 
@@ -323,10 +377,12 @@ def distinct_organisms(
 
 __all__ = [
     "AdjudicationFilters",
+    "DateValidationError",
     "count_adjudications",
     "distinct_organisms",
     "filters_from_query_params",
     "list_adjudications",
     "ranking_by_company",
     "ranking_by_organism",
+    "validate_date_params",
 ]
