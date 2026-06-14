@@ -207,8 +207,13 @@ def test_scrape_store_query_serve_round_trip(
         transport = _make_bcu_transport()
 
         def _patched_bcu_client(base_url, **kwargs):
-            http_client = httpx.Client(transport=transport, timeout=10.0)
-            return original_bcu_client(base_url, client=http_client, **kwargs)
+            # The production scraper now shares its ``httpx.Client`` with
+            # the BCU client for connection pooling. Always force the BCU
+            # SOAP calls through the mock transport so the test does not
+            # reach the real BCU server, regardless of the caller's
+            # calling convention.
+            kwargs["client"] = httpx.Client(transport=transport, timeout=10.0)
+            return original_bcu_client(base_url, **kwargs)
 
         monkeypatch.setattr(bcu_module, "BcuClient", _patched_bcu_client)
         monkeypatch.setattr(scraper_main, "BcuClient", _patched_bcu_client)
