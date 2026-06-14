@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ``/id/{numeric-id}`` or ``/id/i{numeric-id}`` somewhere in the link path.
-_ID_IN_LINK_RE = re.compile(r"/id/i?(\d+)(?:/|$)")
+_ID_IN_LINK_RE = re.compile(r"/id/(i?\d+)(?:/|$)")
 
 
 @dataclass(frozen=True)
