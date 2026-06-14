@@ -13,7 +13,7 @@ from __future__ import annotations
 import argparse
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
@@ -380,14 +380,23 @@ def main() -> None:
                 with ThreadPoolExecutor(
                     max_workers=max(1, args.fallback_workers)
                 ) as executor:
-                    futures = {
-                        executor.submit(_fetch_per_compra, key): key
-                        for key in unique_compras
-                    }
-                    for future in as_completed(futures):
-                        key = futures[future]
+                    # Explicit loop with annotated dict — a dict comprehension
+                    # here makes mypy fall back to the Callable's first
+                    # parameter type, which it then misinfers as `str` and
+                    # cascades into ~10 false positives. The annotation
+                    # pins the value type to the helper's real return.
+                    per_compra_futures: dict[
+                        Future[tuple[tuple[str, str], RssItem | None]],
+                        tuple[str, str],
+                    ] = {}
+                    for key in unique_compras:
+                        per_compra_futures[executor.submit(_fetch_per_compra, key)] = (
+                            key
+                        )
+                    for per_compra_future in as_completed(per_compra_futures):
+                        key = per_compra_futures[per_compra_future]
                         try:
-                            _key, rss_match = future.result()
+                            _key, rss_match = per_compra_future.result()
                         except Exception as exc:
                             log.warning(
                                 "Per-compra RSS error for num=%s, anio=%s: %s",
