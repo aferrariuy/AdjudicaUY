@@ -136,6 +136,20 @@ def main() -> None:
             "the government server."
         ),
     )
+    parser.add_argument(
+        "--base-delay",
+        type=float,
+        default=0.1,
+        help=(
+            "Base delay between days in seconds (default: 0.1). The delay "
+            "doubles on each consecutive HTTP error, capped at 5.0s."
+        ),
+    )
+    parser.add_argument(
+        "--skip-sleep",
+        action="store_true",
+        help="Skip all inter-day sleeps (useful for benchmarks).",
+    )
     args = parser.parse_args()
 
     t_overall_start = time.perf_counter()
@@ -169,6 +183,39 @@ def main() -> None:
     total = 0
     days_with_data = 0
 
+    # Adaptive sleep replaces the fixed time.sleep() calls between days.
+    # The base delay is the floor; on consecutive HTTP errors the delay
+    # doubles exponentially (capped at 5s) so transient server issues
+    # self-throttle the scraper without losing throughput on the happy
+    # path. Counters are closure-local — no module-level state.
+    consecutive_errors = 0
+
+    def adaptive_sleep(log: logging.Logger) -> None:
+        """Sleep between days with exponential back-off on consecutive errors.
+
+        Delay is ``args.base_delay * 2^min(consecutive_errors, 5)``,
+        capped at 5.0s. No-op when ``--skip-sleep`` is set. The chosen
+        delay is logged at DEBUG level so benchmarks can verify the
+        back-off curve.
+        """
+        nonlocal consecutive_errors
+        if args.skip_sleep:
+            return
+        delay = args.base_delay * (2 ** min(consecutive_errors, 5))
+        delay = min(delay, 5.0)
+        time.sleep(delay)
+        log.debug("Sleep %.2fs (consecutive_errors=%d)", delay, consecutive_errors)
+
+    def record_error() -> None:
+        """Bump the consecutive-errors counter (called on HTTP errors)."""
+        nonlocal consecutive_errors
+        consecutive_errors += 1
+
+    def record_success() -> None:
+        """Reset the consecutive-errors counter (called on day success)."""
+        nonlocal consecutive_errors
+        consecutive_errors = 0
+
     try:
         current = start
         while current <= end:
@@ -179,6 +226,11 @@ def main() -> None:
             t_day_start = time.perf_counter()
             t_xml = t_rss = t_parse = t_join = 0.0
             t_fallback = t_normalize = t_insert = 0.0
+            # Per-day flag: any HTTP error from the main XML/RSS fetches
+            # bumps consecutive_errors exactly once at the day's end. Per-
+            # compra RSS failures (next phase) don't count — they are
+            # typically per-record issues, not server-health indicators.
+            day_had_error = False
 
             # Fetch both sources for the same day, in parallel. The two
             # endpoints are independent — XML (Source A) and RSS (Source B)
@@ -215,6 +267,7 @@ def main() -> None:
                             rss_text = result
                     except httpx.HTTPError as exc:
                         log.warning("%s fetch failed: %s", source.upper(), exc)
+                        day_had_error = True
                     if source == "xml":
                         t_xml = time.perf_counter() - t0_xml
                     else:
@@ -223,8 +276,10 @@ def main() -> None:
             # If both fetches failed, skip this day
             if xml_text is None and rss_text is None:
                 log.warning("Both XML and RSS failed for %s — skipping", current)
+                if day_had_error:
+                    record_error()
                 current += timedelta(days=1)
-                time.sleep(0.1)  # brief back-off; Commit 6 will replace
+                adaptive_sleep(log)
                 continue
 
             # Parse — fall back to empty lists when one source failed so the
@@ -244,8 +299,10 @@ def main() -> None:
             t_parse = time.perf_counter() - t0
 
             if not xml_records:
+                if day_had_error:
+                    record_error()
                 current += timedelta(days=1)
-                time.sleep(0.5)
+                adaptive_sleep(log)
                 continue
 
             # Join
@@ -363,8 +420,10 @@ def main() -> None:
                     len(xml_records),
                     len(rss_items),
                 )
+                # "No joined" isn't an HTTP error — the fetch succeeded,
+                # the data just didn't match. Don't bump consecutive_errors.
                 current += timedelta(days=1)
-                time.sleep(0.5)
+                adaptive_sleep(log)
                 continue
 
             # Normalize
@@ -380,8 +439,9 @@ def main() -> None:
             t_normalize = time.perf_counter() - t0
 
             if not normalized:
+                # Normalization failed on every record — not an HTTP error.
                 current += timedelta(days=1)
-                time.sleep(0.5)
+                adaptive_sleep(log)
                 continue
 
             days_with_data += 1
@@ -424,8 +484,11 @@ def main() -> None:
                 t_insert,
             )
 
+            # Day processed end-to-end — reset the back-off counter so the
+            # adaptive sleep below uses the base delay, not a stale back-off.
+            record_success()
             current += timedelta(days=1)
-            time.sleep(1.0)
+            adaptive_sleep(log)
 
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
