@@ -29,6 +29,7 @@ from scraper.bcu_client import BcuClient
 from scraper.joiner import JoinedRecord, join_records
 from scraper.normalizer import NormalizedRecord, normalize_record
 from scraper.rss_feed import (
+    RssItem,
     build_per_compra_rss_url,
     fetch_and_parse_per_compra_rss,
     fetch_rss_feed,
@@ -151,7 +152,9 @@ def main() -> None:
             keepalive_expiry=30,
         ),
     )
-    bcu_client = BcuClient(settings.bcu_api_url, timeout=args.client_timeout, client=client)
+    bcu_client = BcuClient(
+        settings.bcu_api_url, timeout=args.client_timeout, client=client
+    )
     total = 0
     days_with_data = 0
 
@@ -204,11 +207,20 @@ def main() -> None:
             t_join = time.perf_counter() - t0
 
             # Fallback: per-compra RSS for unmatched XML records
+            #
+            # Multiple XML records routinely share the same (num_compra,
+            # anio_compra) — e.g. a single compra with several article
+            # lines shows up as N rows in the XML report, and each one
+            # misses the daily RSS feed. Fetching the per-compra RSS for
+            # every row wastes the connection: the same URL returns the
+            # same body. Collect unique keys first, fetch each URL once,
+            # then map the result back to every record in the group.
             t0 = time.perf_counter()
             matched_ids = {r.id_compra for r in joined}
-            for xml_record in xml_records:
-                if xml_record.id_compra in matched_ids:
-                    continue
+            unmatched = [r for r in xml_records if r.id_compra not in matched_ids]
+
+            unique_compras: dict[tuple[str, str], list] = {}
+            for xml_record in unmatched:
                 if not xml_record.num_compra or not xml_record.anio_compra:
                     log.warning(
                         "XML id_compra=%s has no RSS match and no "
@@ -216,46 +228,55 @@ def main() -> None:
                         xml_record.id_compra,
                     )
                     continue
+                key = (xml_record.num_compra, xml_record.anio_compra)
+                unique_compras.setdefault(key, []).append(xml_record)
 
-                per_compra_url = build_per_compra_rss_url(
-                    RSS_BASE_URL, xml_record.num_compra, xml_record.anio_compra
+            url_cache: dict[tuple[str, str], RssItem | None] = {}
+            for num, anio in unique_compras:
+                per_compra_url = build_per_compra_rss_url(RSS_BASE_URL, num, anio)
+                rss_match = fetch_and_parse_per_compra_rss(
+                    per_compra_url, client=client
                 )
-                rss_match = fetch_and_parse_per_compra_rss(per_compra_url, client=client)
+                url_cache[(num, anio)] = rss_match
                 if rss_match is None:
                     log.warning(
-                        "Per-compra RSS failed for id_compra=%s "
-                        "(num=%s, anio=%s) — skipping",
-                        xml_record.id_compra,
-                        xml_record.num_compra,
-                        xml_record.anio_compra,
+                        "Per-compra RSS failed for num=%s, anio=%s "
+                        "— skipping %d records",
+                        num,
+                        anio,
+                        len(unique_compras[(num, anio)]),
                     )
-                    continue
 
-                joined.append(
-                    JoinedRecord(
-                        id_compra=xml_record.id_compra,
-                        fecha_pub_adj=xml_record.fecha_pub_adj,
-                        id_tipocompra=xml_record.id_tipocompra,
-                        id_moneda_monto_adj=xml_record.id_moneda_monto_adj,
-                        nombre_comercial=xml_record.nombre_comercial,
-                        nro_doc_prov=xml_record.nro_doc_prov,
-                        tipo_doc_prov=xml_record.tipo_doc_prov,
-                        cant_adj=xml_record.cant_adj,
-                        precio_tot_imp=xml_record.precio_tot_imp,
-                        desc_articulo=xml_record.desc_articulo,
-                        id_moneda=xml_record.id_moneda,
-                        organism=rss_match.organism,
-                        license_link=rss_match.license_link,
-                        source_url=url_a,
-                        id_articulo=xml_record.id_articulo,
-                        num_compra=xml_record.num_compra,
-                        anio_compra=xml_record.anio_compra,
+            for (num, anio), xml_records_group in unique_compras.items():
+                rss_match = url_cache.get((num, anio))
+                if rss_match is None:
+                    continue
+                for xml_record in xml_records_group:
+                    joined.append(
+                        JoinedRecord(
+                            id_compra=xml_record.id_compra,
+                            fecha_pub_adj=xml_record.fecha_pub_adj,
+                            id_tipocompra=xml_record.id_tipocompra,
+                            id_moneda_monto_adj=xml_record.id_moneda_monto_adj,
+                            nombre_comercial=xml_record.nombre_comercial,
+                            nro_doc_prov=xml_record.nro_doc_prov,
+                            tipo_doc_prov=xml_record.tipo_doc_prov,
+                            cant_adj=xml_record.cant_adj,
+                            precio_tot_imp=xml_record.precio_tot_imp,
+                            desc_articulo=xml_record.desc_articulo,
+                            id_moneda=xml_record.id_moneda,
+                            organism=rss_match.organism,
+                            license_link=rss_match.license_link,
+                            source_url=url_a,
+                            id_articulo=xml_record.id_articulo,
+                            num_compra=xml_record.num_compra,
+                            anio_compra=xml_record.anio_compra,
+                        )
                     )
-                )
-                log.info(
-                    "Fallback resolved id_compra=%s via per-compra RSS",
-                    xml_record.id_compra,
-                )
+                    log.info(
+                        "Fallback resolved id_compra=%s via per-compra RSS",
+                        xml_record.id_compra,
+                    )
             t_fallback = time.perf_counter() - t0
 
             if not joined:
