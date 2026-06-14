@@ -51,6 +51,18 @@ class Settings(BaseSettings):
             "/tipo-doc/C/tipo-fecha/PUB/rango-fecha"
         ),
     )
+    source_b_rss_base: str | None = Field(
+        default=None,
+        description=(
+            "Base URL of the per-compra RSS feed (source B), used as fallback "
+            "enrichment for XML records missing from the day-RSS. The per-compra "
+            "URL appends ``/tipo-pub/ADJ/nro-compra/<num_compra>/"
+            "anio-compra/<anio_compra>``. When ``None`` (the default), it is "
+            "derived from ``source_b_base_url`` by truncating at "
+            "``/consultas/rss``. "
+            "Example: https://www.comprasestatales.gub.uy/consultas/rss"
+        ),
+    )
 
     # External services
     bcu_api_url: str = Field(

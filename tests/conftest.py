@@ -219,6 +219,8 @@ def make_xml_record():
         "desc_articulo": "Laptop",
         "id_moneda": 20,
         "id_articulo": "42851",
+        "num_compra": "86825",
+        "anio_compra": "2024",
     }
 
     def _factory(**overrides: Any) -> XmlAdjudication:
@@ -267,6 +269,8 @@ def make_joined_record():
         "license_link": "https://example.test/consultas/detalle/id/1319278",
         "source_url": "https://example.test/xml",
         "id_articulo": "42851",
+        "num_compra": "86825",
+        "anio_compra": "2024",
     }
 
     def _factory(**overrides: Any) -> JoinedRecord:

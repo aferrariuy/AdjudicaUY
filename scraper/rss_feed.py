@@ -189,4 +189,61 @@ def parse_rss_feed(xml_text: str) -> Iterator[RssItem]:
             yield record
 
 
-__all__ = ["RssItem", "fetch_rss_feed", "parse_rss_feed"]
+def build_per_compra_rss_url(base_url: str, num_compra: str, anio_compra: str) -> str:
+    """Build a per-compra RSS URL using ``num_compra`` and ``anio_compra``.
+
+    Example::
+
+        >>> build_per_compra_rss_url(
+        ...     "https://www.comprasestatales.gub.uy/consultas/rss",
+        ...     "9412", "2026",
+        ... )
+        'https://www.comprasestatales.gub.uy/consultas/rss/tipo-pub/ADJ/nro-compra/9412/anio-compra/2026'
+    """
+
+    return (
+        f"{base_url}/tipo-pub/ADJ"
+        f"/nro-compra/{num_compra}"
+        f"/anio-compra/{anio_compra}"
+    )
+
+
+def fetch_and_parse_per_compra_rss(
+    url: str,
+    *,
+    client: httpx.Client | None = None,
+    timeout: float = 30.0,
+) -> RssItem | None:
+    """Fetch and parse a per-compra RSS feed, returning the first item.
+
+    Returns ``None`` when the feed is empty, malformed, or the HTTP request
+    fails. Logs a warning when the feed contains more than one item.
+    """
+
+    try:
+        rss_text = fetch_rss_feed(url, client=client, timeout=timeout)
+    except Exception as exc:
+        logger.warning("Per-compra RSS fetch failed for %s: %s", url, exc)
+        return None
+
+    items = list(parse_rss_feed(rss_text))
+
+    if not items:
+        logger.warning("Per-compra RSS returned no items for %s", url)
+        return None
+
+    if len(items) > 1:
+        logger.warning(
+            "Per-compra RSS returned %d items for %s; using first", len(items), url
+        )
+
+    return items[0]
+
+
+__all__ = [
+    "RssItem",
+    "fetch_rss_feed",
+    "parse_rss_feed",
+    "build_per_compra_rss_url",
+    "fetch_and_parse_per_compra_rss",
+]

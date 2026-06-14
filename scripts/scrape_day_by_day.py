@@ -26,9 +26,14 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.models.adjudication import Adjudication
 from scraper.bcu_client import BcuClient
-from scraper.joiner import join_records
+from scraper.joiner import JoinedRecord, join_records
 from scraper.normalizer import NormalizedRecord, normalize_record
-from scraper.rss_feed import fetch_rss_feed, parse_rss_feed
+from scraper.rss_feed import (
+    build_per_compra_rss_url,
+    fetch_and_parse_per_compra_rss,
+    fetch_rss_feed,
+    parse_rss_feed,
+)
 from scraper.xml_report import fetch_xml_report, parse_xml_report
 
 logging.basicConfig(
@@ -56,6 +61,11 @@ def build_source_b_url(d: date) -> str:
         f"https://www.comprasestatales.gub.uy/consultas/rss/tipo-pub/ADJ"
         f"/tipo-doc/C/tipo-fecha/PUB/rango-fecha/{ds}_{ds}/filtro-cat/CAT/tipo-orden/DESC"
     )
+
+
+# Base URL for per-compra RSS (diverges from source_b_base_url which
+# includes /tipo-doc/C/tipo-fecha/PUB/rango-fecha suffix).
+RSS_BASE_URL = "https://www.comprasestatales.gub.uy/consultas/rss"
 
 
 # ── DB insert ───────────────────────────────────────────────────────
@@ -147,6 +157,60 @@ def main() -> None:
 
             # Join
             joined = join_records(xml_records, rss_items, source_url=url_a)
+
+            # Fallback: per-compra RSS for unmatched XML records
+            matched_ids = {r.id_compra for r in joined}
+            for xml_record in xml_records:
+                if xml_record.id_compra in matched_ids:
+                    continue
+                if not xml_record.num_compra or not xml_record.anio_compra:
+                    log.warning(
+                        "XML id_compra=%s has no RSS match and no "
+                        "num_compra/anio_compra — skipping",
+                        xml_record.id_compra,
+                    )
+                    continue
+
+                per_compra_url = build_per_compra_rss_url(
+                    RSS_BASE_URL, xml_record.num_compra, xml_record.anio_compra
+                )
+                rss_match = fetch_and_parse_per_compra_rss(per_compra_url)
+                if rss_match is None:
+                    log.warning(
+                        "Per-compra RSS failed for id_compra=%s "
+                        "(num=%s, anio=%s) — skipping",
+                        xml_record.id_compra,
+                        xml_record.num_compra,
+                        xml_record.anio_compra,
+                    )
+                    continue
+
+                joined.append(
+                    JoinedRecord(
+                        id_compra=xml_record.id_compra,
+                        fecha_pub_adj=xml_record.fecha_pub_adj,
+                        id_tipocompra=xml_record.id_tipocompra,
+                        id_moneda_monto_adj=xml_record.id_moneda_monto_adj,
+                        nombre_comercial=xml_record.nombre_comercial,
+                        nro_doc_prov=xml_record.nro_doc_prov,
+                        tipo_doc_prov=xml_record.tipo_doc_prov,
+                        cant_adj=xml_record.cant_adj,
+                        precio_tot_imp=xml_record.precio_tot_imp,
+                        desc_articulo=xml_record.desc_articulo,
+                        id_moneda=xml_record.id_moneda,
+                        organism=rss_match.organism,
+                        license_link=rss_match.license_link,
+                        source_url=url_a,
+                        id_articulo=xml_record.id_articulo,
+                        num_compra=xml_record.num_compra,
+                        anio_compra=xml_record.anio_compra,
+                    )
+                )
+                log.info(
+                    "Fallback resolved id_compra=%s via per-compra RSS",
+                    xml_record.id_compra,
+                )
+
             if not joined:
                 log.info(
                     "%s: %d XML, %d RSS, 0 joined — skipping",

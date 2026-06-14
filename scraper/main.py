@@ -35,15 +35,22 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.models.adjudication import Adjudication
 from scraper.bcu_client import BcuClient
-from scraper.joiner import join_records
+from scraper.joiner import JoinedRecord, join_records
 from scraper.normalizer import NormalizedRecord, normalize_record
-from scraper.rss_feed import fetch_rss_feed, parse_rss_feed
+from scraper.rss_feed import (
+    build_per_compra_rss_url,
+    fetch_and_parse_per_compra_rss,
+    fetch_rss_feed,
+    parse_rss_feed,
+)
 from scraper.xml_report import fetch_xml_report, parse_xml_report
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
     from sqlalchemy.orm import Session
+
+    from scraper.xml_report import XmlAdjudication
 
 logger = logging.getLogger(__name__)
 
@@ -111,6 +118,63 @@ def build_source_b_url(base_url: str, d_start: date, d_end: date) -> str:
     return f"{base_url}/{s}_{e}/filtro-cat/CAT/tipo-orden/DESC"
 
 
+def resolve_per_compra_rss_base(
+    source_b_base_url: str, source_b_rss_base: str | None
+) -> str:
+    """Return the per-compra RSS base URL.
+
+    When ``source_b_rss_base`` is set explicitly, return it as-is. Otherwise
+    derive it from ``source_b_base_url`` by truncating at the ``/consultas/rss``
+    segment — the upstream endpoint root shared by every RSS variant.
+
+    The derivation is idempotent: when ``source_b_base_url`` is already just
+    the RSS root (as in the test suite), the ``/consultas/rss`` marker is
+    absent and the URL is returned unchanged.
+    """
+
+    if source_b_rss_base:
+        return source_b_rss_base
+    marker = "/consultas/rss"
+    idx = source_b_base_url.find(marker)
+    if idx == -1:
+        return source_b_base_url
+    return source_b_base_url[: idx + len(marker)]
+
+
+def build_joined_record_from_xml(
+    xml_record: XmlAdjudication,
+    organism: str,
+    license_link: str,
+    source_url: str,
+) -> JoinedRecord:
+    """Build a :class:`JoinedRecord` from an XML record enriched with RSS fields.
+
+    Mirrors the construction in :func:`scraper.joiner.join_records`, but is
+    standalone so the per-compra fallback path (one XML record, one RSS
+    item, no join logic) can reuse it without going through the joiner.
+    """
+
+    return JoinedRecord(
+        id_compra=xml_record.id_compra,
+        fecha_pub_adj=xml_record.fecha_pub_adj,
+        id_tipocompra=xml_record.id_tipocompra,
+        id_moneda_monto_adj=xml_record.id_moneda_monto_adj,
+        nombre_comercial=xml_record.nombre_comercial,
+        nro_doc_prov=xml_record.nro_doc_prov,
+        tipo_doc_prov=xml_record.tipo_doc_prov,
+        cant_adj=xml_record.cant_adj,
+        precio_tot_imp=xml_record.precio_tot_imp,
+        desc_articulo=xml_record.desc_articulo,
+        id_moneda=xml_record.id_moneda,
+        organism=organism,
+        license_link=license_link,
+        source_url=source_url,
+        id_articulo=xml_record.id_articulo,
+        num_compra=xml_record.num_compra,
+        anio_compra=xml_record.anio_compra,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Persistence helpers
 # ---------------------------------------------------------------------------
@@ -173,10 +237,9 @@ def _bulk_insert(session: Session, records: Iterable[NormalizedRecord]) -> int:
 def _run_scrape_for_day(
     *,
     target_day: date,
-    range_start: date,
-    range_end: date,
     source_a_base_url: str,
     source_b_base_url: str,
+    source_b_rss_base: str,
     session: Session,
     bcu_client: BcuClient,
     start_hour: int,
@@ -184,10 +247,26 @@ def _run_scrape_for_day(
 ) -> int:
     """Run the full pipeline for a single day.
 
+    The pipeline is:
+
+    1. Fetch the day-scoped XML report (Source A) and the day-scoped RSS
+       feed (Source B). The RSS URL is built with ``target_day`` on both
+       ends so each day in a multi-day range produces a distinct URL.
+    2. Parse both payloads.
+    3. Join XML to RSS by ``id_compra`` via :func:`scraper.joiner.join_records`.
+    4. **Per-compra fallback** — for every XML record the primary join
+       missed, attempt a single-item per-compra RSS fetch using its
+       ``num_compra`` and ``anio_compra`` attributes. Records that fetch
+       successfully are appended to the joined list; the rest are
+       logged and skipped.
+    5. Normalize (BCU rate fetch + currency conversion).
+    6. Bulk insert.
+
     Returns the number of records inserted for this day, or ``0`` when
-    the day produced no data (empty XML, empty RSS, no join, or no
-    surviving normalization). Raises :class:`SQLAlchemyError` on DB
-    failures so the caller can roll back and surface the error.
+    the day produced no data (empty XML, empty RSS, no join, no
+    surviving fallback, or no surviving normalization). Raises
+    :class:`SQLAlchemyError` on DB failures so the caller can roll back
+    and surface the error.
     """
 
     log = logging.getLogger("scraper.run_scrape")
@@ -198,7 +277,12 @@ def _run_scrape_for_day(
         start_hour,
         end_hour,
     )
-    url_b = build_source_b_url(source_b_base_url, range_start, range_end)
+    # Per-day RSS URL: same day on both ends, so the upstream endpoint
+    # returns only items published on ``target_day``. Previously this
+    # was a multi-day range, which made every iteration in a multi-day
+    # scrape fetch the same feed — and miss adjudications published on
+    # the inner days whenever the upstream truncated the result.
+    url_b = build_source_b_url(source_b_base_url, target_day, target_day)
 
     # ------------------------------------------------------------------
     # 1. Fetch sources
@@ -249,6 +333,51 @@ def _run_scrape_for_day(
         rss_items,
         source_url=url_a,
     )
+
+    # ------------------------------------------------------------------
+    # 3b. Per-compra fallback for unmatched XML records
+    # ------------------------------------------------------------------
+    # The day-RSS sometimes omits adjudications the XML report carries
+    # (truncation, filtering, late publication). The per-compra endpoint
+    # gives a single-item feed scoped to ``num_compra``/``anio_compra``,
+    # so we can rescue unmatched records one HTTP request at a time.
+    matched_ids = {record.id_compra for record in joined}
+    unmatched = [x for x in xml_records if x.id_compra not in matched_ids]
+    if unmatched:
+        log.info(
+            "Attempting per-compra fallback for %d unmatched records on %s",
+            len(unmatched),
+            target_day,
+        )
+        for xml_record in unmatched:
+            num_compra = xml_record.num_compra
+            anio_compra = xml_record.anio_compra
+            if not num_compra or not anio_compra:
+                log.warning(
+                    "Unmatched XML record id_compra=%s missing num_compra/"
+                    "anio_compra; skipping per-compra fallback",
+                    xml_record.id_compra,
+                )
+                continue
+
+            per_compra_url = build_per_compra_rss_url(
+                source_b_rss_base, num_compra, anio_compra
+            )
+            item = fetch_and_parse_per_compra_rss(per_compra_url)
+            if item is None:
+                # ``fetch_and_parse_per_compra_rss`` already logs the
+                # failure reason; just move on to the next record.
+                continue
+
+            joined.append(
+                build_joined_record_from_xml(
+                    xml_record,
+                    organism=item.organism,
+                    license_link=item.license_link,
+                    source_url=url_a,
+                )
+            )
+
     if not joined:
         log.info("Join produced no records for %s; nothing to insert", target_day)
         return 0
@@ -353,6 +482,13 @@ def run_scrape(
     if owns_session:
         session = get_session_factory()()
 
+    # Resolve the per-compra RSS base once for the whole run — it's a
+    # pure derivation from the day-RSS base URL, identical for every
+    # day in the range.
+    per_compra_rss_base = resolve_per_compra_rss_base(
+        settings.source_b_base_url, settings.source_b_rss_base
+    )
+
     total_inserted = 0
     try:
         # One BCU client for the entire range — its (bcu_code, date)
@@ -362,10 +498,9 @@ def run_scrape(
             while current <= end_date:
                 inserted = _run_scrape_for_day(
                     target_day=current,
-                    range_start=start_date,
-                    range_end=end_date,
                     source_a_base_url=settings.source_a_base_url,
                     source_b_base_url=settings.source_b_base_url,
+                    source_b_rss_base=per_compra_rss_base,
                     session=session,  # type: ignore[arg-type]
                     bcu_client=bcu_client,
                     start_hour=start_hour,

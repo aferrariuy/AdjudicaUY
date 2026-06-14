@@ -53,6 +53,8 @@ class JoinedRecord:
     license_link: str
     source_url: str
     id_articulo: str | None
+    num_compra: str | None
+    anio_compra: str | None
 
 
 def join_records(
@@ -117,6 +119,8 @@ def join_records(
                 license_link=rss_match.license_link,
                 source_url=source_url,
                 id_articulo=xml_record.id_articulo,
+                num_compra=xml_record.num_compra,
+                anio_compra=xml_record.anio_compra,
             )
         )
 

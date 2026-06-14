@@ -79,6 +79,8 @@ class XmlAdjudication:
     desc_articulo: str
     id_moneda: int
     id_articulo: str | None
+    num_compra: str | None
+    anio_compra: str | None
 
 
 _HEADERS = {
@@ -187,8 +189,10 @@ def _attr(element: etree._Element, name: str) -> str | None:
     return stripped or None
 
 
-def _normalize_compra(compra: etree._Element) -> tuple[str, date, str, int] | None:
-    """Extract the four ``<compra>``-level fields shared by every adjudication."""
+def _normalize_compra(
+    compra: etree._Element,
+) -> tuple[str, date, str, int, str | None, str | None] | None:
+    """Extract the ``<compra>``-level fields shared by every adjudication."""
 
     id_compra = _attr(compra, "id_compra")
     fecha_raw = _attr(compra, "fecha_pub_adj")
@@ -213,16 +217,28 @@ def _normalize_compra(compra: etree._Element) -> tuple[str, date, str, int] | No
         )
         return None
 
-    return id_compra, parsed_date, id_tipocompra, id_moneda_monto_adj
+    num_compra = _attr(compra, "num_compra")
+    anio_compra = _attr(compra, "anio_compra")
+
+    return (
+        id_compra,
+        parsed_date,
+        id_tipocompra,
+        id_moneda_monto_adj,
+        num_compra,
+        anio_compra,
+    )
 
 
 def _normalize_adjudicacion(
-    parent: tuple[str, date, str, int],
+    parent: tuple[str, date, str, int, str | None, str | None],
     adj_el: etree._Element,
 ) -> XmlAdjudication | None:
     """Extract one ``<adjudicacion>`` record, scoped under its parent ``<compra>``."""
 
-    id_compra, parsed_date, id_tipocompra, id_moneda_monto_adj = parent
+    id_compra, parsed_date, id_tipocompra, id_moneda_monto_adj, num_compra, anio_compra = (
+        parent
+    )
 
     nombre_comercial = _attr(adj_el, "nombre_comercial")
     desc_articulo = _attr(adj_el, "desc_articulo")
@@ -268,6 +284,8 @@ def _normalize_adjudicacion(
         desc_articulo=desc_articulo,
         id_moneda=id_moneda,
         id_articulo=_attr(adj_el, "id_articulo"),
+        num_compra=num_compra,
+        anio_compra=anio_compra,
     )
 
 
