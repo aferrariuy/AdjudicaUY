@@ -90,6 +90,7 @@ _COMPRA_KNOWN_ATTRS: frozenset[str] = frozenset(
         "subtipo_compra",
         "id_inciso",
         "id_ue",
+        "id_ucc",
     }
 )
 
@@ -193,6 +194,7 @@ class XmlCompra:
     subtipo_compra: str | None
     id_inciso: int | None
     id_ue: int | None
+    id_ucc: int | None
     adjudicaciones: list[XmlAdjudicacion]
     oferentes: list[XmlOferente]
 
@@ -412,6 +414,7 @@ def _extract_compra(compra: etree._Element) -> XmlCompra | None:
         subtipo_compra=_attr(compra, "subtipo_compra"),
         id_inciso=_parse_int(_attr(compra, "id_inciso")),
         id_ue=_parse_int(_attr(compra, "id_ue")),
+        id_ucc=_parse_int(_attr(compra, "id_ucc")),
         adjudicaciones=adjudicaciones,
         oferentes=oferentes,
     )

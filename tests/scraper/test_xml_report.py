@@ -333,6 +333,130 @@ def test_parse_xml_treats_non_numeric_organism_attributes_as_none() -> None:
 
 
 # ---------------------------------------------------------------------------
+# id_ucc attribute extraction (add-id-ucc-support change)
+# ---------------------------------------------------------------------------
+
+
+# Payload carrying ``id_ucc`` — the happy path for the
+# ``xml-compra-parsing`` spec, "id_ucc present and numeric" scenario.
+XML_WITH_ID_UCC = """<?xml version="1.0" encoding="UTF-8"?>
+<reporte>
+  <compra id_compra="1319278"
+          fecha_pub_adj="2024-01-15"
+          id_moneda_monto_adj="20"
+          id_tipocompra="CD"
+          id_ucc="201">
+    <adjudicaciones>
+      <adjudicacion nombre_comercial="Empresa SA"
+                    nro_doc_prov="210000000018"
+                    tipo_doc_prov="RUT"
+                    cant_adj="10.00"
+                    precio_tot_imp="1234.56"
+                    desc_articulo="Laptop Dell"
+                    id_moneda="20" />
+    </adjudicaciones>
+  </compra>
+</reporte>
+"""
+
+
+def test_parse_xml_extracts_id_ucc_when_numeric() -> None:
+    """A numeric ``id_ucc`` attribute must surface as an int on the record."""
+
+    compras = list(parse_xml_report(XML_WITH_ID_UCC))
+    assert len(compras) == 1
+    assert compras[0].id_ucc == 201
+
+
+def test_parse_xml_returns_none_for_absent_id_ucc() -> None:
+    """Absent ``id_ucc`` attribute must round-trip as ``None`` (never raise)."""
+
+    compras = list(parse_xml_report(VALID_XML))
+    # ``VALID_XML`` doesn't carry id_ucc on any ``<compra>``.
+    assert all(c.id_ucc is None for c in compras)
+
+
+# Payload with a non-numeric ``id_ucc`` — the parser must NOT abort.
+XML_WITH_NON_NUMERIC_ID_UCC = """<?xml version="1.0" encoding="UTF-8"?>
+<reporte>
+  <compra id_compra="1319278"
+          fecha_pub_adj="2024-01-15"
+          id_moneda_monto_adj="20"
+          id_tipocompra="CD"
+          id_ucc="not-a-number">
+    <adjudicaciones>
+      <adjudicacion nombre_comercial="A"
+                    precio_tot_imp="10.00"
+                    desc_articulo="x"
+                    id_moneda="0" />
+    </adjudicaciones>
+  </compra>
+</reporte>
+"""
+
+
+def test_parse_xml_treats_non_numeric_id_ucc_as_none(caplog) -> None:
+    """Garbage ``id_ucc`` must become ``None`` and emit a WARNING (per
+    the existing ``_parse_int`` contract).
+    """
+
+    with caplog.at_level(logging.WARNING, logger="scraper.xml_report"):
+        compras = list(parse_xml_report(XML_WITH_NON_NUMERIC_ID_UCC))
+
+    assert len(compras) == 1
+    assert compras[0].id_ucc is None
+    warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("not-a-number" in r.getMessage() for r in warning_records)
+
+
+# Payload carrying id_inciso, id_ue AND id_ucc — coexistence scenario.
+XML_WITH_INCISO_UE_AND_UCC = """<?xml version="1.0" encoding="UTF-8"?>
+<reporte>
+  <compra id_compra="1319278"
+          fecha_pub_adj="2024-01-15"
+          id_moneda_monto_adj="20"
+          id_tipocompra="CD"
+          id_inciso="3"
+          id_ue="15"
+          id_ucc="201">
+    <adjudicaciones>
+      <adjudicacion nombre_comercial="Empresa SA"
+                    nro_doc_prov="210000000018"
+                    tipo_doc_prov="RUT"
+                    cant_adj="10.00"
+                    precio_tot_imp="1234.56"
+                    desc_articulo="Laptop Dell"
+                    id_moneda="20" />
+    </adjudicaciones>
+  </compra>
+</reporte>
+"""
+
+
+def test_parse_xml_coexists_with_id_inciso_and_id_ue() -> None:
+    """All three id attributes populate correctly when present together."""
+
+    compras = list(parse_xml_report(XML_WITH_INCISO_UE_AND_UCC))
+    assert len(compras) == 1
+    record = compras[0]
+    assert record.id_inciso == 3
+    assert record.id_ue == 15
+    assert record.id_ucc == 201
+
+
+def test_parse_xml_id_ucc_logs_no_unknown_attr_warning(caplog) -> None:
+    """``id_ucc`` MUST appear in ``_COMPRA_KNOWN_ATTRS`` — no WARNING fires."""
+
+    with caplog.at_level(logging.WARNING, logger="scraper.xml_report"):
+        list(parse_xml_report(XML_WITH_ID_UCC))
+
+    # If id_ucc were unknown, the unknown-attribute logger would emit
+    # a WARNING mentioning the attr name. Assert no such WARNING fires.
+    warning_messages = [r.getMessage() for r in caplog.records]
+    assert not any("id_ucc" in m for m in warning_messages)
+
+
+# ---------------------------------------------------------------------------
 # Malformed payloads — must not raise
 # ---------------------------------------------------------------------------
 
