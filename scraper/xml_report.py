@@ -63,8 +63,9 @@ class XmlAdjudication:
     """One adjudication record extracted from the XML report.
 
     The record is a *partial* view — it intentionally lacks the organism name
-    and the public detail URL, both of which come from the RSS feed via
-    :mod:`scraper.joiner`.
+    and the public detail URL, which the pipeline enriches from
+    :mod:`scraper.organism_lookup` and from the deterministic
+    ``/detalle/id/{id_compra}`` URL template respectively.
     """
 
     id_compra: str
@@ -81,6 +82,8 @@ class XmlAdjudication:
     id_articulo: str | None
     num_compra: str | None
     anio_compra: str | None
+    id_inciso: int | None
+    id_ue: int | None
 
 
 _HEADERS = {
@@ -191,8 +194,17 @@ def _attr(element: etree._Element, name: str) -> str | None:
 
 def _normalize_compra(
     compra: etree._Element,
-) -> tuple[str, date, str, int, str | None, str | None] | None:
-    """Extract the ``<compra>``-level fields shared by every adjudication."""
+) -> tuple[str, date, str, int, str | None, str | None, int | None, int | None] | None:
+    """Extract the ``<compra>``-level fields shared by every adjudication.
+
+    Returns a tuple of ``(id_compra, fecha_pub_adj, id_tipocompra,
+    id_moneda_monto_adj, num_compra, anio_compra, id_inciso, id_ue)``.
+    ``id_inciso`` and ``id_ue`` are the procurement-system identifiers
+    used to look up the organism name in
+    :data:`scraper.organism_lookup.ORGANISM_MAP`; both are ``None`` when
+    the upstream attributes are absent (see ``organism-lookup`` spec,
+    "Missing attributes" scenario).
+    """
 
     id_compra = _attr(compra, "id_compra")
     fecha_raw = _attr(compra, "fecha_pub_adj")
@@ -219,6 +231,8 @@ def _normalize_compra(
 
     num_compra = _attr(compra, "num_compra")
     anio_compra = _attr(compra, "anio_compra")
+    id_inciso = _parse_int(_attr(compra, "id_inciso"))
+    id_ue = _parse_int(_attr(compra, "id_ue"))
 
     return (
         id_compra,
@@ -227,18 +241,27 @@ def _normalize_compra(
         id_moneda_monto_adj,
         num_compra,
         anio_compra,
+        id_inciso,
+        id_ue,
     )
 
 
 def _normalize_adjudicacion(
-    parent: tuple[str, date, str, int, str | None, str | None],
+    parent: tuple[str, date, str, int, str | None, str | None, int | None, int | None],
     adj_el: etree._Element,
 ) -> XmlAdjudication | None:
     """Extract one ``<adjudicacion>`` record, scoped under its parent ``<compra>``."""
 
-    id_compra, parsed_date, id_tipocompra, id_moneda_monto_adj, num_compra, anio_compra = (
-        parent
-    )
+    (
+        id_compra,
+        parsed_date,
+        id_tipocompra,
+        id_moneda_monto_adj,
+        num_compra,
+        anio_compra,
+        id_inciso,
+        id_ue,
+    ) = parent
 
     nombre_comercial = _attr(adj_el, "nombre_comercial")
     desc_articulo = _attr(adj_el, "desc_articulo")
@@ -286,6 +309,8 @@ def _normalize_adjudicacion(
         id_articulo=_attr(adj_el, "id_articulo"),
         num_compra=num_compra,
         anio_compra=anio_compra,
+        id_inciso=id_inciso,
+        id_ue=id_ue,
     )
 
 

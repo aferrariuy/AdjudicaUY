@@ -221,6 +221,8 @@ def make_xml_record():
         "id_articulo": "42851",
         "num_compra": "86825",
         "anio_compra": "2024",
+        "id_inciso": 3,
+        "id_ue": 15,
     }
 
     def _factory(**overrides: Any) -> XmlAdjudication:
