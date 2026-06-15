@@ -415,7 +415,38 @@ def test_fetch_xml_report_returns_body_on_success() -> None:
             return httpx.Response(200, request=request, text=VALID_XML)
 
     body = fetch_xml_report("https://example.test/xml", client=_OkClient())
-    assert body == VALID_XML
+    assert body == VALID_XML.encode("utf-8")
+
+
+def test_parse_xml_report_handles_latin1_encoding() -> None:
+    """XML with ISO-8859-1 encoding must parse accented chars correctly.
+
+    Regression test for the double-encoding bug: the government endpoint
+    returns ISO-8859-1 bytes with ``encoding="ISO-8859-1"`` in the XML
+    declaration. Passing raw bytes to lxml lets it read the declaration
+    and decode correctly — no re-encoding via ``response.text`` + str.
+    """
+
+    # Build ISO-8859-1 bytes with accented characters (é = 0xE9 in Latin-1)
+    xml_str = (
+        '<?xml version="1.0" encoding="ISO-8859-1"?>\r\n'
+        '<reporte>\r\n'
+        '  <compra id_compra="1" fecha_pub_adj="2024-01-15" id_moneda_monto_adj="0">\r\n'
+        "    <adjudicaciones>\r\n"
+        '      <adjudicacion nombre_comercial="KPMG SOCIEDAD CIVIL" '
+        'precio_tot_imp="100.00" desc_articulo="Servicio de soporte t\xe9cnico" '
+        'id_moneda="0" />\r\n'
+        "    </adjudicaciones>\r\n"
+        "  </compra>\r\n"
+        "</reporte>"
+    )
+    raw_bytes = xml_str.encode("iso-8859-1")
+
+    compras = list(parse_xml_report(raw_bytes))
+    assert len(compras) == 1
+    adj = compras[0].adjudicaciones[0]
+    assert adj.nombre_comercial == "KPMG SOCIEDAD CIVIL"
+    assert adj.desc_articulo == u"Servicio de soporte t\u00e9cnico"
 
 
 # ---------------------------------------------------------------------------

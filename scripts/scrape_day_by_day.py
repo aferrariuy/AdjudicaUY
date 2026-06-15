@@ -300,7 +300,7 @@ def main() -> None:
             # consecutive_errors exactly once at the day's end.
             day_had_error = False
 
-            xml_text: str | None = None
+            xml_text: bytes | None = None
 
             # ------------------------------------------------------------------
             # 1. Fetch the XML report

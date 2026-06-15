@@ -215,7 +215,7 @@ def fetch_xml_report(
     *,
     client: httpx.Client | None = None,
     timeout: float = 30.0,
-) -> str:
+) -> bytes:
     """Fetch the raw XML payload from ``url``.
 
     Parameters
@@ -230,8 +230,14 @@ def fetch_xml_report(
 
     Returns
     -------
-    str
-        The XML body. The caller is responsible for parsing.
+    bytes
+        The raw XML body as bytes. The caller is responsible for
+        parsing. Returning bytes (not ``str``) preserves the original
+        encoding declared in the XML declaration — lxml reads the
+        ``encoding`` attribute from the ``<?xml ...?>`` prologue and
+        decodes accordingly. Decoding via ``response.text`` would
+        introduce a double-encoding when the upstream uses ISO-8859-1
+        (the government endpoint's default).
 
     Raises
     ------
@@ -243,11 +249,11 @@ def fetch_xml_report(
         with httpx.Client(timeout=timeout, headers=_HEADERS) as owned:
             response = owned.get(url)
             response.raise_for_status()
-            return response.text
+            return response.content
 
     response = client.get(url, headers=_HEADERS)
     response.raise_for_status()
-    return response.text
+    return response.content
 
 
 # ---------------------------------------------------------------------------
@@ -502,13 +508,18 @@ def _extract_oferente(
 # ---------------------------------------------------------------------------
 
 
-def parse_xml_report(xml_text: str) -> Iterator[XmlCompra]:
+def parse_xml_report(xml_text: str | bytes) -> Iterator[XmlCompra]:
     """Yield an :class:`XmlCompra` for every well-formed top-level compra.
 
     Parameters
     ----------
     xml_text:
         The raw XML payload returned by :func:`fetch_xml_report`.
+        Accepts both ``bytes`` (preferred — preserves the upstream
+        encoding declaration) and ``str`` (for test fixtures and
+        in-memory payloads). When a ``str`` with an XML encoding
+        declaration is passed, it is re-encoded to UTF-8 bytes so
+        lxml can honour the declared encoding.
 
     Yields
     ------
@@ -520,10 +531,17 @@ def parse_xml_report(xml_text: str) -> Iterator[XmlCompra]:
         possible.
     """
 
+    # lxml rejects ``str`` input when the XML declaration contains an
+    # ``encoding`` attribute.  Always pass bytes so lxml can honour the
+    # declared encoding (ISO-8859-1 from the government endpoint,
+    # UTF-8 in test fixtures, etc.).
+    if isinstance(xml_text, str):
+        raw = xml_text.encode("utf-8")
+    else:
+        raw = xml_text
+
     try:
-        root = etree.fromstring(
-            xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text
-        )
+        root = etree.fromstring(raw)
     except etree.XMLSyntaxError as exc:
         logger.error("XML payload is malformed: %s", exc)
         return
