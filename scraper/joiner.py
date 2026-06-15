@@ -1,60 +1,36 @@
 """Join XML adjudication records to RSS feed entries by ``id_compra``.
 
-The two sources are independent: the XML report carries the financial detail,
-the RSS feed carries the organism name and the public detail URL. Joining
-them by ``id_compra`` produces a complete record ready for normalization and
-persistence.
+This module is **legacy**: the live pipeline (see :mod:`scraper.main`)
+no longer fetches RSS feeds, and :class:`scraper.normalizer.JoinedRecord`
+now lives in the normalizer module (its natural home — see
+``Decision: JoinedRecord disposition`` in the design). The class is
+re-exported here so any out-of-tree consumer that imported
+``scraper.joiner.JoinedRecord`` keeps working until the cleanup PR
+deletes this file.
 
-When the RSS feed is unavailable, the caller is expected to short-circuit
-and skip the join (see :mod:`scraper.main`). When the RSS feed is available
-but a particular ``id_compra`` is missing from one of the two sources, the
-mismatched side is logged and the matched side proceeds.
+The joiner function itself is kept here (also unused by production) so
+the joiner tests can keep exercising the historical logic without
+modification. New code should construct :class:`scraper.normalizer.JoinedRecord`
+directly from the XML record and the resolved organism/license_link.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
+
+# Re-export :class:`JoinedRecord` from its new home so legacy imports
+# (``from scraper.joiner import JoinedRecord``) keep resolving. The
+# cleanup PR removes this re-export together with the rest of the file.
+from scraper.normalizer import JoinedRecord  # noqa: F401
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
-    from datetime import date
-    from decimal import Decimal
 
     from scraper.rss_feed import RssItem
     from scraper.xml_report import XmlAdjudication
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class JoinedRecord:
-    """A fully-enriched adjudication, ready for normalization and insertion.
-
-    ``source_url`` is the URL the XML report was fetched from — the same for
-    every record in a run. It is the first column of the unique constraint
-    defined on the ``adjudications`` table, so re-scraping the same source
-    is naturally idempotent.
-    """
-
-    id_compra: str
-    fecha_pub_adj: date
-    id_tipocompra: str
-    id_moneda_monto_adj: int
-    nombre_comercial: str
-    nro_doc_prov: str | None
-    tipo_doc_prov: str | None
-    cant_adj: Decimal | None
-    precio_tot_imp: Decimal
-    desc_articulo: str
-    id_moneda: int
-    organism: str
-    license_link: str
-    source_url: str
-    id_articulo: str | None
-    num_compra: str | None
-    anio_compra: str | None
 
 
 def join_records(
@@ -63,7 +39,7 @@ def join_records(
     *,
     source_url: str,
 ) -> list[JoinedRecord]:
-    """Join XML and RSS records by ``id_compra``.
+    """Join XML and RSS records by ``id_compra`` (legacy — see module docstring).
 
     Parameters
     ----------

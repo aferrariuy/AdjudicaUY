@@ -1,10 +1,11 @@
 """Convert non-UYU adjudication amounts to UYU using BCU exchange rates.
 
-The normalization step takes a :class:`scraper.joiner.JoinedRecord` (an
-already-enriched adjudication) and produces a :class:`NormalizedRecord`
-where ``currency`` is a 3-letter display code and ``amount_uyu`` is the
-equivalent value in Uruguayan pesos, or ``NULL`` when conversion was
-impossible.
+The normalization step takes a :class:`JoinedRecord` (an already-enriched
+adjudication, defined here in the normalizer module — see
+``Decision: JoinedRecord disposition`` in the design) and produces a
+:class:`NormalizedRecord` where ``currency`` is a 3-letter display code
+and ``amount_uyu`` is the equivalent value in Uruguayan pesos, or
+``NULL`` when conversion was impossible.
 
 The pipeline is:
 
@@ -31,8 +32,9 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from scraper.bcu_client import BcuClient
-    from scraper.joiner import JoinedRecord
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +97,35 @@ NON_CONVERTIBLE_TABLE: dict[int, str] = {
     22: "OHX",  # ORO (historical)
     39: "EUX",  # EURO TRANSFERENCIA (non-convertible via BCU)
 }
+
+
+@dataclass(frozen=True)
+class JoinedRecord:
+    """A fully-enriched adjudication, ready for normalization and insertion.
+
+    ``source_url`` is the URL the XML report was fetched from — the same for
+    every record in a run. It is the first column of the unique constraint
+    defined on the ``adjudications`` table, so re-scraping the same source
+    is naturally idempotent.
+    """
+
+    id_compra: str
+    fecha_pub_adj: date
+    id_tipocompra: str
+    id_moneda_monto_adj: int
+    nombre_comercial: str
+    nro_doc_prov: str | None
+    tipo_doc_prov: str | None
+    cant_adj: Decimal | None
+    precio_tot_imp: Decimal
+    desc_articulo: str
+    id_moneda: int
+    organism: str
+    license_link: str
+    source_url: str
+    id_articulo: str | None
+    num_compra: str | None
+    anio_compra: str | None
 
 
 @dataclass(frozen=True)
@@ -263,7 +294,9 @@ def normalize_record(
         company_document_type=record.tipo_doc_prov,
         license_type=record.id_tipocompra,
         article=record.desc_articulo,
-        article_quantity=_quantize_uyu(record.cant_adj) if record.cant_adj is not None else None,
+        article_quantity=(
+            _quantize_uyu(record.cant_adj) if record.cant_adj is not None else None
+        ),
         article_id=record.id_articulo,
     )
 
@@ -271,6 +304,7 @@ def normalize_record(
 __all__ = [
     "CONVERSION_TABLE",
     "ConversionMode",
+    "JoinedRecord",
     "NON_CONVERTIBLE_TABLE",
     "NormalizedRecord",
     "PASSTHROUGH_TABLE",
