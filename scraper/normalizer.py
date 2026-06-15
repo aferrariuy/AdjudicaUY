@@ -204,6 +204,7 @@ class CompraRow:
     subtipo_compra: str | None
     id_inciso: int | None
     id_ue: int | None
+    id_ucc: int | None
     organismo: str
     license_link: str
     source_url: str
@@ -421,6 +422,7 @@ def normalize_compra(
         subtipo_compra=compra.subtipo_compra,
         id_inciso=compra.id_inciso,
         id_ue=compra.id_ue,
+        id_ucc=compra.id_ucc,
         organismo=enrichment.organism,
         license_link=enrichment.license_link,
         source_url=enrichment.source_url,

@@ -53,6 +53,7 @@ from scraper.normalizer import (
     normalize_compra,
 )
 from scraper.organism_lookup import resolve_organism
+from scraper.ucc_lookup import resolve_ucc_organism
 from scraper.xml_report import (
     XmlCompra,
     fetch_xml_report,
@@ -135,13 +136,23 @@ def enrich_xml_compra(
 ) -> CompraEnrichment:
     """Build a :class:`CompraEnrichment` from an :class:`XmlCompra`.
 
-    The organism is resolved via
-    :func:`scraper.organism_lookup.resolve_organism` (warn-on-missing,
-    never raises); the ``license_link`` is built deterministically
-    from ``id_compra``.
+    The organism is resolved through a two-step priority chain:
+
+    1. :func:`scraper.organism_lookup.resolve_organism` with the
+       ``(id_inciso, id_ue)`` pair — wins when that pair is mapped.
+    2. When the pair is unmapped (the function returned a
+       ``"Desconocido ..."`` placeholder) AND ``id_ucc`` is present,
+       :func:`scraper.ucc_lookup.resolve_ucc_organism` supplies the
+       organism name from the UCC codiguera.
+
+    When both lookups miss, the final value is the inciso/ue
+    ``"Desconocido ({i}-{u})"`` fallback. The ``license_link`` is
+    built deterministically from ``id_compra``.
     """
 
     organism = resolve_organism(xml_compra.id_inciso, xml_compra.id_ue)
+    if organism.startswith("Desconocido") and xml_compra.id_ucc is not None:
+        organism = resolve_ucc_organism(xml_compra.id_ucc)
     return CompraEnrichment(
         organism=organism,
         license_link=build_license_link(xml_compra.id_compra),
@@ -169,6 +180,7 @@ def _compra_dict(row: CompraRow) -> dict[str, Any]:
         "subtipo_compra": row.subtipo_compra,
         "id_inciso": row.id_inciso,
         "id_ue": row.id_ue,
+        "id_ucc": row.id_ucc,
         "organismo": row.organismo or None,
         "source_url": row.source_url,
     }

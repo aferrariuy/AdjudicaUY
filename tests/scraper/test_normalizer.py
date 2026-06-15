@@ -105,6 +105,7 @@ def _build_xml_compra(
         subtipo_compra="",
         id_inciso=3,
         id_ue=15,
+        id_ucc=None,
         adjudicaciones=adjudicaciones,
         oferentes=oferentes,
     )
