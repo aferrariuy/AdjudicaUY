@@ -121,8 +121,7 @@ def enrich_xml_record(
 ) -> JoinedRecord:
     """Build a :class:`JoinedRecord` from an XML record plus the static enrichment.
 
-    Replaces the historical ``scraper.joiner.join_records`` + per-compra
-    RSS fallback path. The organism is resolved via
+    The organism is resolved via
     :func:`scraper.organism_lookup.resolve_organism` (warn-on-missing,
     never raises); the ``license_link`` is built deterministically from
     ``id_compra``.
