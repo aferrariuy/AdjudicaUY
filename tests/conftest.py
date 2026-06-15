@@ -231,28 +231,10 @@ def make_xml_record():
 
 
 @pytest.fixture
-def make_rss_item():
-    """Factory: build an :class:`RssItem` for parser/joiner tests."""
-
-    from scraper.rss_feed import RssItem
-
-    defaults: dict[str, Any] = {
-        "id_compra": "1319278",
-        "organism": "Ministerio de Interior",
-        "license_link": "https://example.test/consultas/detalle/id/1319278",
-    }
-
-    def _factory(**overrides: Any) -> RssItem:
-        return RssItem(**{**defaults, **overrides})
-
-    return _factory
-
-
-@pytest.fixture
 def make_joined_record():
     """Factory: build a :class:`JoinedRecord` for normalizer tests."""
 
-    from scraper.joiner import JoinedRecord
+    from scraper.normalizer import JoinedRecord
 
     defaults: dict[str, Any] = {
         "id_compra": "1319278",
