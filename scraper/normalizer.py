@@ -40,7 +40,7 @@ if TYPE_CHECKING:
     from datetime import date
 
     from scraper.bcu_client import BcuClient
-    from scraper.xml_report import XmlCompra, XmlOferente
+    from scraper.xml_report import XmlCompra
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +194,7 @@ class CompraRow:
     """
 
     id_compra: str
-    fecha_pub_adj: "date"
+    fecha_pub_adj: date
     id_tipocompra: str
     id_moneda_monto_adj: int
     objeto: str | None
@@ -283,7 +283,7 @@ def _try_resolve_unknown(
 def _convert_amount(
     id_moneda: int,
     amount: Decimal,
-    on_date: "date",
+    on_date: date,
     bcu_client: BcuClient,
     *,
     max_lookback_days: int = 7,
@@ -316,7 +316,7 @@ def _convert_amount(
 
 
 def normalize_compra(
-    compra: "XmlCompra",
+    compra: XmlCompra,
     enrichment: CompraEnrichment,
     bcu_client: BcuClient,
     *,

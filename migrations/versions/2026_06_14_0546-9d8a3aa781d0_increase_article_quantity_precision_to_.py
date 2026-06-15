@@ -7,11 +7,13 @@ Create Date: 2026-06-14 05:46:25.450615+00:00
 """
 from __future__ import annotations
 
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
 revision: str = '9d8a3aa781d0'

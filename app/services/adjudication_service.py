@@ -109,9 +109,9 @@ class AdjudicationRow:
     organism: str
     winning_company: str
     article: str
-    amount: "Decimal"
+    amount: Decimal
     currency: str
-    amount_uyu: "Decimal | None"
+    amount_uyu: Decimal | None
     license_type: str
     company_document: str | None
     company_document_type: str | None
@@ -330,7 +330,9 @@ def count_adjudications(session: Session, filters: AdjudicationFilters) -> int:
     simple.
     """
 
-    stmt = select(func.count(Adjudicacion.id)).join(Compra, Compra.id == Adjudicacion.compra_id)
+    stmt = select(func.count(Adjudicacion.id)).join(
+        Compra, Compra.id == Adjudicacion.compra_id
+    )
     stmt = _apply_filters(stmt, filters)
     return int(session.execute(stmt).scalar_one())
 
@@ -345,7 +347,7 @@ def ranking_by_company(
     filters: AdjudicationFilters,
     *,
     limit: int = 10,
-) -> list[tuple[str, "Decimal"]]:
+) -> list[tuple[str, Decimal]]:
     """Return the top companies by total adjudicated amount in UYU.
 
     The result is a list of ``(company_name, total_amount_uyu)`` pairs,
@@ -378,7 +380,7 @@ def ranking_by_organism(
     filters: AdjudicationFilters,
     *,
     limit: int = 10,
-) -> list[tuple[str, "Decimal"]]:
+) -> list[tuple[str, Decimal]]:
     """Return the top organisms by total adjudicated amount in UYU.
 
     The result is a list of ``(organism_name, total_amount_uyu)`` pairs,

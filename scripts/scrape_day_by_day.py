@@ -37,7 +37,6 @@ from scraper.main import (
 )
 from scraper.normalizer import (
     AdjudicacionRow,
-    CompraEnrichment,
     CompraRow,
     OferenteRow,
     normalize_compra,

@@ -187,7 +187,9 @@ def test_normalize_uyu_passes_amount_through_unchanged() -> None:
             )
         ],
     )
-    result = normalize_compra(compra, _enrichment(), _static_bcu_client(rate=Decimal("38.50")))
+    result = normalize_compra(
+        compra, _enrichment(), _static_bcu_client(rate=Decimal("38.50"))
+    )
 
     assert result.adjudicaciones[0].currency == "UYU"
     assert result.adjudicaciones[0].amount_uyu == Decimal("1234.56")
@@ -481,7 +483,9 @@ def test_normalize_preserves_provenance_fields() -> None:
         license_link="https://example.test/id/7777",
         source_url="https://example.test/source-A",
     )
-    result = normalize_compra(compra, enrichment, _static_bcu_client(rate=Decimal("40.00")))
+    result = normalize_compra(
+        compra, enrichment, _static_bcu_client(rate=Decimal("40.00"))
+    )
 
     assert result.id_compra == "7777"
     assert result.fecha_pub_adj == date(2024, 6, 1)

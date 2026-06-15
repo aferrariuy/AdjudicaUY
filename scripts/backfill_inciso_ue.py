@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import logging
 import time
-from datetime import date
 
 import httpx
 from sqlalchemy import select, update
@@ -136,7 +135,9 @@ def main() -> None:
             # Be polite to the government server
             time.sleep(0.5)
 
-        logger.info("═══ DONE: %d updated, %d skipped ═══", total_updated, total_skipped)
+        logger.info(
+            "═══ DONE: %d updated, %d skipped ═══", total_updated, total_skipped
+        )
 
     finally:
         client.close()

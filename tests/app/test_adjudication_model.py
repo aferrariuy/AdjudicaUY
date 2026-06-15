@@ -304,7 +304,9 @@ def test_adjudicacion_index_on_compra_id_exists(engine) -> None:
 
 
 def test_adjudicacion_index_on_id_articulo_exists(engine) -> None:
-    assert "ix_adjudicacion_id_articulo" in _indexed_column_names(engine, "adjudicacion")
+    assert "ix_adjudicacion_id_articulo" in _indexed_column_names(
+        engine, "adjudicacion"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +330,8 @@ def test_oferente_persists_with_minimal_valid_data(db_session) -> None:
 
 
 def test_multiple_oferentes_per_compra(db_session) -> None:
-    """A single Compra can have many Oferentes (data-storage spec, "Multiple oferentes")."""
+    """A single Compra can have many Oferentes
+    (data-storage spec, "Multiple oferentes")."""
 
     compra = Compra(**_build_compra_payload())
     db_session.add(compra)
@@ -354,7 +357,8 @@ def test_multiple_oferentes_per_compra(db_session) -> None:
 
 
 def test_compra_with_no_oferentes_ok(db_session) -> None:
-    """A Compra with no Oferentes is valid (data-storage spec, "Compra with no oferentes")."""
+    """A Compra with no Oferentes is valid
+    (data-storage spec, "Compra with no oferentes")."""
 
     compra = Compra(**_build_compra_payload())
     db_session.add(compra)
@@ -411,8 +415,8 @@ def test_filter_by_article_id_single_value(db_session, make_adjudication) -> Non
 def test_filter_by_article_id_comma_separated(db_session, make_adjudication) -> None:
     """A comma-separated list MUST match any of the IDs (IN set predicate)."""
 
-    a = make_adjudication(id_articulo="42851")
-    b = make_adjudication(id_articulo="42852")
+    make_adjudication(id_articulo="42851")
+    make_adjudication(id_articulo="42852")
     make_adjudication(id_articulo="42853")
     make_adjudication(id_articulo=None)
 

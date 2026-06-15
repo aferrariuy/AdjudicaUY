@@ -32,7 +32,6 @@ if TYPE_CHECKING:
 from app.database import Base
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
-from app.models.oferente import Oferente
 from scraper import main as scraper_main
 
 # ---------------------------------------------------------------------------
@@ -228,8 +227,8 @@ def test_scrape_store_query_serve_round_trip(
         assert by_company["E2E-COMPANY-Laptop"].amount_uyu == Decimal("40000.00")
         assert by_company["E2E-COMPANY-Monitor"].amount_uyu == Decimal("20000.00")
         assert by_company["E2E-COMPANY-Limpieza"].amount_uyu == Decimal("20000.00")
-        # Organism enrichment comes from the (id_inciso, id_ue) static
-        # lookup — all three records use (4, 1) → "Secretaría del Ministerio del Interior".
+        # Organism enrichment comes from the (id_inciso, id_ue) static lookup —
+        # all three records use (4, 1) → "Secretaría del Ministerio del Interior".
         organisms = {c.organismo for c in compras}
         assert organisms == {"Secretaría del Ministerio del Interior"}
 
