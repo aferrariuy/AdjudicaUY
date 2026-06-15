@@ -44,7 +44,9 @@ XML_REPORT = """<?xml version="1.0" encoding="UTF-8"?>
   <compra id_compra="1001"
           fecha_pub_adj="2024-03-15"
           id_moneda_monto_adj="20"
-          id_tipocompra="CD">
+          id_tipocompra="CD"
+          id_inciso="3"
+          id_ue="15">
     <adjudicaciones>
       <adjudicacion nombre_comercial="E2E-COMPANY-Laptop"
                     nro_doc_prov="210000000101"
@@ -58,7 +60,9 @@ XML_REPORT = """<?xml version="1.0" encoding="UTF-8"?>
   <compra id_compra="1002"
           fecha_pub_adj="2024-03-20"
           id_moneda_monto_adj="20"
-          id_tipocompra="CD">
+          id_tipocompra="CD"
+          id_inciso="3"
+          id_ue="15">
     <adjudicaciones>
       <adjudicacion nombre_comercial="E2E-COMPANY-Monitor"
                     nro_doc_prov="210000000102"
@@ -72,7 +76,9 @@ XML_REPORT = """<?xml version="1.0" encoding="UTF-8"?>
   <compra id_compra="1003"
           fecha_pub_adj="2024-03-25"
           id_moneda_monto_adj="0"
-          id_tipocompra="LP">
+          id_tipocompra="LP"
+          id_inciso="3"
+          id_ue="15">
     <adjudicaciones>
       <adjudicacion nombre_comercial="E2E-COMPANY-Limpieza"
                     nro_doc_prov="210000000103"
@@ -84,26 +90,6 @@ XML_REPORT = """<?xml version="1.0" encoding="UTF-8"?>
     </adjudicaciones>
   </compra>
 </reporte>
-"""
-
-RSS_FEED = """<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0">
-  <channel>
-    <title>Adjudicaciones</title>
-    <item>
-      <title>Compra Directa - E2E Organismo A | E2E Organismo A</title>
-      <link>http://www.comprasestatales.gub.uy/consultas/detalle/id/1001</link>
-    </item>
-    <item>
-      <title>Compra Directa - E2E Organismo A | E2E Organismo A</title>
-      <link>http://www.comprasestatales.gub.uy/consultas/detalle/id/1002</link>
-    </item>
-    <item>
-      <title>Licitacion Publica - E2E Organismo B | E2E Organismo B</title>
-      <link>http://www.comprasestatales.gub.uy/consultas/detalle/id/1003</link>
-    </item>
-  </channel>
-</rss>
 """
 
 
@@ -194,11 +180,7 @@ def test_scrape_store_query_serve_round_trip(
         def _fake_fetch_xml(url, *, client=None, timeout=30.0):  # noqa: ARG001
             return XML_REPORT
 
-        def _fake_fetch_rss(url, *, client=None, timeout=30.0):  # noqa: ARG001
-            return RSS_FEED
-
         monkeypatch.setattr(scraper_main, "fetch_xml_report", _fake_fetch_xml)
-        monkeypatch.setattr(scraper_main, "fetch_rss_feed", _fake_fetch_rss)
 
         # Replace BcuClient with one that uses a mock transport.
         from scraper import bcu_client as bcu_module
@@ -247,10 +229,17 @@ def test_scrape_store_query_serve_round_trip(
         assert by_company["E2E-COMPANY-Laptop"].amount_uyu == Decimal("40000.00")
         assert by_company["E2E-COMPANY-Monitor"].amount_uyu == Decimal("20000.00")
         assert by_company["E2E-COMPANY-Limpieza"].amount_uyu == Decimal("20000.00")
-        # Organism enrichment came from the RSS feed.
+        # Organism enrichment comes from the (id_inciso, id_ue) static
+        # lookup — all three records use (3, 15) → "Ministerio del Interior".
         organisms = {r.organism for r in rows}
-        assert "E2E Organismo A" in organisms
-        assert "E2E Organismo B" in organisms
+        assert organisms == {"Ministerio del Interior"}
+        # License links are deterministic from id_compra.
+        license_links = {r.license_link for r in rows}
+        assert license_links == {
+            "https://www.comprasestatales.gub.uy/consultas/detalle/id/1001",
+            "https://www.comprasestatales.gub.uy/consultas/detalle/id/1002",
+            "https://www.comprasestatales.gub.uy/consultas/detalle/id/1003",
+        }
 
         # Dates round-tripped through the database untouched.
         dates = sorted(r.date.isoformat() for r in rows)
