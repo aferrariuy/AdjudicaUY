@@ -77,7 +77,12 @@ def engine() -> Generator[Engine]:
     )
     # Import models so the metadata is populated.
     from app.database import Base
-    from app.models import adjudication  # noqa: F401
+    from app.models import (  # noqa: F401
+        adjudicacion,
+        adjudication,  # legacy model — kept on Base.metadata until PR 3
+        compra,
+        oferente,
+    )
 
     Base.metadata.create_all(eng)
     yield eng
