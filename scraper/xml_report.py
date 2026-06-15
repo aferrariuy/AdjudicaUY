@@ -23,13 +23,26 @@ The upstream endpoint returns a ``<reporte>`` document whose structure is::
                         desc_articulo="Laptop"
                         id_moneda="20" />
         </adjudicaciones>
-        <oferentes>...</oferentes>
+        <oferentes>
+          <oferente nombre_comercial="Otra Empresa"
+                    nro_doc_prov="210000000099"
+                    tipo_doc_prov="RUT"
+                    cant_ofertada="10"
+                    precio_unit_ofertado="110.00"
+                    id_moneda="20" />
+        </oferentes>
       </compra>
     </reporte>
 
-A single ``<compra>`` may produce several ``XmlAdjudication`` records — one per
-nested ``<adjudicacion>``. Malformed purchase or adjudication blocks are
-skipped and logged so a partial failure never aborts a run.
+A single ``<compra>`` produces exactly one :class:`XmlCompra`, carrying
+every compra-level attribute plus lists of nested
+:class:`XmlAdjudicacion` (one per ``<adjudicacion>``) and
+:class:`XmlOferente` (one per ``<oferente>``). Malformed purchase or
+adjudication blocks are skipped and logged so a partial failure never
+aborts a run. Unknown attributes on any element log a WARNING but do
+not skip the record — that way the parser stays forward-compatible
+with XML changes (data-ingestion spec, "Parser Logs Unknown
+Attributes" requirement).
 """
 
 from __future__ import annotations
@@ -57,34 +70,136 @@ _DATE_FORMATS: tuple[str, ...] = (
     "%d-%m-%Y",
 )
 
+# ---------------------------------------------------------------------------
+# Compra-level attribute set (one column per known XML attribute). The
+# parser maps any attr in this set to a typed field on XmlCompra.
+# Anything not in the set is logged as a WARNING and ignored — the
+# schema does not need to be DDL-changed every time the upstream
+# payload grows a new attribute.
+# ---------------------------------------------------------------------------
+_COMPRA_KNOWN_ATTRS: frozenset[str] = frozenset(
+    {
+        "id_compra",
+        "objeto",
+        "monto_adj",
+        "id_moneda_monto_adj",
+        "fecha_pub_adj",
+        "num_compra",
+        "anio_compra",
+        "id_tipocompra",
+        "subtipo_compra",
+        "id_inciso",
+        "id_ue",
+    }
+)
+
+_ADJUDICACION_KNOWN_ATTRS: frozenset[str] = frozenset(
+    {
+        "nombre_comercial",
+        "nro_doc_prov",
+        "tipo_doc_prov",
+        "cant_adj",
+        "precio_unit",
+        "precio_tot_imp",
+        "desc_articulo",
+        "id_moneda",
+        "id_articulo",
+    }
+)
+
+_OFERENTE_KNOWN_ATTRS: frozenset[str] = frozenset(
+    {
+        "nombre_comercial",
+        "nro_doc_prov",
+        "tipo_doc_prov",
+        "cant_ofertada",
+        "precio_unit_ofertado",
+        "id_moneda",
+        "variacion",
+        "alternativas",
+    }
+)
+
+
+# ---------------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
-class XmlAdjudication:
-    """One adjudication record extracted from the XML report.
+class XmlAdjudicacion:
+    """One ``<adjudicacion>`` record extracted from the XML report.
 
-    The record is a *partial* view — it intentionally lacks the organism name
-    and the public detail URL, which the pipeline enriches from
-    :mod:`scraper.organism_lookup` and from the deterministic
-    ``/detalle/id/{id_compra}`` URL template respectively.
+    Carries the adjudicated line item's identifying and pricing
+    attributes. ``id_compra`` echoes the parent compra's natural key
+    for in-memory correlation; the database linkage is enforced via
+    the foreign key in :class:`app.models.adjudicacion.Adjudicacion`.
+    """
+
+    id_compra: str
+    nombre_comercial: str
+    nro_doc_prov: str | None
+    tipo_doc_prov: str | None
+    cant_adj: Decimal | None
+    precio_unit: Decimal | None
+    precio_tot_imp: Decimal
+    desc_articulo: str
+    id_moneda: int
+    id_articulo: str | None
+
+
+@dataclass(frozen=True)
+class XmlOferente:
+    """One ``<oferente>`` record extracted from the XML report.
+
+    Carries the bidder's identifying and pricing attributes.
+    ``id_compra`` echoes the parent compra's natural key for
+    in-memory correlation; the database linkage is enforced via the
+    foreign key in :class:`app.models.oferente.Oferente`.
+    """
+
+    id_compra: str
+    nombre_comercial: str | None
+    nro_doc_prov: str | None
+    tipo_doc_prov: str | None
+    cant_ofertada: Decimal | None
+    precio_unit_ofertado: Decimal | None
+    id_moneda: int | None
+    variacion: str | None
+    alternativas: str | None
+
+
+@dataclass(frozen=True)
+class XmlCompra:
+    """One ``<compra>`` block extracted from the XML report.
+
+    Carries the compra-level identifying and pricing attributes plus
+    the lists of nested :class:`XmlAdjudicacion` and
+    :class:`XmlOferente` records. A compra with no ``<adjudicaciones>``
+    children yields an empty ``adjudicaciones`` list (the parser still
+    returns the compra — the caller decides what to do with it). A
+    compra with an empty ``<oferentes/>`` element similarly yields an
+    empty ``oferentes`` list.
     """
 
     id_compra: str
     fecha_pub_adj: date
     id_tipocompra: str
     id_moneda_monto_adj: int
-    nombre_comercial: str
-    nro_doc_prov: str | None
-    tipo_doc_prov: str | None
-    cant_adj: Decimal | None
-    precio_tot_imp: Decimal
-    desc_articulo: str
-    id_moneda: int
-    id_articulo: str | None
+    objeto: str | None
+    monto_adj: Decimal | None
     num_compra: str | None
     anio_compra: str | None
+    subtipo_compra: str | None
     id_inciso: int | None
     id_ue: int | None
+    adjudicaciones: list[XmlAdjudicacion]
+    oferentes: list[XmlOferente]
 
+
+# ---------------------------------------------------------------------------
+# HTTP fetch
+# ---------------------------------------------------------------------------
 
 _HEADERS = {
     "User-Agent": (
@@ -133,6 +248,11 @@ def fetch_xml_report(
     response = client.get(url, headers=_HEADERS)
     response.raise_for_status()
     return response.text
+
+
+# ---------------------------------------------------------------------------
+# Type coercion helpers
+# ---------------------------------------------------------------------------
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -192,29 +312,52 @@ def _attr(element: etree._Element, name: str) -> str | None:
     return stripped or None
 
 
-def _normalize_compra(
-    compra: etree._Element,
-) -> tuple[str, date, str, int, str | None, str | None, int | None, int | None] | None:
-    """Extract the ``<compra>``-level fields shared by every adjudication.
+def _log_unknown_attrs(
+    element: etree._Element, known: frozenset[str]
+) -> None:
+    """Log a WARNING for each attribute on ``element`` outside ``known``.
 
-    Returns a tuple of ``(id_compra, fecha_pub_adj, id_tipocompra,
-    id_moneda_monto_adj, num_compra, anio_compra, id_inciso, id_ue)``.
-    ``id_inciso`` and ``id_ue`` are the procurement-system identifiers
-    used to look up the organism name in
-    :data:`scraper.organism_lookup.ORGANISM_MAP`; both are ``None`` when
-    the upstream attributes are absent (see ``organism-lookup`` spec,
-    "Missing attributes" scenario).
+    The schema is forward-compatible: when the upstream XML adds a
+    new attribute, the parser logs it so the team can decide whether
+    to add a column. The record itself is still produced — the
+    unknown attribute is silently dropped (data-ingestion spec,
+    "Parser Logs Unknown Attributes" requirement).
     """
 
-    id_compra = _attr(compra, "id_compra")
-    fecha_raw = _attr(compra, "fecha_pub_adj")
-    id_tipocompra = _attr(compra, "id_tipocompra") or ""
-    id_moneda_monto_adj_raw = _attr(compra, "id_moneda_monto_adj")
+    tag = element.tag.rsplit("}", 1)[-1]
+    for attr_name in element.attrib:
+        if attr_name not in known:
+            logger.warning(
+                "Unknown attribute on <%s>: attr=%s value=%r",
+                tag,
+                attr_name,
+                element.attrib[attr_name],
+            )
 
+
+# ---------------------------------------------------------------------------
+# Per-element extraction
+# ---------------------------------------------------------------------------
+
+
+def _extract_compra(compra: etree._Element) -> XmlCompra | None:
+    """Extract one :class:`XmlCompra` from a ``<compra>`` element.
+
+    Returns ``None`` when the element lacks the minimum identifying
+    attributes (``id_compra`` and a parseable ``fecha_pub_adj``).
+    Malformed child elements (``<adjudicacion>`` or ``<oferente>``)
+    are skipped with a warning — the parent compra is still
+    returned.
+    """
+
+    _log_unknown_attrs(compra, _COMPRA_KNOWN_ATTRS)
+
+    id_compra = _attr(compra, "id_compra")
     if not id_compra:
         logger.warning("Skipping <compra> without id_compra")
         return None
 
+    fecha_raw = _attr(compra, "fecha_pub_adj")
     parsed_date = _parse_date(fecha_raw)
     if parsed_date is None:
         logger.warning(
@@ -222,46 +365,64 @@ def _normalize_compra(
         )
         return None
 
+    id_moneda_monto_adj_raw = _attr(compra, "id_moneda_monto_adj")
     id_moneda_monto_adj = _parse_int(id_moneda_monto_adj_raw)
     if id_moneda_monto_adj is None:
         logger.warning(
-            "Skipping <compra id_compra=%s> with invalid id_moneda_monto_adj", id_compra
+            "Skipping <compra id_compra=%s> with invalid id_moneda_monto_adj",
+            id_compra,
         )
         return None
 
-    num_compra = _attr(compra, "num_compra")
-    anio_compra = _attr(compra, "anio_compra")
-    id_inciso = _parse_int(_attr(compra, "id_inciso"))
-    id_ue = _parse_int(_attr(compra, "id_ue"))
+    id_tipocompra = _attr(compra, "id_tipocompra") or ""
 
-    return (
-        id_compra,
-        parsed_date,
-        id_tipocompra,
-        id_moneda_monto_adj,
-        num_compra,
-        anio_compra,
-        id_inciso,
-        id_ue,
+    adjudicaciones: list[XmlAdjudicacion] = []
+    oferentes: list[XmlOferente] = []
+
+    # Children may be inside wrapper elements (``<adjudicaciones>`` /
+    # ``<oferentes>``) or directly under ``<compra>`` (defensive — the
+    # upstream XSD uses the wrappers, but we do not crash on either
+    # shape). Match by local tag name.
+    for child in compra.iter():
+        local = child.tag.rsplit("}", 1)[-1]
+        if local == "adjudicacion" and child is not compra:
+            record = _extract_adjudicacion(id_compra, child)
+            if record is not None:
+                adjudicaciones.append(record)
+        elif local == "oferente" and child is not compra:
+            record = _extract_oferente(id_compra, child)
+            if record is not None:
+                oferentes.append(record)
+
+    return XmlCompra(
+        id_compra=id_compra,
+        fecha_pub_adj=parsed_date,
+        id_tipocompra=id_tipocompra,
+        id_moneda_monto_adj=id_moneda_monto_adj,
+        objeto=_attr(compra, "objeto"),
+        monto_adj=_parse_decimal(_attr(compra, "monto_adj")),
+        num_compra=_attr(compra, "num_compra"),
+        anio_compra=_attr(compra, "anio_compra"),
+        subtipo_compra=_attr(compra, "subtipo_compra"),
+        id_inciso=_parse_int(_attr(compra, "id_inciso")),
+        id_ue=_parse_int(_attr(compra, "id_ue")),
+        adjudicaciones=adjudicaciones,
+        oferentes=oferentes,
     )
 
 
-def _normalize_adjudicacion(
-    parent: tuple[str, date, str, int, str | None, str | None, int | None, int | None],
-    adj_el: etree._Element,
-) -> XmlAdjudication | None:
-    """Extract one ``<adjudicacion>`` record, scoped under its parent ``<compra>``."""
+def _extract_adjudicacion(
+    id_compra: str, adj_el: etree._Element
+) -> XmlAdjudicacion | None:
+    """Extract one :class:`XmlAdjudicacion` from a ``<adjudicacion>`` child.
 
-    (
-        id_compra,
-        parsed_date,
-        id_tipocompra,
-        id_moneda_monto_adj,
-        num_compra,
-        anio_compra,
-        id_inciso,
-        id_ue,
-    ) = parent
+    Returns ``None`` when the element lacks the minimum required
+    fields (``nombre_comercial``, ``desc_articulo``, ``precio_tot_imp``,
+    ``id_moneda``). Each missing field logs a warning with the
+    parent id_compra so the team can investigate upstream.
+    """
+
+    _log_unknown_attrs(adj_el, _ADJUDICACION_KNOWN_ATTRS)
 
     nombre_comercial = _attr(adj_el, "nombre_comercial")
     desc_articulo = _attr(adj_el, "desc_articulo")
@@ -294,28 +455,55 @@ def _normalize_adjudicacion(
         )
         return None
 
-    return XmlAdjudication(
+    return XmlAdjudicacion(
         id_compra=id_compra,
-        fecha_pub_adj=parsed_date,
-        id_tipocompra=id_tipocompra,
-        id_moneda_monto_adj=id_moneda_monto_adj,
         nombre_comercial=nombre_comercial,
         nro_doc_prov=_attr(adj_el, "nro_doc_prov"),
         tipo_doc_prov=_attr(adj_el, "tipo_doc_prov"),
         cant_adj=_parse_decimal(_attr(adj_el, "cant_adj")),
+        precio_unit=_parse_decimal(_attr(adj_el, "precio_unit")),
         precio_tot_imp=precio_tot_imp,
         desc_articulo=desc_articulo,
         id_moneda=id_moneda,
         id_articulo=_attr(adj_el, "id_articulo"),
-        num_compra=num_compra,
-        anio_compra=anio_compra,
-        id_inciso=id_inciso,
-        id_ue=id_ue,
     )
 
 
-def parse_xml_report(xml_text: str) -> Iterator[XmlAdjudication]:
-    """Yield an :class:`XmlAdjudication` for every well-formed nested record.
+def _extract_oferente(
+    id_compra: str, of_el: etree._Element
+) -> XmlOferente | None:
+    """Extract one :class:`XmlOferente` from a ``<oferente>`` child.
+
+    Oferente rows are intentionally permissive: an empty element
+    yields a row with every field ``None`` (the schema's nullable
+    columns tolerate this). We only skip when ``_extract_oferente``
+    itself cannot produce a coherent record (none of the current
+    extraction paths fail outright, but the ``None``-tolerant
+    contract is documented here for future schema tightening).
+    """
+
+    _log_unknown_attrs(of_el, _OFERENTE_KNOWN_ATTRS)
+
+    return XmlOferente(
+        id_compra=id_compra,
+        nombre_comercial=_attr(of_el, "nombre_comercial"),
+        nro_doc_prov=_attr(of_el, "nro_doc_prov"),
+        tipo_doc_prov=_attr(of_el, "tipo_doc_prov"),
+        cant_ofertada=_parse_decimal(_attr(of_el, "cant_ofertada")),
+        precio_unit_ofertado=_parse_decimal(_attr(of_el, "precio_unit_ofertado")),
+        id_moneda=_parse_int(_attr(of_el, "id_moneda")),
+        variacion=_attr(of_el, "variacion"),
+        alternativas=_attr(of_el, "alternativas"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public parser entry point
+# ---------------------------------------------------------------------------
+
+
+def parse_xml_report(xml_text: str) -> Iterator[XmlCompra]:
+    """Yield an :class:`XmlCompra` for every well-formed top-level compra.
 
     Parameters
     ----------
@@ -324,9 +512,12 @@ def parse_xml_report(xml_text: str) -> Iterator[XmlAdjudication]:
 
     Yields
     ------
-    XmlAdjudication
-        One per well-formed ``<adjudicacion>`` under a well-formed
-        ``<compra>``. Malformed blocks are skipped with a warning.
+    XmlCompra
+        One per well-formed ``<compra>``. Each compra carries its
+        own list of nested ``<adjudicacion>`` and ``<oferente>``
+        children. Malformed blocks are skipped with a warning; the
+        parent compra is still yielded so partial recovery is
+        possible.
     """
 
     try:
@@ -342,16 +533,15 @@ def parse_xml_report(xml_text: str) -> Iterator[XmlAdjudication]:
     for compra in root.iter():
         if not compra.tag.endswith("compra"):
             continue
-        parent = _normalize_compra(compra)
-        if parent is None:
-            continue
-
-        for adj_el in compra.iter():
-            if not adj_el.tag.endswith("adjudicacion"):
-                continue
-            record = _normalize_adjudicacion(parent, adj_el)
-            if record is not None:
-                yield record
+        record = _extract_compra(compra)
+        if record is not None:
+            yield record
 
 
-__all__ = ["XmlAdjudication", "fetch_xml_report", "parse_xml_report"]
+__all__ = [
+    "XmlAdjudicacion",
+    "XmlCompra",
+    "XmlOferente",
+    "fetch_xml_report",
+    "parse_xml_report",
+]
