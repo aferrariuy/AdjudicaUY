@@ -47,6 +47,11 @@ class Compra(Base):
     subtipo_compra = Column(String(10), nullable=True)
     id_inciso = Column(Integer, nullable=True)
     id_ue = Column(Integer, nullable=True)
+    # Alternative organism identifier carried by some <compra> blocks
+    # instead of the (id_inciso, id_ue) pair. Resolved via the static
+    # UCC codiguera in ``scraper.ucc_lookup``. Nullable: most purchases
+    # carry (id_inciso, id_ue) only.
+    id_ucc = Column(Integer, nullable=True)
 
     # Resolved at ingest time from the static (id_inciso, id_ue) lookup
     # (see ``scraper.organism_lookup``). Nullable because the lookup may
@@ -66,6 +71,7 @@ class Compra(Base):
         Index("ix_compra_id_inciso", "id_inciso"),
         Index("ix_compra_id_ue", "id_ue"),
         Index("ix_compra_id_tipocompra", "id_tipocompra"),
+        Index("ix_compra_id_ucc", "id_ucc"),
     )
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
