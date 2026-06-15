@@ -48,7 +48,7 @@ from scraper.xml_report import (
 )
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.WARNING,
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger("scrape_day_by_day")
@@ -157,6 +157,11 @@ def main() -> None:
         action="store_true",
         help="Fetch and parse but don't insert into DB",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show detailed per-day logs (default: warnings + summary only)",
+    )
     parser.add_argument("--start", default="2026-04-01", help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", default="2026-06-12", help="End date (YYYY-MM-DD)")
     parser.add_argument(
@@ -211,6 +216,13 @@ def main() -> None:
         ),
     )
     args = parser.parse_args()
+
+    if args.verbose:
+        logging.getLogger().setLevel(logging.INFO)
+    # Always show our summary/operator messages regardless of --verbose.
+    # Per-day noise lives on child ``day.*`` loggers (suppressed by root
+    # WARNING); this keeps DONE/TIMING visible without --verbose.
+    logger.setLevel(logging.INFO)
 
     t_overall_start = time.perf_counter()
 
@@ -372,7 +384,7 @@ def main() -> None:
             t0 = time.perf_counter()
             if args.dry_run:
                 total_adjs = sum(len(c.adjudicaciones) for c in normalized)
-                log.info(
+                log.debug(
                     "[DRY RUN] %s: %d XML → %d compras (%d adjudicaciones)",
                     current,
                     len(xml_compras),
@@ -383,7 +395,7 @@ def main() -> None:
             else:
                 buffer.extend(normalized)
                 days_since_flush += 1
-                log.info(
+                log.debug(
                     "%s: %d XML → %d compras (buffered=%d, days_since_flush=%d)",
                     current,
                     len(xml_compras),
@@ -396,7 +408,7 @@ def main() -> None:
                     or days_since_flush >= args.flush_interval
                 ):
                     inserted = _bulk_insert(session, buffer)
-                    log.info(
+                    log.debug(
                         "Flushed %d records (total=%d)",
                         inserted,
                         total + inserted,
@@ -407,7 +419,7 @@ def main() -> None:
             t_insert = time.perf_counter() - t0
 
             t_day = time.perf_counter() - t_day_start
-            log.info(
+            log.debug(
                 "TIMING %s: day=%.2fs xml=%.2fs parse=%.2fs "
                 "normalize=%.2fs insert=%.2fs",
                 current,

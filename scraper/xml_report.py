@@ -321,7 +321,7 @@ def _attr(element: etree._Element, name: str) -> str | None:
 def _log_unknown_attrs(
     element: etree._Element, known: frozenset[str]
 ) -> None:
-    """Log a WARNING for each attribute on ``element`` outside ``known``.
+    """Log at DEBUG level each attribute on ``element`` outside ``known``.
 
     The schema is forward-compatible: when the upstream XML adds a
     new attribute, the parser logs it so the team can decide whether
@@ -333,7 +333,7 @@ def _log_unknown_attrs(
     tag = element.tag.rsplit("}", 1)[-1]
     for attr_name in element.attrib:
         if attr_name not in known:
-            logger.warning(
+            logger.debug(
                 "Unknown attribute on <%s>: attr=%s value=%r",
                 tag,
                 attr_name,
