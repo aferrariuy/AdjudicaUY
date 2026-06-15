@@ -68,6 +68,7 @@ def _compra_dict(row: CompraRow) -> dict[str, Any]:
         "subtipo_compra": row.subtipo_compra,
         "id_inciso": row.id_inciso,
         "id_ue": row.id_ue,
+        "id_ucc": row.id_ucc,
         "organismo": row.organismo or None,
         "source_url": row.source_url,
     }
