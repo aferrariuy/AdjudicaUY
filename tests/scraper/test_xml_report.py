@@ -578,8 +578,8 @@ def test_parse_xml_report_handles_latin1_encoding() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_parse_xml_logs_warning_for_unknown_attribute(caplog) -> None:
-    """Unknown attributes on compra/adjudicacion/oferente log a WARNING."""
+def test_parse_xml_logs_debug_for_unknown_attribute(caplog) -> None:
+    """Unknown attributes on compra/adjudicacion/oferente log at DEBUG."""
 
     payload = """<?xml version="1.0" encoding="UTF-8"?>
 <reporte>
@@ -596,14 +596,14 @@ def test_parse_xml_logs_warning_for_unknown_attribute(caplog) -> None:
   </compra>
 </reporte>
 """
-    with caplog.at_level(logging.WARNING, logger="scraper.xml_report"):
+    with caplog.at_level(logging.DEBUG, logger="scraper.xml_report"):
         compras = list(parse_xml_report(payload))
 
     # All three records still come through.
     assert len(compras) == 1
     assert compras[0].id_compra == "1"
 
-    # Three WARNING lines — one per element.
+    # Three DEBUG lines — one per element.
     msgs = [record.message for record in caplog.records]
     assert any("nuevo_campo_compra" in m for m in msgs)
     assert any("nuevo_campo_adj" in m for m in msgs)
