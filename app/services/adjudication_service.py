@@ -4,8 +4,29 @@ This module is the only place the web layer talks to SQLAlchemy. Routes
 call functions like :func:`list_adjudications` or :func:`ranking_by_company`
 with plain Python values; the service builds the SQLAlchemy query, applies
 active filters with AND logic, executes it, and returns plain data
-structures (lists of ``Adjudication`` rows, ``(label, value)`` pairs for
-charts, etc.).
+structures (lists of :class:`AdjudicationRow` dataclasses for listings,
+``(label, value)`` pairs for charts, etc.).
+
+The query layer reads from a join of the :class:`Compra` and
+:class:`Adjudicacion` tables (web-app spec, "Query Layer Reads From
+New Schema" requirement). The service flattens each row into an
+:class:`AdjudicationRow` — a display-shaped dataclass whose attribute
+names match the old ORM model so the existing Jinja templates do not
+need to change. The mapping is one-to-one:
+
+* ``date``     ← ``Compra.fecha_pub_adj``
+* ``organism`` ← ``Compra.organismo``
+* ``license_type`` ← ``Compra.id_tipocompra``
+* ``license_link``  ← built from ``Compra.id_compra``
+* ``winning_company``  ← ``Adjudicacion.nombre_comercial``
+* ``article``  ← ``Adjudicacion.desc_articulo``
+* ``amount``   ← ``Adjudicacion.precio_tot_imp``
+* ``currency`` ← resolved at ingest (no longer a column — see
+   :mod:`scraper.normalizer` for the display code table)
+* ``amount_uyu`` ← ``Adjudicacion.amount_uyu``
+* ``company_document``        ← ``Adjudicacion.nro_doc_prov``
+* ``company_document_type``   ← ``Adjudicacion.tipo_doc_prov``
+* ``article_id``              ← ``Adjudicacion.id_articulo``
 
 Keeping the query construction in one place means:
 
@@ -22,7 +43,8 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import Column, and_, func, select
 
-from app.models.adjudication import Adjudication
+from app.models.adjudicacion import Adjudicacion
+from app.models.compra import Compra
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -66,6 +88,49 @@ class AdjudicationFilters:
                 "date_to",
             )
         )
+
+
+# ---------------------------------------------------------------------------
+# Display dataclass
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AdjudicationRow:
+    """Display-shaped view of one adjudicated line item.
+
+    Returned by the service so the Jinja templates can read the same
+    field names they used to read off the old ``Adjudication`` ORM
+    model. Construction happens inside the service — the web layer
+    never builds one by hand.
+    """
+
+    date: date
+    organism: str
+    winning_company: str
+    article: str
+    amount: "Decimal"
+    currency: str
+    amount_uyu: "Decimal | None"
+    license_type: str
+    company_document: str | None
+    company_document_type: str | None
+    license_link: str
+
+
+# ---------------------------------------------------------------------------
+# License link template — mirrors the deterministic template the
+# scraper uses when building its own link, so DB rows and freshly
+# scraped rows produce the same URL for the same ``id_compra``.
+# ---------------------------------------------------------------------------
+
+_LICENSE_LINK_TEMPLATE = (
+    "https://www.comprasestatales.gub.uy/consultas/detalle/id/{id_compra}"
+)
+
+
+def _build_license_link(id_compra: str) -> str:
+    return _LICENSE_LINK_TEMPLATE.format(id_compra=id_compra)
 
 
 def _normalize(text: str | None) -> str | None:
@@ -180,7 +245,7 @@ def _is_organism_predicate(predicate: Any) -> bool:
     operator_name = getattr(predicate.operator, "__name__", "")
     return (
         isinstance(left, Column)
-        and left.key == "organism"
+        and left.key == "organismo"
         and operator_name == "ilike_op"
     )
 
@@ -198,11 +263,11 @@ def _build_predicates(filters: AdjudicationFilters) -> list[Any]:
     predicates: list[Any] = []
 
     if filters.company:
-        predicates.append(Adjudication.winning_company.ilike(f"%{filters.company}%"))
+        predicates.append(Adjudicacion.nombre_comercial.ilike(f"%{filters.company}%"))
     if filters.organism:
-        predicates.append(Adjudication.organism.ilike(f"%{filters.organism}%"))
+        predicates.append(Compra.organismo.ilike(f"%{filters.organism}%"))
     if filters.article:
-        predicates.append(Adjudication.article.ilike(f"%{filters.article}%"))
+        predicates.append(Adjudicacion.desc_articulo.ilike(f"%{filters.article}%"))
     if filters.article_id:
         # Comma-separated list of exact IDs → IN set predicate. Whitespace
         # and empty entries are dropped so trailing commas ("1234, ") do
@@ -211,11 +276,11 @@ def _build_predicates(filters: AdjudicationFilters) -> list[Any]:
         ids = [piece.strip() for piece in filters.article_id.split(",")]
         ids = [piece for piece in ids if piece]
         if ids:
-            predicates.append(Adjudication.article_id.in_(ids))
+            predicates.append(Adjudicacion.id_articulo.in_(ids))
     if filters.date_from is not None:
-        predicates.append(Adjudication.date >= filters.date_from)
+        predicates.append(Compra.fecha_pub_adj >= filters.date_from)
     if filters.date_to is not None:
-        predicates.append(Adjudication.date <= filters.date_to)
+        predicates.append(Compra.fecha_pub_adj <= filters.date_to)
 
     return predicates
 
@@ -240,30 +305,31 @@ def list_adjudications(
     *,
     limit: int = 50,
     offset: int = 0,
-) -> list[Adjudication]:
-    """Return a page of adjudications matching ``filters``, newest first.
+) -> list[AdjudicationRow]:
+    """Return a page of adjudicated line items matching ``filters``, newest first.
 
-    Ordering is ``date DESC, id DESC`` so that two adjudications on the
-    same date have a stable order. ``limit`` and ``offset`` are simple
-    pagination knobs — the route layer may cap them.
+    Joins :class:`Compra` and :class:`Adjudicacion`; orders by
+    ``Compra.fecha_pub_adj DESC, Adjudicacion.id DESC`` so two line
+    items on the same date have a stable order. ``limit`` and ``offset``
+    are simple pagination knobs — the route layer may cap them.
     """
 
-    stmt = select(Adjudication)
+    stmt = _listing_query()
     stmt = _apply_filters(stmt, filters)
-    stmt = stmt.order_by(Adjudication.date.desc(), Adjudication.id.desc())
+    stmt = stmt.order_by(Compra.fecha_pub_adj.desc(), Adjudicacion.id.desc())
     stmt = stmt.limit(limit).offset(offset)
-    return list(session.execute(stmt).scalars())
+    return [_row_to_adjudication_row(row) for row in session.execute(stmt)]
 
 
 def count_adjudications(session: Session, filters: AdjudicationFilters) -> int:
-    """Return the total number of adjudications matching ``filters``.
+    """Return the total number of adjudicaciones matching ``filters``.
 
     Used by the route to render pagination controls and the "showing N
     of M" header. A separate ``COUNT(*)`` query keeps the listing query
     simple.
     """
 
-    stmt = select(func.count(Adjudication.id))
+    stmt = select(func.count(Adjudicacion.id)).join(Compra, Compra.id == Adjudicacion.compra_id)
     stmt = _apply_filters(stmt, filters)
     return int(session.execute(stmt).scalar_one())
 
@@ -278,7 +344,7 @@ def ranking_by_company(
     filters: AdjudicationFilters,
     *,
     limit: int = 10,
-) -> list[tuple[str, Decimal]]:
+) -> list[tuple[str, "Decimal"]]:
     """Return the top companies by total adjudicated amount in UYU.
 
     The result is a list of ``(company_name, total_amount_uyu)`` pairs,
@@ -293,12 +359,13 @@ def ranking_by_company(
 
     stmt = (
         select(
-            Adjudication.winning_company.label("company"),
-            func.coalesce(func.sum(Adjudication.amount_uyu), 0).label("total"),
+            Adjudicacion.nombre_comercial.label("company"),
+            func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label("total"),
         )
-        .where(Adjudication.amount_uyu.is_not(None))
-        .group_by(Adjudication.winning_company)
-        .order_by(func.sum(Adjudication.amount_uyu).desc())
+        .join(Compra, Compra.id == Adjudicacion.compra_id)
+        .where(Adjudicacion.amount_uyu.is_not(None))
+        .group_by(Adjudicacion.nombre_comercial)
+        .order_by(func.sum(Adjudicacion.amount_uyu).desc())
         .limit(limit)
     )
     stmt = _apply_filters(stmt, filters)
@@ -310,7 +377,7 @@ def ranking_by_organism(
     filters: AdjudicationFilters,
     *,
     limit: int = 10,
-) -> list[tuple[str, Decimal]]:
+) -> list[tuple[str, "Decimal"]]:
     """Return the top organisms by total adjudicated amount in UYU.
 
     The result is a list of ``(organism_name, total_amount_uyu)`` pairs,
@@ -325,12 +392,13 @@ def ranking_by_organism(
 
     stmt = (
         select(
-            Adjudication.organism.label("organism"),
-            func.coalesce(func.sum(Adjudication.amount_uyu), 0).label("total"),
+            Compra.organismo.label("organism"),
+            func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label("total"),
         )
-        .where(Adjudication.amount_uyu.is_not(None))
-        .group_by(Adjudication.organism)
-        .order_by(func.sum(Adjudication.amount_uyu).desc())
+        .join(Compra, Compra.id == Adjudicacion.compra_id)
+        .where(Adjudicacion.amount_uyu.is_not(None))
+        .group_by(Compra.organismo)
+        .order_by(func.sum(Adjudicacion.amount_uyu).desc())
         .limit(limit)
     )
     stmt = _apply_filters(stmt, filters)
@@ -365,18 +433,76 @@ def distinct_organisms(
     ]
 
     stmt = (
-        select(Adjudication.organism)
+        select(Compra.organismo)
+        .join(Adjudicacion, Adjudicacion.compra_id == Compra.id)
         .distinct()
-        .order_by(Adjudication.organism.asc())
+        .order_by(Compra.organismo.asc())
         .limit(limit)
     )
     if predicates:
         stmt = stmt.where(and_(*predicates))
-    return [row[0] for row in session.execute(stmt)]
+    return [row[0] for row in session.execute(stmt) if row[0] is not None]
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+
+def _listing_query() -> Any:
+    """Base SELECT for the listing query — selects all display fields.
+
+    Returning a column bundle keeps ``list_adjudications`` focused on
+    ordering + limits + filters; this helper centralizes the projection
+    so renaming a column only touches one place.
+    """
+
+    return select(
+        Compra.fecha_pub_adj.label("date"),
+        Compra.organismo.label("organism"),
+        Compra.id_tipocompra.label("license_type"),
+        Compra.id_compra.label("id_compra"),
+        Adjudicacion.nombre_comercial.label("winning_company"),
+        Adjudicacion.desc_articulo.label("article"),
+        Adjudicacion.precio_tot_imp.label("amount"),
+        Adjudicacion.amount_uyu.label("amount_uyu"),
+        Adjudicacion.nro_doc_prov.label("company_document"),
+        Adjudicacion.tipo_doc_prov.label("company_document_type"),
+    ).join(Adjudicacion, Adjudicacion.compra_id == Compra.id)
+
+
+def _row_to_adjudication_row(row: Any) -> AdjudicationRow:
+    """Map a SQLAlchemy row to a display-shaped :class:`AdjudicationRow`.
+
+    The ``currency`` field is the new schema's per-row display code
+    (set by the normalizer at ingest). It is not on the new schema
+    directly — the AdjudicacionRow constructor receives the resolved
+    code from the scraper. For legacy rows that did not have a
+    currency recorded, fall back to "UYU" so the template never
+    renders ``None``.
+    """
+
+    currency = getattr(row, "currency", "UYU") or "UYU"
+    organism = row.organism or ""
+    license_type = row.license_type or ""
+    return AdjudicationRow(
+        date=row.date,
+        organism=organism,
+        winning_company=row.winning_company,
+        article=row.article,
+        amount=row.amount,
+        currency=currency,
+        amount_uyu=row.amount_uyu,
+        license_type=license_type,
+        company_document=row.company_document,
+        company_document_type=row.company_document_type,
+        license_link=_build_license_link(row.id_compra),
+    )
 
 
 __all__ = [
     "AdjudicationFilters",
+    "AdjudicationRow",
     "DateValidationError",
     "count_adjudications",
     "distinct_organisms",
