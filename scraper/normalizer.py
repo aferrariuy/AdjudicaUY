@@ -1,26 +1,31 @@
 """Convert non-UYU adjudication amounts to UYU using BCU exchange rates.
 
-The normalization step takes a :class:`JoinedRecord` (an already-enriched
-adjudication, defined here in the normalizer module — see
-``Decision: JoinedRecord disposition`` in the design) and produces a
-:class:`NormalizedRecord` where ``currency`` is a 3-letter display code
-and ``amount_uyu`` is the equivalent value in Uruguayan pesos, or
-``NULL`` when conversion was impossible.
+The normalization step takes an :class:`XmlCompra` (already-parsed
+XML, defined in :mod:`scraper.xml_report`) plus a per-compra organism
+enrichment and produces one :class:`CompraRow` carrying the compra
+metadata plus a list of :class:`AdjudicacionRow` carrying each
+adjudicated line item with its per-row ``amount_uyu``.
 
-The pipeline is:
+The pipeline is, per ``<adjudicacion>`` child:
 
 1. Look up the procurement ``id_moneda`` in :data:`CONVERSION_TABLE`. If
    the code is ``0`` (Pesos Uruguayos), ``amount_uyu`` is set to
-   ``amount`` and no BCU call is made.
+   ``precio_tot_imp`` and no BCU call is made.
 2. If the code is a known non-convertible currency (UI, UR, OHR, …),
    ``amount_uyu`` is ``NULL`` and no BCU call is made.
-3. If the code maps to a BCU currency, the TCC rate is fetched for the
-   adjudication date with a 7-day lookback fallback. ``amount_uyu`` is
-   ``amount * TCC`` rounded to two decimal places.
+3. If the code maps to a BCU currency, the TCC rate is fetched for
+   the adjudication date with a 7-day lookback fallback. ``amount_uyu``
+   is ``precio_tot_imp * TCC`` rounded to two decimal places.
 4. If the code is unmapped, the normalizer queries the BCU ``monedas``
-   endpoint as a best-effort sanity check. If the procurement ID happens
-   to coincide with a valid BCU code, the conversion proceeds; otherwise
-   ``amount_uyu`` is ``NULL`` and a warning is logged.
+   endpoint as a best-effort sanity check. If the procurement ID
+   happens to coincide with a valid BCU code, the conversion proceeds;
+   otherwise ``amount_uyu`` is ``NULL`` and a warning is logged.
+
+The BCU rate is resolved per adjudicated line item, using
+``adjudicacion.id_moneda`` (NOT the compra-level
+``id_moneda_monto_adj``) — the spec changed the conversion path to
+be per-line-item (data-ingestion spec, "BCU Exchange Rate Fetching"
+requirement).
 """
 
 from __future__ import annotations
@@ -35,10 +40,11 @@ if TYPE_CHECKING:
     from datetime import date
 
     from scraper.bcu_client import BcuClient
+    from scraper.xml_report import XmlCompra, XmlOferente
 
 logger = logging.getLogger(__name__)
 
-# A scale of 2 fits the ``Numeric(12, 2)`` column on the Adjudication model.
+# A scale of 2 fits the ``Numeric(14, 2)`` columns on the new models.
 _UYU_SCALE = Decimal("0.01")
 
 
@@ -99,69 +105,115 @@ NON_CONVERTIBLE_TABLE: dict[int, str] = {
 }
 
 
-@dataclass(frozen=True)
-class JoinedRecord:
-    """A fully-enriched adjudication, ready for normalization and insertion.
+# ---------------------------------------------------------------------------
+# Dataclasses
+# ---------------------------------------------------------------------------
 
-    ``source_url`` is the URL the XML report was fetched from — the same for
-    every record in a run. It is the first column of the unique constraint
-    defined on the ``adjudications`` table, so re-scraping the same source
-    is naturally idempotent.
+
+@dataclass(frozen=True)
+class CompraEnrichment:
+    """Per-compra enrichment shared by every child adjudication.
+
+    Built once per :class:`XmlCompra` by the orchestrator: the
+    organism is resolved via the static ``(id_inciso, id_ue)``
+    lookup, the license link is built deterministically from
+    ``id_compra``, and ``source_url`` is the per-day URL the XML
+    was fetched from. Keeping these as a separate dataclass means
+    :class:`CompraRow` / :class:`AdjudicacionRow` are pure
+    one-to-one projections of the parser's data — no extra
+    cross-cutting fields to track.
     """
 
+    organism: str
+    license_link: str
+    source_url: str
+
+
+@dataclass(frozen=True)
+class AdjudicacionRow:
+    """One adjudicated line item, ready for persistence.
+
+    Carries every column the ``adjudicacion`` table needs plus the
+    BCU-normalized ``amount_uyu`` and the display-currency code.
+    The display code lives here (not in the model) because the
+    conversion happens at ingest time and the table does not store
+    it — the web layer's :class:`AdjudicationRow` re-derives it from
+    the :class:`Compra` row's source data when needed.
+    """
+
+    # Provenance
     id_compra: str
-    fecha_pub_adj: date
-    id_tipocompra: str
-    id_moneda_monto_adj: int
     nombre_comercial: str
     nro_doc_prov: str | None
     tipo_doc_prov: str | None
+
+    # Pricing
     cant_adj: Decimal | None
+    precio_unit: Decimal | None
     precio_tot_imp: Decimal
-    desc_articulo: str
     id_moneda: int
-    organism: str
-    license_link: str
-    source_url: str
-    id_articulo: str | None
-    num_compra: str | None
-    anio_compra: str | None
-    id_inciso: int | None
-    id_ue: int | None
-
-
-@dataclass(frozen=True)
-class NormalizedRecord:
-    """A joined record enriched with ``currency`` and ``amount_uyu``.
-
-    Has exactly the fields needed to populate an :class:`Adjudication` row
-    — no more, no less — so the orchestrator can map them one-to-one.
-    """
-
-    # Provenance / identification
-    id_compra: str
-    source_url: str
-    license_link: str
-    date: object  # ``datetime.date`` — written as object to avoid an import dance
-    organism: str
-    id_inciso: int | None
-    id_ue: int | None
-
-    # Financials
-    amount: Decimal
     currency: str
     amount_uyu: Decimal | None
 
-    # Company
-    winning_company: str
-    company_document: str | None
-    company_document_type: str | None
+    # Article
+    desc_articulo: str
+    id_articulo: str | None
 
-    # License / item
-    license_type: str
-    article: str
-    article_quantity: Decimal | None
-    article_id: str | None
+
+@dataclass(frozen=True)
+class OferenteRow:
+    """One bidder record, ready for persistence.
+
+    Bidders carry no normalized-currency field — the upstream
+    ``id_moneda`` is stored as-is on the row. The currency code is
+    not derived here because the web app does not aggregate
+    oferentes by amount.
+    """
+
+    id_compra: str
+    nombre_comercial: str | None
+    nro_doc_prov: str | None
+    tipo_doc_prov: str | None
+    cant_ofertada: Decimal | None
+    precio_unit_ofertado: Decimal | None
+    id_moneda: int | None
+    variacion: str | None
+    alternativas: str | None
+
+
+@dataclass(frozen=True)
+class CompraRow:
+    """One compra + its adjudicated children, ready for persistence.
+
+    The persistence layer maps :class:`CompraRow` to the ``compra``
+    table and each :class:`AdjudicacionRow` /
+    :class:`OferenteRow` to its child table. The shape is
+    flat-on-the-parent / nested-on-the-children — the database is
+    normalized, but the orchestrator's view stays one XmlCompra =
+    one CompraRow.
+    """
+
+    id_compra: str
+    fecha_pub_adj: "date"
+    id_tipocompra: str
+    id_moneda_monto_adj: int
+    objeto: str | None
+    monto_adj: Decimal | None
+    num_compra: str | None
+    anio_compra: str | None
+    subtipo_compra: str | None
+    id_inciso: int | None
+    id_ue: int | None
+    organismo: str
+    license_link: str
+    source_url: str
+    adjudicaciones: list[AdjudicacionRow]
+    oferentes: list[OferenteRow]
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 
 def _resolve_mode(id_moneda: int) -> ConversionMode:
@@ -228,91 +280,163 @@ def _try_resolve_unknown(
     return None
 
 
-def normalize_record(
-    record: JoinedRecord,
+def _convert_amount(
+    id_moneda: int,
+    amount: Decimal,
+    on_date: "date",
     bcu_client: BcuClient,
     *,
     max_lookback_days: int = 7,
-) -> NormalizedRecord:
-    """Convert ``record`` into a :class:`NormalizedRecord` ready for insertion.
+) -> tuple[str, Decimal | None]:
+    """Return ``(currency_display_code, amount_uyu_or_None)`` for one line.
 
-    The BCU client is used as a context manager internally to keep its
-    lifecycle predictable when this function is called in a tight loop —
-    the caller may also pass a long-lived client, which the function will
-    not close.
+    Centralizes the BCU lookup + currency classification so the
+    :func:`normalize_compra` driver does not have to repeat the
+    dispatch table per adjudicated row.
     """
 
-    id_moneda = record.id_moneda
     mode = _resolve_mode(id_moneda)
-
     currency = _display_currency(id_moneda)
-    amount = record.precio_tot_imp
 
     if mode is ConversionMode.PASSTHROUGH:
-        amount_uyu: Decimal | None = _quantize_uyu(amount)
-    elif mode is ConversionMode.NULL:
-        amount_uyu = None
-    else:  # CONVERT
-        bcu_code, _ = CONVERSION_TABLE[id_moneda]
-        rate = bcu_client.get_tcc(
-            bcu_code, record.fecha_pub_adj, max_lookback_days=max_lookback_days
-        )
-        amount_uyu = None if rate is None else _quantize_uyu(amount * rate)
+        return currency, _quantize_uyu(amount)
+    if mode is ConversionMode.NULL:
+        return currency, None
 
-    # If we couldn't resolve ``id_moneda`` at all, try a BCU monedas lookup
-    # as a last resort. This branch only runs for the small set of codes
-    # that are not in the static tables.
-    if (
-        id_moneda not in PASSTHROUGH_TABLE
-        and id_moneda not in NON_CONVERTIBLE_TABLE
-        and id_moneda not in CONVERSION_TABLE
-    ):
-        resolved = _try_resolve_unknown(id_moneda, bcu_client)
-        if resolved is not None:
-            bcu_code, iso = resolved
-            currency = iso
-            rate = bcu_client.get_tcc(
-                bcu_code, record.fecha_pub_adj, max_lookback_days=max_lookback_days
-            )
-            amount_uyu = None if rate is None else _quantize_uyu(amount * rate)
+    bcu_code, _ = CONVERSION_TABLE[id_moneda]
+    rate = bcu_client.get_tcc(
+        bcu_code, on_date, max_lookback_days=max_lookback_days
+    )
+    return currency, None if rate is None else _quantize_uyu(amount * rate)
+
+
+# ---------------------------------------------------------------------------
+# Public normalizer
+# ---------------------------------------------------------------------------
+
+
+def normalize_compra(
+    compra: "XmlCompra",
+    enrichment: CompraEnrichment,
+    bcu_client: BcuClient,
+    *,
+    max_lookback_days: int = 7,
+) -> CompraRow:
+    """Convert ``compra`` into a :class:`CompraRow` ready for insertion.
+
+    Each nested :class:`XmlAdjudicacion` is BCU-normalized
+    independently — the per-row ``amount_uyu`` lives on the child
+    :class:`AdjudicacionRow`, not the parent. Unmapped
+    ``id_moneda`` codes fall back to the BCU ``monedas`` endpoint
+    as a last resort (the same path the legacy normalizer took).
+    """
+
+    adjudicaciones: list[AdjudicacionRow] = []
+    for adj in compra.adjudicaciones:
+        # Last-resort: if id_moneda is not in any of the static
+        # tables, try the BCU monedas catalogue. This branch only
+        # runs for the small set of unmapped codes; the rest take
+        # the fast path in ``_convert_amount``.
+        id_moneda = adj.id_moneda
+        if (
+            id_moneda not in PASSTHROUGH_TABLE
+            and id_moneda not in NON_CONVERTIBLE_TABLE
+            and id_moneda not in CONVERSION_TABLE
+        ):
+            resolved = _try_resolve_unknown(id_moneda, bcu_client)
+            if resolved is not None:
+                # Inject the resolved code into the static table so
+                # the rest of the run can use the fast path. Use a
+                # per-call local copy to keep the module-level
+                # tables pristine (and the dispatch predictable).
+                local_conversion = {**CONVERSION_TABLE, id_moneda: resolved}
+                bcu_code, iso = local_conversion[id_moneda]
+                rate = bcu_client.get_tcc(
+                    bcu_code,
+                    compra.fecha_pub_adj,
+                    max_lookback_days=max_lookback_days,
+                )
+                currency = iso[:3]
+                amount_uyu = (
+                    None if rate is None else _quantize_uyu(adj.precio_tot_imp * rate)
+                )
+            else:
+                logger.warning(
+                    "Unknown id_moneda=%s for id_compra=%s; setting amount_uyu=NULL",
+                    id_moneda,
+                    compra.id_compra,
+                )
+                currency = "UNK"
+                amount_uyu = None
         else:
-            logger.warning(
-                "Unknown id_moneda=%s for id_compra=%s; setting amount_uyu=NULL",
+            currency, amount_uyu = _convert_amount(
                 id_moneda,
-                record.id_compra,
+                adj.precio_tot_imp,
+                compra.fecha_pub_adj,
+                bcu_client,
+                max_lookback_days=max_lookback_days,
             )
-            amount_uyu = None
-            currency = "UNK"
 
-    return NormalizedRecord(
-        id_compra=record.id_compra,
-        source_url=record.source_url,
-        license_link=record.license_link,
-        date=record.fecha_pub_adj,
-        organism=record.organism,
-        id_inciso=record.id_inciso,
-        id_ue=record.id_ue,
-        amount=_quantize_uyu(amount),
-        currency=currency,
-        amount_uyu=amount_uyu,
-        winning_company=record.nombre_comercial,
-        company_document=record.nro_doc_prov,
-        company_document_type=record.tipo_doc_prov,
-        license_type=record.id_tipocompra,
-        article=record.desc_articulo,
-        article_quantity=(
-            _quantize_uyu(record.cant_adj) if record.cant_adj is not None else None
-        ),
-        article_id=record.id_articulo,
+        adjudicaciones.append(
+            AdjudicacionRow(
+                id_compra=compra.id_compra,
+                nombre_comercial=adj.nombre_comercial,
+                nro_doc_prov=adj.nro_doc_prov,
+                tipo_doc_prov=adj.tipo_doc_prov,
+                cant_adj=adj.cant_adj,
+                precio_unit=adj.precio_unit,
+                precio_tot_imp=adj.precio_tot_imp,
+                id_moneda=id_moneda,
+                currency=currency,
+                amount_uyu=amount_uyu,
+                desc_articulo=adj.desc_articulo,
+                id_articulo=adj.id_articulo,
+            )
+        )
+
+    oferentes: list[OferenteRow] = [
+        OferenteRow(
+            id_compra=compra.id_compra,
+            nombre_comercial=of.nombre_comercial,
+            nro_doc_prov=of.nro_doc_prov,
+            tipo_doc_prov=of.tipo_doc_prov,
+            cant_ofertada=of.cant_ofertada,
+            precio_unit_ofertado=of.precio_unit_ofertado,
+            id_moneda=of.id_moneda,
+            variacion=of.variacion,
+            alternativas=of.alternativas,
+        )
+        for of in compra.oferentes
+    ]
+
+    return CompraRow(
+        id_compra=compra.id_compra,
+        fecha_pub_adj=compra.fecha_pub_adj,
+        id_tipocompra=compra.id_tipocompra,
+        id_moneda_monto_adj=compra.id_moneda_monto_adj,
+        objeto=compra.objeto,
+        monto_adj=compra.monto_adj,
+        num_compra=compra.num_compra,
+        anio_compra=compra.anio_compra,
+        subtipo_compra=compra.subtipo_compra,
+        id_inciso=compra.id_inciso,
+        id_ue=compra.id_ue,
+        organismo=enrichment.organism,
+        license_link=enrichment.license_link,
+        source_url=enrichment.source_url,
+        adjudicaciones=adjudicaciones,
+        oferentes=oferentes,
     )
 
 
 __all__ = [
     "CONVERSION_TABLE",
+    "CompraEnrichment",
+    "CompraRow",
     "ConversionMode",
-    "JoinedRecord",
     "NON_CONVERTIBLE_TABLE",
-    "NormalizedRecord",
+    "OferenteRow",
     "PASSTHROUGH_TABLE",
-    "normalize_record",
+    "AdjudicacionRow",
+    "normalize_compra",
 ]
