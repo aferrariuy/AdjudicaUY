@@ -139,6 +139,108 @@ def test_parse_valid_xml_extracts_all_eight_fields() -> None:
     assert first.id_moneda == 20
 
 
+# ---------------------------------------------------------------------------
+# Organism-lookup attribute extraction
+# ---------------------------------------------------------------------------
+
+
+# Payload carrying both ``id_inciso`` and ``id_ue`` — the happy path
+# for the new organism-lookup pipeline (see ``organism-lookup`` spec,
+# "Both attributes present" scenario).
+XML_WITH_INCISO_UE = """<?xml version="1.0" encoding="UTF-8"?>
+<reporte>
+  <compra id_compra="1319278"
+          fecha_pub_adj="2024-01-15"
+          id_moneda_monto_adj="20"
+          id_tipocompra="CD"
+          id_inciso="3"
+          id_ue="15">
+    <adjudicaciones>
+      <adjudicacion nombre_comercial="Empresa SA"
+                    nro_doc_prov="210000000018"
+                    tipo_doc_prov="RUT"
+                    cant_adj="10.00"
+                    precio_tot_imp="1234.56"
+                    desc_articulo="Laptop Dell"
+                    id_moneda="20" />
+    </adjudicaciones>
+  </compra>
+</reporte>
+"""
+
+
+def test_parse_xml_extracts_id_inciso_and_id_ue() -> None:
+    """``<compra>`` attributes must surface as ints on the parsed record."""
+
+    records = list(parse_xml_report(XML_WITH_INCISO_UE))
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.id_inciso == 3
+    assert record.id_ue == 15
+
+
+def test_parse_xml_returns_none_for_missing_id_inciso_and_id_ue() -> None:
+    """Absent attributes must round-trip as ``None`` (never raise)."""
+
+    records = list(parse_xml_report(VALID_XML))
+
+    # ``VALID_XML`` doesn't carry id_inciso/id_ue on any ``<compra>``.
+    assert all(r.id_inciso is None for r in records)
+    assert all(r.id_ue is None for r in records)
+
+
+def test_parse_xml_handles_partially_missing_organism_attributes() -> None:
+    """Only one of id_inciso / id_ue present → the other is ``None``."""
+
+    payload = """<?xml version="1.0" encoding="UTF-8"?>
+<reporte>
+  <compra id_compra="1319278"
+          fecha_pub_adj="2024-01-15"
+          id_moneda_monto_adj="20"
+          id_tipocompra="CD"
+          id_inciso="3">
+    <adjudicaciones>
+      <adjudicacion nombre_comercial="A"
+                    precio_tot_imp="10.00"
+                    desc_articulo="x"
+                    id_moneda="0" />
+    </adjudicaciones>
+  </compra>
+</reporte>
+"""
+    records = list(parse_xml_report(payload))
+    assert len(records) == 1
+    assert records[0].id_inciso == 3
+    assert records[0].id_ue is None
+
+
+def test_parse_xml_treats_non_numeric_organism_attributes_as_none() -> None:
+    """Garbage values for id_inciso / id_ue must NOT abort the record."""
+
+    payload = """<?xml version="1.0" encoding="UTF-8"?>
+<reporte>
+  <compra id_compra="1319278"
+          fecha_pub_adj="2024-01-15"
+          id_moneda_monto_adj="20"
+          id_tipocompra="CD"
+          id_inciso="not-a-number"
+          id_ue="also-not">
+    <adjudicaciones>
+      <adjudicacion nombre_comercial="A"
+                    precio_tot_imp="10.00"
+                    desc_articulo="x"
+                    id_moneda="0" />
+    </adjudicaciones>
+  </compra>
+</reporte>
+"""
+    records = list(parse_xml_report(payload))
+    assert len(records) == 1
+    assert records[0].id_inciso is None
+    assert records[0].id_ue is None
+
+
 def test_parse_valid_xml_preserves_uyu_record() -> None:
     records = list(parse_xml_report(VALID_XML))
     uyu_record = records[2]
