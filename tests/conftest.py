@@ -69,12 +69,24 @@ def engine() -> Generator[Engine]:
     empty database.
     """
 
+    from sqlalchemy import event
+
     eng = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
         future=True,
     )
+
+    # SQLite does NOT enforce foreign keys by default. Enable the
+    # PRAGMA on every new connection so ON DELETE CASCADE actually
+    # cascades (it is a no-op on PostgreSQL in production).
+    @event.listens_for(eng, "connect")
+    def _enable_sqlite_fk(dbapi_connection, _connection_record):  # noqa: ARG001
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
     # Import models so the metadata is populated.
     from app.database import Base
     from app.models import (  # noqa: F401
@@ -248,11 +260,12 @@ def make_adjudication(db_session: Session):
 
         # Anything left in ``overrides`` is treated as a direct
         # ``Adjudicacion`` field. This lets new tests opt into the new
-        # names without changing the factory call shape.
+        # names without changing the factory call shape. ``update`` (not
+        # ``setdefault``) so the caller's override wins over the default.
         for key, value in overrides.items():
             if key in _LEGACY_FIELD_ALIASES:
                 continue
-            adj_payload.setdefault(key, value)
+            adj_payload[key] = value
 
         compra = Compra(**compra_payload)
         db_session.add(compra)

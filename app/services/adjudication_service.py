@@ -116,6 +116,7 @@ class AdjudicationRow:
     company_document: str | None
     company_document_type: str | None
     license_link: str
+    article_id: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -464,6 +465,7 @@ def _listing_query() -> Any:
         Compra.id_compra.label("id_compra"),
         Adjudicacion.nombre_comercial.label("winning_company"),
         Adjudicacion.desc_articulo.label("article"),
+        Adjudicacion.id_articulo.label("article_id"),
         Adjudicacion.precio_tot_imp.label("amount"),
         Adjudicacion.amount_uyu.label("amount_uyu"),
         Adjudicacion.nro_doc_prov.label("company_document"),
@@ -497,6 +499,7 @@ def _row_to_adjudication_row(row: Any) -> AdjudicationRow:
         company_document=row.company_document,
         company_document_type=row.company_document_type,
         license_link=_build_license_link(row.id_compra),
+        article_id=getattr(row, "article_id", None),
     )
 
 
