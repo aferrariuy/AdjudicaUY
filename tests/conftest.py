@@ -254,6 +254,8 @@ def make_joined_record():
         "id_articulo": "42851",
         "num_compra": "86825",
         "anio_compra": "2024",
+        "id_inciso": 4,
+        "id_ue": 1,
     }
 
     def _factory(**overrides: Any) -> JoinedRecord:

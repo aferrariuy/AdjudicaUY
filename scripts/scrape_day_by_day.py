@@ -52,6 +52,8 @@ def _to_adjudication_dict(record: NormalizedRecord) -> dict:
         "company_document": record.company_document,
         "company_document_type": record.company_document_type,
         "organism": record.organism,
+        "id_inciso": record.id_inciso,
+        "id_ue": record.id_ue,
         "date": record.date,
         "license_type": record.license_type,
         "article": record.article,

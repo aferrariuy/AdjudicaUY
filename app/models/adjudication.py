@@ -38,6 +38,9 @@ class Adjudication(Base):
     company_document_type = Column(String(10), nullable=True)
     organism = Column(String(255), nullable=False)
 
+    id_inciso = Column(Integer, nullable=True)
+    id_ue = Column(Integer, nullable=True)
+
     date = Column(Date, nullable=False, index=True)
 
     license_type = Column(String(100), nullable=True)

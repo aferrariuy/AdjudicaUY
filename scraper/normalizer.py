@@ -126,6 +126,8 @@ class JoinedRecord:
     id_articulo: str | None
     num_compra: str | None
     anio_compra: str | None
+    id_inciso: int | None
+    id_ue: int | None
 
 
 @dataclass(frozen=True)
@@ -142,6 +144,8 @@ class NormalizedRecord:
     license_link: str
     date: object  # ``datetime.date`` — written as object to avoid an import dance
     organism: str
+    id_inciso: int | None
+    id_ue: int | None
 
     # Financials
     amount: Decimal
@@ -286,6 +290,8 @@ def normalize_record(
         license_link=record.license_link,
         date=record.fecha_pub_adj,
         organism=record.organism,
+        id_inciso=record.id_inciso,
+        id_ue=record.id_ue,
         amount=_quantize_uyu(amount),
         currency=currency,
         amount_uyu=amount_uyu,

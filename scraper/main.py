@@ -146,6 +146,8 @@ def enrich_xml_record(
         id_articulo=xml_record.id_articulo,
         num_compra=xml_record.num_compra,
         anio_compra=xml_record.anio_compra,
+        id_inciso=xml_record.id_inciso,
+        id_ue=xml_record.id_ue,
     )
 
 
@@ -170,6 +172,8 @@ def _to_adjudication_dict(record: NormalizedRecord) -> dict[str, Any]:
         "company_document": record.company_document,
         "company_document_type": record.company_document_type,
         "organism": record.organism,
+        "id_inciso": record.id_inciso,
+        "id_ue": record.id_ue,
         "date": record.date,
         "license_type": record.license_type,
         "article": record.article,
