@@ -31,19 +31,19 @@ from scraper.organism_lookup import ORGANISM_MAP, resolve_organism
 def test_resolve_organism_returns_name_for_known_pair() -> None:
     """The canonical (id_inciso, id_ue) → name lookup must hit the table."""
 
-    # (3, 15) → "Ministerio del Interior" — also referenced in the
-    # ``organism-lookup`` spec "Both attributes present" scenario.
-    assert resolve_organism(3, 15) == "Ministerio del Interior"
+    # (4, 1) → "Secretaría del Ministerio del Interior" — also referenced
+    # in the ``organism-lookup`` spec "Both attributes present" scenario.
+    assert resolve_organism(4, 1) == "Secretaría del Ministerio del Interior"
 
 
 def test_resolve_organism_resolves_multiple_known_pairs() -> None:
     """Every documented entry in the table must round-trip."""
 
     samples = [
-        ((2, 1), "Presidencia de la República"),
-        ((11, 2), "Dirección General de Educación Inicial y Primaria"),
-        ((12, 2), "Administración de los Servicios de Salud del Estado"),
-        ((28, 1), "Administración de las Obras Sanitarias del Estado"),
+        ((2, 1), "Presidencia de la República y Unidades Dependientes"),
+        ((11, 2), "Dirección de Educación"),
+        ((53, 1), "Banco de Seguros del Estado"),
+        ((65, 1), "Administración Nacional de Telecomunicaciones"),
     ]
     for (inciso, ue), expected in samples:
         assert resolve_organism(inciso, ue) == expected
@@ -121,7 +121,7 @@ def test_resolve_organism_always_returns_str() -> None:
     """The ``organism`` DB column is ``String(255) NOT NULL`` — no exceptions."""
 
     samples: list[tuple[int | None, int | None]] = [
-        (3, 15),
+        (4, 1),
         (99, 99),
         (None, None),
         (0, 0),

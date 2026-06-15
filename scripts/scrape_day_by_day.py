@@ -224,7 +224,7 @@ def main() -> None:
         current = start
         while current <= end:
             log = logging.getLogger(f"day.{current.isoformat()}")
-            url_a = build_source_a_url(current)
+            url_a = build_source_a_url(settings.source_a_base_url, current)
 
             t_day_start = time.perf_counter()
             t_xml = t_parse = t_normalize = t_insert = 0.0

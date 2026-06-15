@@ -2,13 +2,11 @@
 
 This test wires the full pipeline together **in-process**:
 
-1. ``fetch_xml_report`` and ``fetch_rss_feed`` are pointed at canned
-   XML/RSS payloads.
+1. ``fetch_xml_report`` is pointed at a canned XML payload.
 2. The BCU SOAP endpoint is mocked.
-3. ``scraper.run_scrape`` walks the records through the joiner, the
-   normalizer, and the bulk insert — writing into the in-memory SQLite
-   engine shared with the FastAPI app via the ``client`` fixture from
-   :mod:`conftest`.
+3. ``scraper.run_scrape`` walks the records through the normalizer and
+   the bulk insert — writing into the in-memory SQLite engine shared
+   with the FastAPI app via the ``client`` fixture from :mod:`conftest`.
 4. The FastAPI ``TestClient`` issues a real HTTP request against the
    route, and the page must contain the inserted data.
 
@@ -45,8 +43,8 @@ XML_REPORT = """<?xml version="1.0" encoding="UTF-8"?>
           fecha_pub_adj="2024-03-15"
           id_moneda_monto_adj="20"
           id_tipocompra="CD"
-          id_inciso="3"
-          id_ue="15">
+          id_inciso="4"
+          id_ue="1">
     <adjudicaciones>
       <adjudicacion nombre_comercial="E2E-COMPANY-Laptop"
                     nro_doc_prov="210000000101"
@@ -61,8 +59,8 @@ XML_REPORT = """<?xml version="1.0" encoding="UTF-8"?>
           fecha_pub_adj="2024-03-20"
           id_moneda_monto_adj="20"
           id_tipocompra="CD"
-          id_inciso="3"
-          id_ue="15">
+          id_inciso="4"
+          id_ue="1">
     <adjudicaciones>
       <adjudicacion nombre_comercial="E2E-COMPANY-Monitor"
                     nro_doc_prov="210000000102"
@@ -77,8 +75,8 @@ XML_REPORT = """<?xml version="1.0" encoding="UTF-8"?>
           fecha_pub_adj="2024-03-25"
           id_moneda_monto_adj="0"
           id_tipocompra="LP"
-          id_inciso="3"
-          id_ue="15">
+          id_inciso="4"
+          id_ue="1">
     <adjudicaciones>
       <adjudicacion nombre_comercial="E2E-COMPANY-Limpieza"
                     nro_doc_prov="210000000103"
@@ -230,9 +228,9 @@ def test_scrape_store_query_serve_round_trip(
         assert by_company["E2E-COMPANY-Monitor"].amount_uyu == Decimal("20000.00")
         assert by_company["E2E-COMPANY-Limpieza"].amount_uyu == Decimal("20000.00")
         # Organism enrichment comes from the (id_inciso, id_ue) static
-        # lookup — all three records use (3, 15) → "Ministerio del Interior".
+        # lookup — all three records use (4, 1) → "Secretaría del Ministerio del Interior".
         organisms = {r.organism for r in rows}
-        assert organisms == {"Ministerio del Interior"}
+        assert organisms == {"Secretaría del Ministerio del Interior"}
         # License links are deterministic from id_compra.
         license_links = {r.license_link for r in rows}
         assert license_links == {
