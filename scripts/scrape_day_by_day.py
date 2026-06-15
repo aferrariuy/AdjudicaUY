@@ -1,6 +1,8 @@
 """Test script: run scraper day-by-day for April 1 – June 12, 2026.
 
-Each day: fetch XML + RSS with the same single-day range, join, normalize.
+Each day: fetch the XML report, parse, enrich via the static
+``(id_inciso, id_ue)`` organism lookup, build ``license_link`` from
+``id_compra``, normalize via BCU, and insert.
 
 Usage::
 
@@ -13,7 +15,6 @@ from __future__ import annotations
 import argparse
 import logging
 import time
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
@@ -27,15 +28,11 @@ from app.config import get_settings
 from app.database import get_session_factory
 from app.models.adjudication import Adjudication
 from scraper.bcu_client import BcuClient
-from scraper.joiner import JoinedRecord, join_records
-from scraper.normalizer import NormalizedRecord, normalize_record
-from scraper.rss_feed import (
-    RssItem,
-    build_per_compra_rss_url,
-    fetch_and_parse_per_compra_rss,
-    fetch_rss_feed,
-    parse_rss_feed,
+from scraper.main import (
+    build_source_a_url,
+    enrich_xml_record,
 )
+from scraper.normalizer import NormalizedRecord, normalize_record
 from scraper.xml_report import XmlAdjudication, fetch_xml_report, parse_xml_report
 
 logging.basicConfig(
@@ -43,31 +40,6 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
 )
 logger = logging.getLogger("scrape_day_by_day")
-
-
-# ── URL builders ────────────────────────────────────────────────────
-def build_source_a_url(d: date) -> str:
-    """Source A (XML) — same day start/end."""
-    return (
-        "http://www.comprasestatales.gub.uy/comprasenlinea/jboss/generarReporte"
-        f"?tipo_publicacion=a"
-        f"&dia_inicial={d.day}&mes_inicial={d.month}&anio_inicial={d.year}&hora_inicial=0"
-        f"&dia_final={d.day}&mes_final={d.month}&anio_final={d.year}&hora_final=23"
-    )
-
-
-def build_source_b_url(d: date) -> str:
-    """Source B (RSS) — same day start/end, matching production format."""
-    ds = d.isoformat()  # YYYY-MM-DD
-    return (
-        f"https://www.comprasestatales.gub.uy/consultas/rss/tipo-pub/ADJ"
-        f"/tipo-doc/C/tipo-fecha/PUB/rango-fecha/{ds}_{ds}/filtro-cat/CAT/tipo-orden/DESC"
-    )
-
-
-# Base URL for per-compra RSS (diverges from source_b_base_url which
-# includes /tipo-doc/C/tipo-fecha/PUB/rango-fecha suffix).
-RSS_BASE_URL = "https://www.comprasestatales.gub.uy/consultas/rss"
 
 
 # ── DB insert ───────────────────────────────────────────────────────
@@ -137,16 +109,6 @@ def main() -> None:
         type=int,
         default=10,
         help="Max keepalive connections (default: 10)",
-    )
-    parser.add_argument(
-        "--fallback-workers",
-        type=int,
-        default=5,
-        help=(
-            "Max concurrent per-compra RSS fetches in the fallback phase "
-            "(default: 5). Conservative default to avoid rate-limiting "
-            "the government server."
-        ),
     )
     parser.add_argument(
         "--base-delay",
@@ -248,11 +210,13 @@ def main() -> None:
 
     def record_error() -> None:
         """Bump the consecutive-errors counter (called on HTTP errors)."""
+
         nonlocal consecutive_errors
         consecutive_errors += 1
 
     def record_success() -> None:
         """Reset the consecutive-errors counter (called on day success)."""
+
         nonlocal consecutive_errors
         consecutive_errors = 0
 
@@ -261,81 +225,43 @@ def main() -> None:
         while current <= end:
             log = logging.getLogger(f"day.{current.isoformat()}")
             url_a = build_source_a_url(current)
-            url_b = build_source_b_url(current)
 
             t_day_start = time.perf_counter()
-            t_xml = t_rss = t_parse = t_join = 0.0
-            t_fallback = t_normalize = t_insert = 0.0
-            # Per-day flag: any HTTP error from the main XML/RSS fetches
-            # bumps consecutive_errors exactly once at the day's end. Per-
-            # compra RSS failures (next phase) don't count — they are
-            # typically per-record issues, not server-health indicators.
+            t_xml = t_parse = t_normalize = t_insert = 0.0
+            # Per-day flag: any HTTP error from the main XML fetch bumps
+            # consecutive_errors exactly once at the day's end.
             day_had_error = False
 
-            # Fetch both sources for the same day, in parallel. The two
-            # endpoints are independent — XML (Source A) and RSS (Source B)
-            # hit different servers — so a 2-worker thread pool cuts
-            # wall-clock time from t_xml + t_rss to max(t_xml, t_rss).
-            # Partial failures don't abort the day: the surviving source is
-            # still parsed so downstream phases (joiner, fallback, normalize)
-            # can use whatever data is available.
             xml_text: str | None = None
-            rss_text: str | None = None
-            t_xml = 0.0
-            t_rss = 0.0
 
-            def _fetch_xml(url: str) -> str:
-                return fetch_xml_report(url, client=client)
+            # ------------------------------------------------------------------
+            # 1. Fetch the XML report
+            # ------------------------------------------------------------------
+            t0_xml = time.perf_counter()
+            try:
+                xml_text = fetch_xml_report(url_a, client=client)
+            except httpx.HTTPError as exc:
+                log.warning("XML fetch failed: %s", exc)
+                day_had_error = True
+            t_xml = time.perf_counter() - t0_xml
 
-            def _fetch_rss(url: str) -> str:
-                return fetch_rss_feed(url, client=client)
-
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                t0_xml = time.perf_counter()
-                t0_rss = time.perf_counter()
-                futures = {
-                    executor.submit(_fetch_xml, url_a): "xml",
-                    executor.submit(_fetch_rss, url_b): "rss",
-                }
-                for future in as_completed(futures):
-                    source = futures[future]
-                    try:
-                        result = future.result()
-                        if source == "xml":
-                            xml_text = result
-                        else:
-                            rss_text = result
-                    except httpx.HTTPError as exc:
-                        log.warning("%s fetch failed: %s", source.upper(), exc)
-                        day_had_error = True
-                    if source == "xml":
-                        t_xml = time.perf_counter() - t0_xml
-                    else:
-                        t_rss = time.perf_counter() - t0_rss
-
-            # If both fetches failed, skip this day
-            if xml_text is None and rss_text is None:
-                log.warning("Both XML and RSS failed for %s — skipping", current)
+            if xml_text is None:
+                log.warning("XML fetch failed for %s — skipping", current)
                 if day_had_error:
                     record_error()
                 current += timedelta(days=1)
                 adaptive_sleep(log)
                 continue
 
-            # Parse — fall back to empty lists when one source failed so the
-            # downstream pipeline still runs and can use whatever data is
-            # available.
+            # ------------------------------------------------------------------
+            # 2. Parse + enrich
+            # ------------------------------------------------------------------
+            # Enrichment is the inline replacement for the historical
+            # RSS-join + per-compra fallback: resolve the organism via
+            # the static ``(id_inciso, id_ue)`` lookup and build
+            # ``license_link`` deterministically from ``id_compra``.
             t0 = time.perf_counter()
-            if xml_text is None:
-                log.warning("%s: XML failed — processing with 0 XML records", current)
-                xml_records: list[XmlAdjudication] = []
-            else:
-                xml_records = list(parse_xml_report(xml_text))
-            if rss_text is None:
-                log.warning("%s: RSS failed — processing with 0 RSS items", current)
-                rss_items: list[RssItem] = []
-            else:
-                rss_items = list(parse_rss_feed(rss_text))
+            xml_records: list[XmlAdjudication] = list(parse_xml_report(xml_text))
             t_parse = time.perf_counter() - t0
 
             if not xml_records:
@@ -345,137 +271,13 @@ def main() -> None:
                 adaptive_sleep(log)
                 continue
 
-            # Join
-            t0 = time.perf_counter()
-            joined = join_records(xml_records, rss_items, source_url=url_a)
-            t_join = time.perf_counter() - t0
+            joined = [
+                enrich_xml_record(record, source_url=url_a) for record in xml_records
+            ]
 
-            # Fallback: per-compra RSS for unmatched XML records
-            #
-            # Multiple XML records routinely share the same (num_compra,
-            # anio_compra) — e.g. a single compra with several article
-            # lines shows up as N rows in the XML report, and each one
-            # misses the daily RSS feed. Fetching the per-compra RSS for
-            # every row wastes the connection: the same URL returns the
-            # same body. Collect unique keys first, fetch each URL once,
-            # then map the result back to every record in the group.
-            #
-            # Fetches run in parallel with a capped ThreadPoolExecutor:
-            # the shared httpx.Client is thread-safe, so 5 concurrent
-            # workers reuse pooled TCP connections instead of paying
-            # per-fetch handshake cost.
-            t0 = time.perf_counter()
-            matched_ids = {r.id_compra for r in joined}
-            unmatched = [r for r in xml_records if r.id_compra not in matched_ids]
-
-            unique_compras: dict[tuple[str, str], list] = {}
-            for xml_record in unmatched:
-                if not xml_record.num_compra or not xml_record.anio_compra:
-                    log.warning(
-                        "XML id_compra=%s has no RSS match and no "
-                        "num_compra/anio_compra — skipping",
-                        xml_record.id_compra,
-                    )
-                    continue
-                key = (xml_record.num_compra, xml_record.anio_compra)
-                unique_compras.setdefault(key, []).append(xml_record)
-
-            def _fetch_per_compra(
-                num_anio: tuple[str, str],
-            ) -> tuple[tuple[str, str], RssItem | None]:
-                num, anio = num_anio
-                per_compra_url = build_per_compra_rss_url(RSS_BASE_URL, num, anio)
-                return (num, anio), fetch_and_parse_per_compra_rss(
-                    per_compra_url, client=client
-                )
-
-            url_cache: dict[tuple[str, str], RssItem | None] = {}
-            if unique_compras:
-                with ThreadPoolExecutor(
-                    max_workers=max(1, args.fallback_workers)
-                ) as executor:
-                    # Explicit loop with annotated dict — a dict comprehension
-                    # here makes mypy fall back to the Callable's first
-                    # parameter type, which it then misinfers as `str` and
-                    # cascades into ~10 false positives. The annotation
-                    # pins the value type to the helper's real return.
-                    per_compra_futures: dict[
-                        Future[tuple[tuple[str, str], RssItem | None]],
-                        tuple[str, str],
-                    ] = {}
-                    for key in unique_compras:
-                        per_compra_futures[executor.submit(_fetch_per_compra, key)] = (
-                            key
-                        )
-                    for per_compra_future in as_completed(per_compra_futures):
-                        key = per_compra_futures[per_compra_future]
-                        try:
-                            _key, rss_match = per_compra_future.result()
-                        except Exception as exc:
-                            log.warning(
-                                "Per-compra RSS error for num=%s, anio=%s: %s",
-                                key[0],
-                                key[1],
-                                exc,
-                            )
-                            url_cache[key] = None
-                            continue
-                        url_cache[_key] = rss_match
-                        if rss_match is None:
-                            log.warning(
-                                "Per-compra RSS failed for num=%s, anio=%s "
-                                "— skipping %d records",
-                                _key[0],
-                                _key[1],
-                                len(unique_compras[_key]),
-                            )
-
-            for (num, anio), xml_records_group in unique_compras.items():
-                rss_match = url_cache.get((num, anio))
-                if rss_match is None:
-                    continue
-                for xml_record in xml_records_group:
-                    joined.append(
-                        JoinedRecord(
-                            id_compra=xml_record.id_compra,
-                            fecha_pub_adj=xml_record.fecha_pub_adj,
-                            id_tipocompra=xml_record.id_tipocompra,
-                            id_moneda_monto_adj=xml_record.id_moneda_monto_adj,
-                            nombre_comercial=xml_record.nombre_comercial,
-                            nro_doc_prov=xml_record.nro_doc_prov,
-                            tipo_doc_prov=xml_record.tipo_doc_prov,
-                            cant_adj=xml_record.cant_adj,
-                            precio_tot_imp=xml_record.precio_tot_imp,
-                            desc_articulo=xml_record.desc_articulo,
-                            id_moneda=xml_record.id_moneda,
-                            organism=rss_match.organism,
-                            license_link=rss_match.license_link,
-                            source_url=url_a,
-                            id_articulo=xml_record.id_articulo,
-                            num_compra=xml_record.num_compra,
-                            anio_compra=xml_record.anio_compra,
-                        )
-                    )
-                    log.info(
-                        "Fallback resolved id_compra=%s via per-compra RSS",
-                        xml_record.id_compra,
-                    )
-            t_fallback = time.perf_counter() - t0
-
-            if not joined:
-                log.info(
-                    "%s: %d XML, %d RSS, 0 joined — skipping",
-                    current,
-                    len(xml_records),
-                    len(rss_items),
-                )
-                # "No joined" isn't an HTTP error — the fetch succeeded,
-                # the data just didn't match. Don't bump consecutive_errors.
-                current += timedelta(days=1)
-                adaptive_sleep(log)
-                continue
-
-            # Normalize
+            # ------------------------------------------------------------------
+            # 3. Normalize
+            # ------------------------------------------------------------------
             t0 = time.perf_counter()
             normalized: list[NormalizedRecord] = []
             for record in joined:
@@ -495,17 +297,15 @@ def main() -> None:
 
             days_with_data += 1
 
-            # Insert or dry-run. Records accumulate in a buffer that flushes
-            # when either the day or record threshold is hit; this shrinks
-            # commit overhead from O(days) to O(days/flush-interval).
-            # Dry-run skips the buffer entirely — we just count records.
+            # ------------------------------------------------------------------
+            # 4. Insert or dry-run
+            # ------------------------------------------------------------------
             t0 = time.perf_counter()
             if args.dry_run:
                 log.info(
-                    "[DRY RUN] %s: %d XML → %d joined → %d normalized",
+                    "[DRY RUN] %s: %d XML → %d normalized",
                     current,
                     len(xml_records),
-                    len(joined),
                     len(normalized),
                 )
                 total += len(normalized)
@@ -513,11 +313,9 @@ def main() -> None:
                 buffer.extend(normalized)
                 days_since_flush += 1
                 log.info(
-                    "%s: %d XML → %d joined → %d normalized "
-                    "(buffered=%d, days_since_flush=%d)",
+                    "%s: %d XML → %d normalized (buffered=%d, days_since_flush=%d)",
                     current,
                     len(xml_records),
-                    len(joined),
                     len(normalized),
                     len(buffer),
                     days_since_flush,
@@ -539,15 +337,12 @@ def main() -> None:
 
             t_day = time.perf_counter() - t_day_start
             log.info(
-                "TIMING %s: day=%.2fs xml=%.2fs rss=%.2fs parse=%.2fs "
-                "join=%.2fs fallback=%.2fs normalize=%.2fs insert=%.2fs",
+                "TIMING %s: day=%.2fs xml=%.2fs parse=%.2fs "
+                "normalize=%.2fs insert=%.2fs",
                 current,
                 t_day,
                 t_xml,
-                t_rss,
                 t_parse,
-                t_join,
-                t_fallback,
                 t_normalize,
                 t_insert,
             )

@@ -30,37 +30,16 @@ class Settings(BaseSettings):
         ),
     )
 
-    # Scraping sources
-    # Both sources expose date-dependent endpoints; we store the BASE URL
+    # Scraping source
+    # The XML report endpoint is date-dependent; we store the BASE URL
     # (without any date parameters) and have the scraper append the date
-    # range on every run. See :mod:`scraper.main` for the URL builders.
+    # range on every run. See :mod:`scraper.main` for the URL builder.
     source_a_base_url: str = Field(
         ...,
         description=(
             "Base URL of the XML adjudication source A, without date "
             "query parameters. Example: "
             "http://www.comprasestatales.gub.uy/comprasenlinea/jboss/generarReporte"
-        ),
-    )
-    source_b_base_url: str = Field(
-        ...,
-        description=(
-            "Base URL of the RSS adjudication source B, without the "
-            "``rango-fecha/<start>_<end>`` path segment. Example: "
-            "https://www.comprasestatales.gub.uy/consultas/rss/tipo-pub/ADJ"
-            "/tipo-doc/C/tipo-fecha/PUB/rango-fecha"
-        ),
-    )
-    source_b_rss_base: str | None = Field(
-        default=None,
-        description=(
-            "Base URL of the per-compra RSS feed (source B), used as fallback "
-            "enrichment for XML records missing from the day-RSS. The per-compra "
-            "URL appends ``/tipo-pub/ADJ/nro-compra/<num_compra>/"
-            "anio-compra/<anio_compra>``. When ``None`` (the default), it is "
-            "derived from ``source_b_base_url`` by truncating at "
-            "``/consultas/rss``. "
-            "Example: https://www.comprasestatales.gub.uy/consultas/rss"
         ),
     )
 
