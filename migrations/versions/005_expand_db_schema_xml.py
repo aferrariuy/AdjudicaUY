@@ -1,7 +1,7 @@
 """add compra / adjudicacion / oferente tables for full XML hierarchy
 
 Revision ID: 005_expand_db_schema_xml
-Revises: 9d8a3aa781d0
+Revises: 004_add_inciso_ue
 Create Date: 2026-06-15 06:00:00
 
 Adds three new tables that mirror the upstream XML report's hierarchy
@@ -38,7 +38,7 @@ if TYPE_CHECKING:
 
 # revision identifiers, used by Alembic.
 revision: str = "005_expand_db_schema_xml"
-down_revision: str | Sequence[str] | None = "9d8a3aa781d0"
+down_revision: str | Sequence[str] | None = "004_add_inciso_ue"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
