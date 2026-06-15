@@ -10,7 +10,7 @@ This conftest provides:
   function-scoped session wrapper.
 * A ``client`` fixture returning a FastAPI :class:`TestClient` bound to
   the test database.
-* Reusable XML / RSS / record fixtures used by both the scraper and the
+* Reusable XML / CompraRow factories used by both the scraper and the
   route tests.
 """
 
@@ -79,7 +79,6 @@ def engine() -> Generator[Engine]:
     from app.database import Base
     from app.models import (  # noqa: F401
         adjudicacion,
-        adjudication,  # legacy model — kept on Base.metadata until PR 3
         compra,
         oferente,
     )
@@ -153,68 +152,128 @@ def client(db_session: Session) -> Generator[TestClient]:
 
 
 # ---------------------------------------------------------------------------
-# Sample data fixtures — adjudications, RSS items, joined records
+# Sample data factories — Compra + Adjudicacion, XmlCompra
 # ---------------------------------------------------------------------------
+
+
+# Field aliases — the old test suite used the flat ``adjudications``
+# field names (``winning_company``, ``organism``, ``date``, ...). The
+# factory below accepts both the legacy keys (translated to the new
+# Compra/Adjudicacion columns) and the new keys directly, so existing
+# tests can keep their old call shape while new tests can use the new
+# field names without an indirection.
+_LEGACY_FIELD_ALIASES: dict[str, tuple[str, str]] = {
+    # legacy key          -> (target model, target column)
+    "winning_company":    ("adjudicacion", "nombre_comercial"),
+    "company_document":   ("adjudicacion", "nro_doc_prov"),
+    "company_document_type": ("adjudicacion", "tipo_doc_prov"),
+    "article":            ("adjudicacion", "desc_articulo"),
+    "article_id":         ("adjudicacion", "id_articulo"),
+    "article_quantity":   ("adjudicacion", "cant_adj"),
+    "amount":             ("adjudicacion", "precio_tot_imp"),
+    "currency":           ("adjudicacion", "__skip_currency__"),
+    "date":               ("compra", "fecha_pub_adj"),
+    "organism":           ("compra", "organismo"),
+    "license_type":       ("compra", "id_tipocompra"),
+    "license_link":       ("compra", "__skip_license_link__"),
+    "source_url":         ("compra", "source_url"),
+}
 
 
 @pytest.fixture
 def make_adjudication(db_session: Session):
-    """Factory: persist a single :class:`Adjudication` with sensible defaults.
+    """Factory: persist a Compra + Adjudicacion pair with sensible defaults.
 
-    Tests call this with keyword overrides for the fields they care
-    about. The factory returns the persisted ORM instance so the test
-    can read back auto-populated values (e.g. ``id``, ``ingested_at``).
-
-    Each call automatically varies the unique-key triple
-    ``(source_url, license_link, date)`` so multiple inserts in the
-    same test do not trip the database's unique constraint. Tests that
-    need explicit control over those fields pass them as overrides.
+    Returns the :class:`Adjudicacion` instance — the row the web layer
+    reads from. The factory varies ``id_compra`` per call so two inserts
+    in the same test do not trip the unique constraint on the natural
+    key. Both the legacy kwargs (``winning_company``, ``organism``,
+    ``date``, ...) and the new direct field names
+    (``nombre_comercial``, ``fecha_pub_adj`` via ``compra_overrides``,
+    ...) are accepted.
     """
 
-    from app.models.adjudication import Adjudication
+    from app.models.adjudicacion import Adjudicacion
+    from app.models.compra import Compra
 
     counter = {"n": 0}
 
-    def _factory(**overrides: Any) -> Adjudication:
+    def _factory(**overrides: Any) -> Adjudicacion:
         counter["n"] += 1
         n = counter["n"]
-        defaults: dict[str, Any] = {
-            "amount": Decimal("1000.00"),
-            "currency": "UYU",
+
+        # ----------------------------------------------------------------
+        # Translate legacy kwargs to the new schema's columns.
+        # ----------------------------------------------------------------
+        adj_payload: dict[str, Any] = {
+            "nombre_comercial": f"Empresa {n}",
+            "nro_doc_prov": f"2100000000{n:02d}",
+            "tipo_doc_prov": "RUT",
+            "cant_adj": Decimal("10.00"),
+            "precio_tot_imp": Decimal("1000.00"),
+            "desc_articulo": "Laptop Dell Latitude",
+            "id_moneda": 0,
+            "id_articulo": f"{40000 + n}",
             "amount_uyu": Decimal("1000.00"),
-            "winning_company": f"Empresa {n}",
-            "company_document": f"2100000000{n:02d}",
-            "company_document_type": "RUT",
-            "organism": "Ministerio de Interior",
-            "date": date(2024, 1, 15),
-            "license_type": "CD",
-            "article": "Laptop Dell Latitude",
-            "article_quantity": Decimal("10.00"),
-            "article_id": f"{40000 + n}",
-            "license_link": f"https://example.test/licitacion/{n}",
+        }
+        compra_payload: dict[str, Any] = {
+            "id_compra": f"compra-{n}",
+            "fecha_pub_adj": date(2024, 1, 15),
+            "id_tipocompra": "CD",
+            "id_inciso": 4,
+            "id_ue": 1,
+            "organismo": "Ministerio de Interior",
             "source_url": "https://example.test/xml",
         }
-        payload = {**defaults, **overrides}
-        instance = Adjudication(**payload)
-        db_session.add(instance)
+
+        # Caller can also pass ``compra_overrides`` / ``adj_overrides``
+        # to target one side explicitly. These take precedence over the
+        # legacy-key translation below.
+        compra_payload.update(overrides.pop("compra_overrides", {}))
+        adj_payload.update(overrides.pop("adj_overrides", {}))
+
+        # Legacy-key translation. Apply each legacy key to the correct
+        # side's payload. ``currency`` and ``license_link`` are
+        # display-only in the new schema and have nowhere to go — drop
+        # them silently.
+        for legacy_key, value in list(overrides.items()):
+            if legacy_key in _LEGACY_FIELD_ALIASES:
+                target_model, target_col = _LEGACY_FIELD_ALIASES[legacy_key]
+                if target_col.startswith("__skip_"):
+                    continue
+                if target_model == "compra":
+                    compra_payload[target_col] = value
+                else:
+                    adj_payload[target_col] = value
+
+        # Anything left in ``overrides`` is treated as a direct
+        # ``Adjudicacion`` field. This lets new tests opt into the new
+        # names without changing the factory call shape.
+        for key, value in overrides.items():
+            if key in _LEGACY_FIELD_ALIASES:
+                continue
+            adj_payload.setdefault(key, value)
+
+        compra = Compra(**compra_payload)
+        db_session.add(compra)
+        db_session.flush()  # assigns Compra.id without committing
+
+        adj = Adjudicacion(compra_id=compra.id, **adj_payload)
+        db_session.add(adj)
         db_session.commit()
-        db_session.refresh(instance)
-        return instance
+        db_session.refresh(adj)
+        return adj
 
     return _factory
 
 
 @pytest.fixture
-def make_xml_record():
-    """Factory: build an :class:`XmlAdjudication` for parser/joiner tests."""
+def make_xml_compra():
+    """Factory: build an :class:`XmlCompra` for parser tests."""
 
-    from scraper.xml_report import XmlAdjudication
+    from scraper.xml_report import XmlAdjudicacion, XmlCompra, XmlOferente
 
-    defaults: dict[str, Any] = {
-        "id_compra": "1319278",
-        "fecha_pub_adj": date(2024, 1, 15),
-        "id_tipocompra": "CD",
-        "id_moneda_monto_adj": 20,
+    defaults_company: dict[str, Any] = {
         "nombre_comercial": "Empresa SA",
         "nro_doc_prov": "210000000018",
         "tipo_doc_prov": "RUT",
@@ -223,47 +282,41 @@ def make_xml_record():
         "desc_articulo": "Laptop",
         "id_moneda": 20,
         "id_articulo": "42851",
+    }
+
+    defaults_oferente: dict[str, Any] = {
+        "nombre_comercial": "Bidder SA",
+        "nro_doc_prov": "210000000050",
+        "tipo_doc_prov": "RUT",
+        "cant_ofertada": Decimal("10.00"),
+        "precio_unit_ofertado": Decimal("80.00"),
+        "id_moneda": 20,
+        "variacion": None,
+        "alternativas": None,
+    }
+
+    defaults_compra: dict[str, Any] = {
+        "id_compra": "1319278",
+        "fecha_pub_adj": date(2024, 1, 15),
+        "id_tipocompra": "CD",
+        "id_moneda_monto_adj": 20,
+        "objeto": "Adquisición",
+        "monto_adj": Decimal("1000.00"),
         "num_compra": "86825",
         "anio_compra": "2024",
+        "subtipo_compra": None,
         "id_inciso": 3,
         "id_ue": 15,
+        "adjudicaciones": [
+            XmlAdjudicacion(id_compra="1319278", **defaults_company),
+        ],
+        "oferentes": [
+            XmlOferente(id_compra="1319278", **defaults_oferente),
+        ],
     }
 
-    def _factory(**overrides: Any) -> XmlAdjudication:
-        return XmlAdjudication(**{**defaults, **overrides})
-
-    return _factory
-
-
-@pytest.fixture
-def make_joined_record():
-    """Factory: build a :class:`JoinedRecord` for normalizer tests."""
-
-    from scraper.normalizer import JoinedRecord
-
-    defaults: dict[str, Any] = {
-        "id_compra": "1319278",
-        "fecha_pub_adj": date(2024, 1, 15),
-        "id_tipocompra": "CD",
-        "id_moneda_monto_adj": 20,
-        "nombre_comercial": "Empresa SA",
-        "nro_doc_prov": "210000000018",
-        "tipo_doc_prov": "RUT",
-        "cant_adj": Decimal("10.00"),
-        "precio_tot_imp": Decimal("1000.00"),
-        "desc_articulo": "Laptop",
-        "id_moneda": 20,
-        "organism": "Ministerio de Interior",
-        "license_link": "https://example.test/consultas/detalle/id/1319278",
-        "source_url": "https://example.test/xml",
-        "id_articulo": "42851",
-        "num_compra": "86825",
-        "anio_compra": "2024",
-        "id_inciso": 4,
-        "id_ue": 1,
-    }
-
-    def _factory(**overrides: Any) -> JoinedRecord:
-        return JoinedRecord(**{**defaults, **overrides})
+    def _factory(**overrides: Any) -> XmlCompra:
+        merged = {**defaults_compra, **overrides}
+        return XmlCompra(**merged)
 
     return _factory

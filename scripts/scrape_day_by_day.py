@@ -16,9 +16,10 @@ import argparse
 import logging
 import time
 from datetime import date, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 if TYPE_CHECKING:
@@ -26,14 +27,26 @@ if TYPE_CHECKING:
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models.adjudication import Adjudication
+from app.models.adjudicacion import Adjudicacion
+from app.models.compra import Compra
+from app.models.oferente import Oferente
 from scraper.bcu_client import BcuClient
 from scraper.main import (
     build_source_a_url,
-    enrich_xml_record,
+    enrich_xml_compra,
 )
-from scraper.normalizer import NormalizedRecord, normalize_record
-from scraper.xml_report import XmlAdjudication, fetch_xml_report, parse_xml_report
+from scraper.normalizer import (
+    AdjudicacionRow,
+    CompraEnrichment,
+    CompraRow,
+    OferenteRow,
+    normalize_compra,
+)
+from scraper.xml_report import (
+    XmlCompra,
+    fetch_xml_report,
+    parse_xml_report,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,36 +56,89 @@ logger = logging.getLogger("scrape_day_by_day")
 
 
 # ── DB insert ───────────────────────────────────────────────────────
-def _to_adjudication_dict(record: NormalizedRecord) -> dict:
+def _compra_dict(row: CompraRow) -> dict[str, Any]:
     return {
-        "amount": record.amount,
-        "currency": record.currency,
-        "amount_uyu": record.amount_uyu,
-        "winning_company": record.winning_company,
-        "company_document": record.company_document,
-        "company_document_type": record.company_document_type,
-        "organism": record.organism,
-        "id_inciso": record.id_inciso,
-        "id_ue": record.id_ue,
-        "date": record.date,
-        "license_type": record.license_type,
-        "article": record.article,
-        "article_quantity": record.article_quantity,
-        "license_link": record.license_link,
-        "source_url": record.source_url,
+        "id_compra": row.id_compra,
+        "fecha_pub_adj": row.fecha_pub_adj,
+        "objeto": row.objeto,
+        "monto_adj": row.monto_adj,
+        "id_moneda_monto_adj": row.id_moneda_monto_adj,
+        "num_compra": row.num_compra,
+        "anio_compra": row.anio_compra,
+        "id_tipocompra": row.id_tipocompra,
+        "subtipo_compra": row.subtipo_compra,
+        "id_inciso": row.id_inciso,
+        "id_ue": row.id_ue,
+        "organismo": row.organismo or None,
+        "source_url": row.source_url,
     }
 
 
-def _bulk_insert(session: Session, records: list[NormalizedRecord]) -> int:
-    rows = [_to_adjudication_dict(r) for r in records]
+def _adjudicacion_dict(
+    compra_id: int, row: AdjudicacionRow
+) -> dict[str, Any]:
+    return {
+        "compra_id": compra_id,
+        "nombre_comercial": row.nombre_comercial,
+        "nro_doc_prov": row.nro_doc_prov,
+        "tipo_doc_prov": row.tipo_doc_prov,
+        "cant_adj": row.cant_adj,
+        "precio_unit": row.precio_unit,
+        "precio_tot_imp": row.precio_tot_imp,
+        "id_moneda": row.id_moneda,
+        "desc_articulo": row.desc_articulo,
+        "id_articulo": row.id_articulo,
+        "amount_uyu": row.amount_uyu,
+    }
+
+
+def _oferente_dict(compra_id: int, row: OferenteRow) -> dict[str, Any]:
+    return {
+        "compra_id": compra_id,
+        "nombre_comercial": row.nombre_comercial,
+        "nro_doc_prov": row.nro_doc_prov,
+        "tipo_doc_prov": row.tipo_doc_prov,
+        "cant_ofertada": row.cant_ofertada,
+        "precio_unit_ofertado": row.precio_unit_ofertado,
+        "id_moneda": row.id_moneda,
+        "variacion": row.variacion,
+        "alternativas": row.alternativas,
+    }
+
+
+def _bulk_insert(session: Session, rows: list[CompraRow]) -> int:
     if not rows:
         return 0
-    stmt = pg_insert(Adjudication).values(rows)
-    stmt = stmt.on_conflict_do_nothing(
-        index_elements=["source_url", "license_link", "date"],
-    )
     try:
+        # 1. Upsert compra rows (idempotent on id_compra).
+        compra_payloads = [_compra_dict(r) for r in rows]
+        stmt = pg_insert(Compra).values(compra_payloads)
+        stmt = stmt.on_conflict_do_nothing(index_elements=["id_compra"])
         session.execute(stmt)
+
+        # 2. Resolve compra primary keys.
+        id_compras = {r.id_compra for r in rows}
+        rows_pk = session.execute(
+            select(Compra.id_compra, Compra.id).where(Compra.id_compra.in_(id_compras))
+        ).all()
+        id_compra_to_pk: dict[str, int] = {row[0]: row[1] for row in rows_pk}
+
+        # 3. Insert adjudicacion and oferente rows. Only do this for
+        #    compras we just inserted — the parent-level skip in step
+        #    1 is the idempotency guarantee.
+        adj_payloads: list[dict[str, Any]] = []
+        oferente_payloads: list[dict[str, Any]] = []
+        for r in rows:
+            pk = id_compra_to_pk.get(r.id_compra)
+            if pk is None:
+                continue
+            adj_payloads.extend(_adjudicacion_dict(pk, a) for a in r.adjudicaciones)
+            oferente_payloads.extend(_oferente_dict(pk, o) for o in r.oferentes)
+
+        if adj_payloads:
+            session.execute(pg_insert(Adjudicacion).values(adj_payloads))
+        if oferente_payloads:
+            session.execute(pg_insert(Oferente).values(oferente_payloads))
         session.commit()
     except Exception as exc:
         session.rollback()
@@ -180,11 +246,12 @@ def main() -> None:
     total = 0
     days_with_data = 0
     # Batch insert buffer: instead of committing after every day, accumulate
-    # normalized records and flush when either the day count or record count
-    # threshold is reached. This shrinks commit overhead from O(days) to
-    # O(days/flush-interval); the 7-day / 1000-record defaults cap crash
-    # data loss at ~700 records. on_conflict_do_nothing makes re-runs safe.
-    buffer: list[NormalizedRecord] = []
+    # CompraRow records and flush when either the day count or record
+    # count threshold is reached. This shrinks commit overhead from
+    # O(days) to O(days/flush-interval); the 7-day / 1000-record
+    # defaults cap crash data loss at ~700 records. on_conflict_do_nothing
+    # makes re-runs safe.
+    buffer: list[CompraRow] = []
     days_since_flush = 0
 
     # Adaptive sleep replaces the fixed time.sleep() calls between days.
@@ -263,31 +330,32 @@ def main() -> None:
             # the static ``(id_inciso, id_ue)`` lookup and build
             # ``license_link`` deterministically from ``id_compra``.
             t0 = time.perf_counter()
-            xml_records: list[XmlAdjudication] = list(parse_xml_report(xml_text))
+            xml_compras: list[XmlCompra] = list(parse_xml_report(xml_text))
             t_parse = time.perf_counter() - t0
 
-            if not xml_records:
+            if not xml_compras:
                 if day_had_error:
                     record_error()
                 current += timedelta(days=1)
                 adaptive_sleep(log)
                 continue
 
-            joined = [
-                enrich_xml_record(record, source_url=url_a) for record in xml_records
+            enriched = [
+                (compra, enrich_xml_compra(compra, source_url=url_a))
+                for compra in xml_compras
             ]
 
             # ------------------------------------------------------------------
             # 3. Normalize
             # ------------------------------------------------------------------
             t0 = time.perf_counter()
-            normalized: list[NormalizedRecord] = []
-            for record in joined:
+            normalized: list[CompraRow] = []
+            for compra, enrichment in enriched:
                 try:
-                    normalized.append(normalize_record(record, bcu_client))
+                    normalized.append(normalize_compra(compra, enrichment, bcu_client))
                 except Exception as exc:
                     log.warning(
-                        "Normalize failed id_compra=%s: %s", record.id_compra, exc
+                        "Normalize failed id_compra=%s: %s", compra.id_compra, exc
                     )
             t_normalize = time.perf_counter() - t0
 
@@ -304,20 +372,22 @@ def main() -> None:
             # ------------------------------------------------------------------
             t0 = time.perf_counter()
             if args.dry_run:
+                total_adjs = sum(len(c.adjudicaciones) for c in normalized)
                 log.info(
-                    "[DRY RUN] %s: %d XML → %d normalized",
+                    "[DRY RUN] %s: %d XML → %d compras (%d adjudicaciones)",
                     current,
-                    len(xml_records),
+                    len(xml_compras),
                     len(normalized),
+                    total_adjs,
                 )
                 total += len(normalized)
             else:
                 buffer.extend(normalized)
                 days_since_flush += 1
                 log.info(
-                    "%s: %d XML → %d normalized (buffered=%d, days_since_flush=%d)",
+                    "%s: %d XML → %d compras (buffered=%d, days_since_flush=%d)",
                     current,
-                    len(xml_records),
+                    len(xml_compras),
                     len(normalized),
                     len(buffer),
                     days_since_flush,

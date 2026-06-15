@@ -18,12 +18,13 @@ omitted, the function defaults to **today** (``start_hour=0``,
 ``end_hour=23``). The per-day URL is built from the base URL configured
 in :class:`app.config.Settings` — see :func:`build_source_a_url`.
 
-Organism enrichment
--------------------
-The XML report exposes ``id_inciso`` and ``id_ue`` on every ``<compra>``;
-those are mapped to the organism name via the static
-:mod:`scraper.organism_lookup` module. ``license_link`` is built
-deterministically from ``id_compra`` — no RSS request is issued.
+Persistence
+-----------
+Records are inserted into the new ``compra`` / ``adjudicacion`` /
+``oferente`` tables. Idempotency is enforced via ``ON CONFLICT DO
+NOTHING`` on ``compra.id_compra`` (the natural key from the upstream
+XML). A re-run on the same data is a no-op at the parent level;
+existing children stay attached to the existing compra row.
 """
 
 from __future__ import annotations
@@ -34,16 +35,29 @@ from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models.adjudication import Adjudication
+from app.models.adjudicacion import Adjudicacion
+from app.models.compra import Compra
+from app.models.oferente import Oferente
 from scraper.bcu_client import BcuClient
-from scraper.normalizer import JoinedRecord, NormalizedRecord, normalize_record
+from scraper.normalizer import (
+    AdjudicacionRow,
+    CompraEnrichment,
+    CompraRow,
+    OferenteRow,
+    normalize_compra,
+)
 from scraper.organism_lookup import resolve_organism
-from scraper.xml_report import XmlAdjudication, fetch_xml_report, parse_xml_report
+from scraper.xml_report import (
+    XmlCompra,
+    fetch_xml_report,
+    parse_xml_report,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -114,40 +128,24 @@ def build_license_link(id_compra: str) -> str:
     return _LICENSE_LINK_TEMPLATE.format(id_compra=id_compra)
 
 
-def enrich_xml_record(
-    xml_record: XmlAdjudication,
+def enrich_xml_compra(
+    xml_compra: XmlCompra,
     *,
     source_url: str,
-) -> JoinedRecord:
-    """Build a :class:`JoinedRecord` from an XML record plus the static enrichment.
+) -> CompraEnrichment:
+    """Build a :class:`CompraEnrichment` from an :class:`XmlCompra`.
 
     The organism is resolved via
     :func:`scraper.organism_lookup.resolve_organism` (warn-on-missing,
-    never raises); the ``license_link`` is built deterministically from
-    ``id_compra``.
+    never raises); the ``license_link`` is built deterministically
+    from ``id_compra``.
     """
 
-    organism = resolve_organism(xml_record.id_inciso, xml_record.id_ue)
-    return JoinedRecord(
-        id_compra=xml_record.id_compra,
-        fecha_pub_adj=xml_record.fecha_pub_adj,
-        id_tipocompra=xml_record.id_tipocompra,
-        id_moneda_monto_adj=xml_record.id_moneda_monto_adj,
-        nombre_comercial=xml_record.nombre_comercial,
-        nro_doc_prov=xml_record.nro_doc_prov,
-        tipo_doc_prov=xml_record.tipo_doc_prov,
-        cant_adj=xml_record.cant_adj,
-        precio_tot_imp=xml_record.precio_tot_imp,
-        desc_articulo=xml_record.desc_articulo,
-        id_moneda=xml_record.id_moneda,
+    organism = resolve_organism(xml_compra.id_inciso, xml_compra.id_ue)
+    return CompraEnrichment(
         organism=organism,
-        license_link=build_license_link(xml_record.id_compra),
+        license_link=build_license_link(xml_compra.id_compra),
         source_url=source_url,
-        id_articulo=xml_record.id_articulo,
-        num_compra=xml_record.num_compra,
-        anio_compra=xml_record.anio_compra,
-        id_inciso=xml_record.id_inciso,
-        id_ue=xml_record.id_ue,
     )
 
 
@@ -156,53 +154,117 @@ def enrich_xml_record(
 # ---------------------------------------------------------------------------
 
 
-def _to_adjudication_dict(record: NormalizedRecord) -> dict[str, Any]:
-    """Map a :class:`NormalizedRecord` to the columns of ``Adjudication``.
-
-    Centralizing the mapping here keeps the model decoupled from the
-    scraper package — the only place that knows the model's exact column
-    names is this function.
-    """
+def _compra_dict(row: CompraRow) -> dict[str, Any]:
+    """Map a :class:`CompraRow` to the ``compra`` table row it produces."""
 
     return {
-        "amount": record.amount,
-        "currency": record.currency,
-        "amount_uyu": record.amount_uyu,
-        "winning_company": record.winning_company,
-        "company_document": record.company_document,
-        "company_document_type": record.company_document_type,
-        "organism": record.organism,
-        "id_inciso": record.id_inciso,
-        "id_ue": record.id_ue,
-        "date": record.date,
-        "license_type": record.license_type,
-        "article": record.article,
-        "article_quantity": record.article_quantity,
-        "article_id": record.article_id,
-        "license_link": record.license_link,
-        "source_url": record.source_url,
+        "id_compra": row.id_compra,
+        "fecha_pub_adj": row.fecha_pub_adj,
+        "objeto": row.objeto,
+        "monto_adj": row.monto_adj,
+        "id_moneda_monto_adj": row.id_moneda_monto_adj,
+        "num_compra": row.num_compra,
+        "anio_compra": row.anio_compra,
+        "id_tipocompra": row.id_tipocompra,
+        "subtipo_compra": row.subtipo_compra,
+        "id_inciso": row.id_inciso,
+        "id_ue": row.id_ue,
+        "organismo": row.organismo or None,
+        "source_url": row.source_url,
     }
 
 
-def _bulk_insert(session: Session, records: Iterable[NormalizedRecord]) -> int:
-    """Insert ``records`` into the ``adjudications`` table, idempotently.
+def _adjudicacion_dict(
+    compra_id: int, row: AdjudicacionRow
+) -> dict[str, Any]:
+    """Map an :class:`AdjudicacionRow` to the ``adjudicacion`` table row."""
 
-    Uses PostgreSQL's ``ON CONFLICT DO NOTHING`` against the unique
-    constraint ``(source_url, license_link, date)`` so a re-run of the
-    scraper on the same data is a no-op. Returns the number of rows
-    passed to the database (not the number actually inserted — the
-    database does not report the latter without an additional round-trip).
+    return {
+        "compra_id": compra_id,
+        "nombre_comercial": row.nombre_comercial,
+        "nro_doc_prov": row.nro_doc_prov,
+        "tipo_doc_prov": row.tipo_doc_prov,
+        "cant_adj": row.cant_adj,
+        "precio_unit": row.precio_unit,
+        "precio_tot_imp": row.precio_tot_imp,
+        "id_moneda": row.id_moneda,
+        "desc_articulo": row.desc_articulo,
+        "id_articulo": row.id_articulo,
+        "amount_uyu": row.amount_uyu,
+    }
+
+
+def _oferente_dict(compra_id: int, row: OferenteRow) -> dict[str, Any]:
+    """Map an :class:`OferenteRow` to the ``oferente`` table row."""
+
+    return {
+        "compra_id": compra_id,
+        "nombre_comercial": row.nombre_comercial,
+        "nro_doc_prov": row.nro_doc_prov,
+        "tipo_doc_prov": row.tipo_doc_prov,
+        "cant_ofertada": row.cant_ofertada,
+        "precio_unit_ofertado": row.precio_unit_ofertado,
+        "id_moneda": row.id_moneda,
+        "variacion": row.variacion,
+        "alternativas": row.alternativas,
+    }
+
+
+def _bulk_insert(session: Session, rows: Iterable[CompraRow]) -> int:
+    """Insert ``rows`` into the new schema, idempotently.
+
+    Each :class:`CompraRow` produces one ``compra`` (with ``ON
+    CONFLICT DO NOTHING`` on ``id_compra``), one ``adjudicacion`` per
+    nested :class:`AdjudicacionRow`, and one ``oferente`` per nested
+    :class:`OferenteRow`. A re-run of the scraper on the same data
+    is a no-op at the parent level: the existing Compra is reused
+    and no new children are inserted. Returns the number of
+    CompraRow rows passed in (not the number actually inserted — the
+    DB does not report that without a round-trip).
     """
 
-    rows = [_to_adjudication_dict(r) for r in records]
+    rows = list(rows)
     if not rows:
         return 0
 
-    stmt = pg_insert(Adjudication).values(rows)
-    stmt = stmt.on_conflict_do_nothing(
-        index_elements=["source_url", "license_link", "date"],
-    )
+    # 1. Upsert the Compra rows first. ``ON CONFLICT DO NOTHING`` skips
+    #    purchases we have already ingested, which is the idempotency
+    #    the spec requires.
+    compra_payloads = [_compra_dict(r) for r in rows]
+    stmt = pg_insert(Compra).values(compra_payloads)
+    stmt = stmt.on_conflict_do_nothing(index_elements=["id_compra"])
     session.execute(stmt)
+
+    # 2. Resolve each Compra's primary key. New compras get a fresh
+    #    ``id``; existing compras return the previously-assigned id.
+    id_compras = {r.id_compra for r in rows}
+    rows_pk = session.execute(
+        select(Compra.id_compra, Compra.id).where(Compra.id_compra.in_(id_compras))
+    ).all()
+    id_compra_to_pk: dict[str, int] = {row[0]: row[1] for row in rows_pk}
+
+    # 3. Insert Adjudicacion rows. There is no natural key on the
+    #    child table, so duplicate children would normally be
+    #    possible — but the parent-level skip in step 1 ensures
+    #    that we only reach this branch for *new* compras. For new
+    #    compras, every child is also new.
+    adj_payloads: list[dict[str, Any]] = []
+    oferente_payloads: list[dict[str, Any]] = []
+    for r in rows:
+        pk = id_compra_to_pk.get(r.id_compra)
+        if pk is None:
+            # The Compra already existed and we skipped the insert;
+            # the spec's idempotency contract says no new children
+            # either, so just drop them.
+            continue
+        adj_payloads.extend(_adjudicacion_dict(pk, a) for a in r.adjudicaciones)
+        oferente_payloads.extend(_oferente_dict(pk, o) for o in r.oferentes)
+
+    if adj_payloads:
+        session.execute(pg_insert(Adjudicacion).values(adj_payloads))
+    if oferente_payloads:
+        session.execute(pg_insert(Oferente).values(oferente_payloads))
+
     session.commit()
     return len(rows)
 
@@ -221,25 +283,31 @@ def _run_scrape_for_day(
     client: httpx.Client,
     start_hour: int,
     end_hour: int,
-) -> list[NormalizedRecord]:
+) -> list[CompraRow]:
     """Run the full XML-only pipeline for a single day.
 
     The pipeline is:
 
     1. Fetch the day-scoped XML report (Source A).
-    2. Parse it into :class:`XmlAdjudication` records.
-    3. Enrich each record via :func:`enrich_xml_record` — the organism
-       is resolved through :func:`scraper.organism_lookup.resolve_organism`
-       and the ``license_link`` is built deterministically from
+    2. Parse it into :class:`XmlCompra` records (each carrying
+       nested :class:`XmlAdjudicacion` and :class:`XmlOferente`
+       children).
+    3. Enrich each compra via :func:`enrich_xml_compra` — the
+       organism is resolved through
+       :func:`scraper.organism_lookup.resolve_organism` and the
+       ``license_link`` is built deterministically from
        ``id_compra``. No RSS fetch, no per-compra fallback, no join.
-    4. Normalize (BCU rate fetch + currency conversion).
-    5. Return the normalized records for batch flush by the caller.
+    4. Normalize per :class:`XmlAdjudicacion` (BCU rate fetch +
+       currency conversion). The per-row ``amount_uyu`` lives on
+       the child :class:`AdjudicacionRow`.
+    5. Return the :class:`CompraRow` records for batch flush by
+       the caller.
 
     The shared ``client`` is the long-lived ``httpx.Client`` constructed
     by :func:`run_scrape` — passing it in keeps the connection pool warm
     across every fetch in the run.
 
-    Returns the list of :class:`NormalizedRecord` for this day, or ``[]``
+    Returns the list of :class:`CompraRow` for this day, or ``[]``
     when the day produced no data (empty XML, HTTP error, or no
     surviving normalization). Persistence is the caller's
     responsibility — :func:`run_scrape` accumulates these into a buffer
@@ -267,36 +335,38 @@ def _run_scrape_for_day(
     # ------------------------------------------------------------------
     # 2. Parse
     # ------------------------------------------------------------------
-    xml_records: list[XmlAdjudication] = list(parse_xml_report(xml_text))
-    log.info("Parsed %d XML adjudications for %s", len(xml_records), target_day)
+    xml_compras: list[XmlCompra] = list(parse_xml_report(xml_text))
+    total_adjs = sum(len(c.adjudicaciones) for c in xml_compras)
+    log.info(
+        "Parsed %d compras (%d adjudicaciones) for %s",
+        len(xml_compras),
+        total_adjs,
+        target_day,
+    )
 
-    if not xml_records:
+    if not xml_compras:
         log.info("No XML records for %s; nothing to insert", target_day)
         return []
 
     # ------------------------------------------------------------------
-    # 3. Enrich — resolve organism + build license_link per record
+    # 3. Enrich — resolve organism + build license_link per compra
     # ------------------------------------------------------------------
-    # Use the per-day URL as ``source_url`` so the
-    # ``(source_url, license_link, date)`` unique constraint dedupes
-    # correctly: same day + same link = conflict (skip); different day
-    # = different source_url = insert (even if the same adjudication
-    # appears on multiple days).
-    joined: list[JoinedRecord] = [
-        enrich_xml_record(record, source_url=url_a) for record in xml_records
+    enriched: list[tuple[XmlCompra, CompraEnrichment]] = [
+        (compra, enrich_xml_compra(compra, source_url=url_a))
+        for compra in xml_compras
     ]
 
     # ------------------------------------------------------------------
-    # 4. Normalize (BCU rate fetch + currency conversion)
+    # 4. Normalize (BCU rate fetch + currency conversion per row)
     # ------------------------------------------------------------------
-    normalized: list[NormalizedRecord] = []
-    for record in joined:
+    normalized: list[CompraRow] = []
+    for compra, enrichment in enriched:
         try:
-            normalized.append(normalize_record(record, bcu_client))
+            normalized.append(normalize_compra(compra, enrichment, bcu_client))
         except Exception as exc:  # BcuError, malformed data, etc.
             log.warning(
                 "Normalization failed for id_compra=%s on %s: %s",
-                record.id_compra,
+                compra.id_compra,
                 target_day,
                 exc,
             )
@@ -308,13 +378,9 @@ def _run_scrape_for_day(
         return []
 
     # ------------------------------------------------------------------
-    # 5. Return normalized records for batch flush by run_scrape
+    # 5. Return CompraRow records for batch flush by run_scrape
     # ------------------------------------------------------------------
-    # Persistence is the orchestrator's responsibility: it accumulates
-    # these into a buffer and flushes every ``flush_size`` records or
-    # every ``flush_interval`` days, whichever comes first. This shrinks
-    # the commit count from O(days) to O(days / flush_interval).
-    log.info("Normalized %d records for %s", len(normalized), target_day)
+    log.info("Normalized %d compras for %s", len(normalized), target_day)
     return normalized
 
 
@@ -355,7 +421,7 @@ def run_scrape(
     Returns
     -------
     int
-        The total number of normalized records passed to ``ON CONFLICT
+        The total number of CompraRow records passed to ``ON CONFLICT
         DO NOTHING`` across all days in the range. Existing rows are
         silently skipped by the database.
 
@@ -417,26 +483,10 @@ def run_scrape(
     )
 
     total_inserted = 0
-    # Batch insert buffer: instead of committing after every day,
-    # accumulate normalized records and flush when either the day count
-    # or record count threshold is reached. This shrinks commit overhead
-    # from O(days) to O(days / flush_interval); the 7-day / 1000-record
-    # defaults cap crash data loss at ~700 records. on_conflict_do_nothing
-    # in :func:`_bulk_insert` makes a re-run after a crash mid-batch
-    # idempotent.
-    buffer: list[NormalizedRecord] = []
+    buffer: list[CompraRow] = []
     days_since_flush = 0
-    # ``session`` is non-None from here on (either the caller's or one
-    # borrowed from the factory above). ``cast`` narrows the type for
-    # mypy without runtime checks — invariants already enforced by the
-    # control flow above.
     db: Session = cast("Session", session)
     try:
-        # One BCU client for the entire range — its (bcu_code, date)
-        # cache is the whole point of having a long-lived client. We
-        # also pass the shared ``httpx.Client`` in so BCU SOAP requests
-        # reuse the same connection pool (and so ``BcuClient.close``
-        # does NOT close the shared client — see ``owns_client`` below).
         bcu_client = BcuClient(settings.bcu_api_url, client=client)
         try:
             current = start_date
@@ -454,10 +504,6 @@ def run_scrape(
                     buffer.extend(normalized)
                     days_since_flush += 1
 
-                # Flush check: whichever threshold (records or days) is
-                # reached first triggers a commit. Days-without-data do
-                # not advance ``days_since_flush`` — only days that
-                # actually contributed records to the buffer count.
                 if buffer and (
                     len(buffer) >= flush_size or days_since_flush >= flush_interval
                 ):
@@ -478,16 +524,8 @@ def run_scrape(
 
                 current += timedelta(days=1)
         finally:
-            # BCU client must not close the shared ``client``; we own
-            # its lifecycle below. ``BcuClient.close`` short-circuits
-            # when ``owns_client`` is False (we passed one in), so this
-            # is a no-op for the shared client.
             bcu_client.close()
 
-        # Final flush: anything left in the buffer must be committed so
-        # a graceful exit (or a crash right after) doesn't lose data.
-        # ``ON CONFLICT DO NOTHING`` keeps a re-run idempotent in case
-        # the process was killed between commit and process exit.
         if buffer:
             try:
                 inserted = _bulk_insert(db, buffer)

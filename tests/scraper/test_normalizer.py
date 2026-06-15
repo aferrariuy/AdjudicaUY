@@ -1,9 +1,10 @@
 """Unit tests for :mod:`scraper.normalizer`.
 
-The normalizer's job is straightforward — translate a :class:`JoinedRecord`
-with a procurement ``id_moneda`` into a :class:`NormalizedRecord` whose
-``amount_uyu`` reflects the BCU rate for the adjudication date. The test
-suite is mostly table-driven: one parametrized case per (id_moneda, mode)
+The normalizer's job is straightforward — translate an
+:class:`XmlCompra` plus a :class:`CompraEnrichment` into a
+:class:`CompraRow` whose per-adjudicacion ``amount_uyu`` reflects
+the BCU rate for the adjudication date. The test suite is mostly
+table-driven: one parametrized case per (id_moneda, mode)
 combination the spec defines.
 """
 
@@ -20,9 +21,15 @@ from scraper.normalizer import (
     CONVERSION_TABLE,
     NON_CONVERTIBLE_TABLE,
     PASSTHROUGH_TABLE,
+    CompraEnrichment,
     ConversionMode,
     _resolve_mode,
-    normalize_record,
+    normalize_compra,
+)
+from scraper.xml_report import (
+    XmlAdjudicacion,
+    XmlCompra,
+    XmlOferente,
 )
 
 # ---------------------------------------------------------------------------
@@ -50,6 +57,64 @@ def _static_bcu_client(rate: Decimal | None = Decimal("38.50")) -> BcuClient:
     return BcuClient(
         "https://example.test/wscotizaciones/servlet/wsbcucotizaciones",
         client=client,
+    )
+
+
+def _build_xml_compra(
+    *,
+    id_compra: str = "1319278",
+    fecha_pub_adj: date = date(2024, 1, 15),
+    id_moneda_monto_adj: int = 20,
+    id_tipocompra: str = "CD",
+    adjudicaciones: list[XmlAdjudicacion] | None = None,
+    oferentes: list[XmlOferente] | None = None,
+) -> XmlCompra:
+    """Build a minimal :class:`XmlCompra` for normalizer tests.
+
+    Defaults to a single USD adjudication so each test only has to
+    override the fields it cares about.
+    """
+
+    if adjudicaciones is None:
+        adjudicaciones = [
+            XmlAdjudicacion(
+                id_compra=id_compra,
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("1234.56"),
+                desc_articulo="Laptop",
+                id_moneda=20,
+                id_articulo="42851",
+            )
+        ]
+    if oferentes is None:
+        oferentes = []
+
+    return XmlCompra(
+        id_compra=id_compra,
+        fecha_pub_adj=fecha_pub_adj,
+        id_tipocompra=id_tipocompra,
+        id_moneda_monto_adj=id_moneda_monto_adj,
+        objeto="Adquisición",
+        monto_adj=Decimal("1234.56"),
+        num_compra="86825",
+        anio_compra="2024",
+        subtipo_compra="",
+        id_inciso=3,
+        id_ue=15,
+        adjudicaciones=adjudicaciones,
+        oferentes=oferentes,
+    )
+
+
+def _enrichment() -> CompraEnrichment:
+    return CompraEnrichment(
+        organism="Ministerio del Interior",
+        license_link="https://example.test/consultas/detalle/id/1319278",
+        source_url="https://example.test/xml",
     )
 
 
@@ -102,16 +167,33 @@ def test_non_convertible_currency_ids_match_spec() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_uyu_passes_amount_through_unchanged(make_joined_record) -> None:
-    record = make_joined_record(id_moneda=0, precio_tot_imp=Decimal("1234.56"))
+def test_normalize_uyu_passes_amount_through_unchanged() -> None:
+    """id_moneda=0: amount_uyu equals precio_tot_imp, no BCU call."""
 
-    result = normalize_record(record, _static_bcu_client(rate=Decimal("38.50")))
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=0,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("1234.56"),
+                desc_articulo="Laptop",
+                id_moneda=0,
+                id_articulo="42851",
+            )
+        ],
+    )
+    result = normalize_compra(compra, _enrichment(), _static_bcu_client(rate=Decimal("38.50")))
 
-    assert result.currency == "UYU"
-    assert result.amount_uyu == Decimal("1234.56")
+    assert result.adjudicaciones[0].currency == "UYU"
+    assert result.adjudicaciones[0].amount_uyu == Decimal("1234.56")
 
 
-def test_normalize_uyu_does_not_call_bcu(make_joined_record) -> None:
+def test_normalize_uyu_does_not_call_bcu() -> None:
     """id_moneda=0 MUST short-circuit — no SOAP request is issued."""
 
     call_log: list[str] = []
@@ -129,10 +211,26 @@ def test_normalize_uyu_does_not_call_bcu(make_joined_record) -> None:
     client = httpx.Client(transport=transport)
     bcu = BcuClient("https://example.test/wsbcucotizaciones", client=client)
 
-    record = make_joined_record(id_moneda=0, precio_tot_imp=Decimal("100.00"))
-    result = normalize_record(record, bcu)
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=0,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("100.00"),
+                desc_articulo="Laptop",
+                id_moneda=0,
+                id_articulo="42851",
+            )
+        ],
+    )
+    result = normalize_compra(compra, _enrichment(), bcu)
 
-    assert result.amount_uyu == Decimal("100.00")
+    assert result.adjudicaciones[0].amount_uyu == Decimal("100.00")
     assert call_log == []  # No BCU request was made.
 
 
@@ -159,33 +257,71 @@ def test_normalize_uyu_does_not_call_bcu(make_joined_record) -> None:
     ],
 )
 def test_normalize_converts_foreign_currency_to_uyu(
-    make_joined_record,
-    id_moneda: int,
-    amount: Decimal,
-    rate: Decimal,
-    expected_uyu: Decimal,
+    id_moneda: int, amount: Decimal, rate: Decimal, expected_uyu: Decimal
 ) -> None:
-    record = make_joined_record(id_moneda=id_moneda, precio_tot_imp=amount)
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=id_moneda,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=amount,
+                desc_articulo="Laptop",
+                id_moneda=id_moneda,
+                id_articulo="42851",
+            )
+        ],
+    )
+    result = normalize_compra(compra, _enrichment(), _static_bcu_client(rate=rate))
+    assert result.adjudicaciones[0].amount_uyu == expected_uyu
 
-    result = normalize_record(record, _static_bcu_client(rate=rate))
 
-    assert result.amount_uyu == expected_uyu
+def test_normalize_sets_currency_code_for_usd() -> None:
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=20,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("100"),
+                desc_articulo="Laptop",
+                id_moneda=20,
+                id_articulo="42851",
+            )
+        ],
+    )
+    result = normalize_compra(compra, _enrichment(), _static_bcu_client())
+    assert result.adjudicaciones[0].currency == "USD"
 
 
-def test_normalize_sets_currency_code_for_usd(make_joined_record) -> None:
-    record = make_joined_record(id_moneda=20, precio_tot_imp=Decimal("100"))
-
-    result = normalize_record(record, _static_bcu_client())
-
-    assert result.currency == "USD"
-
-
-def test_normalize_sets_currency_code_for_eur(make_joined_record) -> None:
-    record = make_joined_record(id_moneda=15, precio_tot_imp=Decimal("100"))
-
-    result = normalize_record(record, _static_bcu_client())
-
-    assert result.currency == "EUR"
+def test_normalize_sets_currency_code_for_eur() -> None:
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=15,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("100"),
+                desc_articulo="Laptop",
+                id_moneda=15,
+                id_articulo="42851",
+            )
+        ],
+    )
+    result = normalize_compra(compra, _enrichment(), _static_bcu_client())
+    assert result.adjudicaciones[0].currency == "EUR"
 
 
 # ---------------------------------------------------------------------------
@@ -195,19 +331,33 @@ def test_normalize_sets_currency_code_for_eur(make_joined_record) -> None:
 
 @pytest.mark.parametrize("id_moneda", [4, 5, 22, 39])
 def test_normalize_returns_null_amount_uyu_for_non_convertible(
-    make_joined_record, id_moneda: int
+    id_moneda: int,
 ) -> None:
-    record = make_joined_record(id_moneda=id_moneda, precio_tot_imp=Decimal("500.00"))
-
-    result = normalize_record(record, _static_bcu_client())
-
-    assert result.amount_uyu is None
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=id_moneda,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("500.00"),
+                desc_articulo="Servicio",
+                id_moneda=id_moneda,
+                id_articulo="42851",
+            )
+        ],
+    )
+    result = normalize_compra(compra, _enrichment(), _static_bcu_client())
+    assert result.adjudicaciones[0].amount_uyu is None
     # The currency is a 3-letter placeholder (NOT "UYU") so the chart can
     # still group the row.
-    assert result.currency != "UYU"
+    assert result.adjudicaciones[0].currency != "UYU"
 
 
-def test_normalize_non_convertible_does_not_call_bcu(make_joined_record) -> None:
+def test_normalize_non_convertible_does_not_call_bcu() -> None:
     call_log: list[str] = []
 
     def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
@@ -223,10 +373,25 @@ def test_normalize_non_convertible_does_not_call_bcu(make_joined_record) -> None
     client = httpx.Client(transport=transport)
     bcu = BcuClient("https://example.test/wsbcucotizaciones", client=client)
 
-    record = make_joined_record(id_moneda=4, precio_tot_imp=Decimal("100.00"))
-    result = normalize_record(record, bcu)
-
-    assert result.amount_uyu is None
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=4,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("100.00"),
+                desc_articulo="Servicio",
+                id_moneda=4,
+                id_articulo="42851",
+            )
+        ],
+    )
+    result = normalize_compra(compra, _enrichment(), bcu)
+    assert result.adjudicaciones[0].amount_uyu is None
     assert call_log == []
 
 
@@ -235,16 +400,30 @@ def test_normalize_non_convertible_does_not_call_bcu(make_joined_record) -> None
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_unknown_currency_returns_null_and_warns(
-    make_joined_record, caplog
-) -> None:
-    record = make_joined_record(id_moneda=99999, precio_tot_imp=Decimal("100.00"))
+def test_normalize_unknown_currency_returns_null_and_warns(caplog) -> None:
+    """Unmapped id_moneda → null amount_uyu + WARNING log."""
 
-    # The lookup first tries the static tables, then the BCU monedas endpoint.
-    # Both miss for an unknown code, so a warning MUST be logged and
-    # ``amount_uyu`` MUST be NULL.
+    import logging
+
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=99999,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("100.00"),
+                desc_articulo="Laptop",
+                id_moneda=99999,
+                id_articulo="42851",
+            )
+        ],
+    )
+
     def _monedas_handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
-        # Empty monedas list — no resolution.
         return httpx.Response(200, content=b"<?xml version='1.0'?><root></root>")
 
     def _cotizaciones_handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
@@ -262,12 +441,12 @@ def test_normalize_unknown_currency_returns_null_and_warns(
     client = httpx.Client(transport=transport)
     bcu = BcuClient("https://example.test/wsbcucotizaciones", client=client)
 
-    with caplog.at_level("WARNING", logger="scraper.normalizer"):
-        result = normalize_record(record, bcu)
+    with caplog.at_level(logging.WARNING, logger="scraper.normalizer"):
+        result = normalize_compra(compra, _enrichment(), bcu)
 
-    assert result.amount_uyu is None
+    assert result.adjudicaciones[0].amount_uyu is None
     # The fallback display code signals "unknown" to the user.
-    assert result.currency == "UNK"
+    assert result.adjudicaciones[0].currency == "UNK"
     assert any("Unknown id_moneda=99999" in record.message for record in caplog.records)
 
 
@@ -276,40 +455,48 @@ def test_normalize_unknown_currency_returns_null_and_warns(
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_preserves_provenance_fields(make_joined_record) -> None:
-    record = make_joined_record(
+def test_normalize_preserves_provenance_fields() -> None:
+    """Compra-level enrichment + adjudication fields round-trip cleanly."""
+
+    compra = _build_xml_compra(
         id_compra="7777",
         fecha_pub_adj=date(2024, 6, 1),
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="7777",
+                nombre_comercial="Acme",
+                nro_doc_prov="210000000077",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("2.00"),
+                precio_unit=Decimal("500.00"),
+                precio_tot_imp=Decimal("1000.00"),
+                desc_articulo="Silla",
+                id_moneda=20,
+                id_articulo="42851",
+            )
+        ],
+    )
+    enrichment = CompraEnrichment(
         organism="OSE",
         license_link="https://example.test/id/7777",
         source_url="https://example.test/source-A",
-        nombre_comercial="Acme",
-        nro_doc_prov="210000000077",
-        tipo_doc_prov="RUT",
-        desc_articulo="Silla",
-        id_tipocompra="CD",
-        cant_adj=Decimal("2.00"),
-        id_moneda=20,
-        precio_tot_imp=Decimal("1000.00"),
-        id_articulo="42851",
     )
-
-    result = normalize_record(record, _static_bcu_client(rate=Decimal("40.00")))
+    result = normalize_compra(compra, enrichment, _static_bcu_client(rate=Decimal("40.00")))
 
     assert result.id_compra == "7777"
-    assert result.date == date(2024, 6, 1)
-    assert result.organism == "OSE"
+    assert result.fecha_pub_adj == date(2024, 6, 1)
+    assert result.organismo == "OSE"
     assert result.license_link == "https://example.test/id/7777"
     assert result.source_url == "https://example.test/source-A"
-    assert result.winning_company == "Acme"
-    assert result.company_document == "210000000077"
-    assert result.company_document_type == "RUT"
-    assert result.article == "Silla"
-    assert result.license_type == "CD"
-    assert result.article_quantity == Decimal("2.00")
-    assert result.article_id == "42851"
-    assert result.amount == Decimal("1000.00")
-    assert result.amount_uyu == Decimal("40000.00")
+    assert result.id_tipocompra == "CD"
+    assert result.adjudicaciones[0].nombre_comercial == "Acme"
+    assert result.adjudicaciones[0].nro_doc_prov == "210000000077"
+    assert result.adjudicaciones[0].tipo_doc_prov == "RUT"
+    assert result.adjudicaciones[0].desc_articulo == "Silla"
+    assert result.adjudicaciones[0].cant_adj == Decimal("2.00")
+    assert result.adjudicaciones[0].precio_tot_imp == Decimal("1000.00")
+    assert result.adjudicaciones[0].id_articulo == "42851"
+    assert result.adjudicaciones[0].amount_uyu == Decimal("40000.00")
 
 
 # ---------------------------------------------------------------------------

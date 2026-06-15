@@ -30,7 +30,9 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 from app.database import Base
-from app.models.adjudication import Adjudication
+from app.models.adjudicacion import Adjudicacion
+from app.models.compra import Compra
+from app.models.oferente import Oferente
 from scraper import main as scraper_main
 
 # ---------------------------------------------------------------------------
@@ -207,13 +209,13 @@ def test_scrape_store_query_serve_round_trip(
         assert inserted == 3  # 2 USD + 1 UYU
 
         with TestSessionLocal() as session:
-            rows = session.execute(select(Adjudication)).scalars().all()
+            compras = session.execute(select(Compra)).scalars().all()
+            adjs = session.execute(select(Adjudicacion)).scalars().all()
 
-        assert len(rows) == 3
-        # Ordering is by date desc, so the latest insertion (Mar 25) is
-        # at index 0. The test asserts the set of companies is the
-        # expected one, regardless of insertion order.
-        companies = sorted(r.winning_company for r in rows)
+        assert len(compras) == 3
+        assert len(adjs) == 3
+
+        companies = sorted(a.nombre_comercial for a in adjs)
         assert companies == sorted(
             [
                 "E2E-COMPANY-Limpieza",
@@ -222,25 +224,17 @@ def test_scrape_store_query_serve_round_trip(
             ]
         )
 
-        # USD rows have amount_uyu populated; UYU row passes through.
-        by_company = {r.winning_company: r for r in rows}
+        by_company = {a.nombre_comercial: a for a in adjs}
         assert by_company["E2E-COMPANY-Laptop"].amount_uyu == Decimal("40000.00")
         assert by_company["E2E-COMPANY-Monitor"].amount_uyu == Decimal("20000.00")
         assert by_company["E2E-COMPANY-Limpieza"].amount_uyu == Decimal("20000.00")
         # Organism enrichment comes from the (id_inciso, id_ue) static
         # lookup — all three records use (4, 1) → "Secretaría del Ministerio del Interior".
-        organisms = {r.organism for r in rows}
+        organisms = {c.organismo for c in compras}
         assert organisms == {"Secretaría del Ministerio del Interior"}
-        # License links are deterministic from id_compra.
-        license_links = {r.license_link for r in rows}
-        assert license_links == {
-            "https://www.comprasestatales.gub.uy/consultas/detalle/id/1001",
-            "https://www.comprasestatales.gub.uy/consultas/detalle/id/1002",
-            "https://www.comprasestatales.gub.uy/consultas/detalle/id/1003",
-        }
 
         # Dates round-tripped through the database untouched.
-        dates = sorted(r.date.isoformat() for r in rows)
+        dates = sorted(c.fecha_pub_adj.isoformat() for c in compras)
         assert dates == ["2024-03-15", "2024-03-20", "2024-03-25"]
 
         # --------------------------------------------------------------
