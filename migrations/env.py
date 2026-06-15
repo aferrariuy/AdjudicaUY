@@ -17,7 +17,6 @@ from app.database import Base
 # Import models so their metadata is registered on Base before autogenerate.
 from app.models import (  # noqa: F401
     adjudicacion,
-    adjudication,  # legacy model — kept on Base.metadata until PR 3
     compra,
     oferente,
 )
