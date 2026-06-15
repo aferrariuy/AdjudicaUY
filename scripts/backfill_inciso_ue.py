@@ -4,6 +4,12 @@ Re-fetches the XML reports for each date that has records in the
 database, parses them to extract (id_inciso, id_ue) per id_compra,
 and updates rows where id_inciso IS NULL.
 
+The script writes against the ``compra`` table — the old flat
+``adjudications`` table no longer exists (see migration
+``006_drop_legacy_adjudications``). The backfill updates Compra
+rows directly; child ``adjudicacion`` rows do not need to be
+touched because they share the same compra_id.
+
 Usage::
 
     PYTHONPATH=. python scripts/backfill_inciso_ue.py [--dry-run]
@@ -21,7 +27,7 @@ from sqlalchemy import select, update
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models.adjudication import Adjudication
+from app.models.compra import Compra
 from scraper.main import build_source_a_url
 from scraper.xml_report import fetch_xml_report, parse_xml_report
 
@@ -54,12 +60,14 @@ def main() -> None:
     )
 
     try:
-        # 1. Get all distinct dates that have records missing id_inciso
+        # 1. Get all distinct dates that have records missing id_inciso.
+        # The natural join via Compra.fecha_pub_adj (since the new
+        # table has one row per id_compra) keeps the lookup small.
         result = session.execute(
-            select(Adjudication.date)
-            .where(Adjudication.id_inciso.is_(None))
+            select(Compra.fecha_pub_adj)
+            .where(Compra.id_inciso.is_(None))
             .distinct()
-            .order_by(Adjudication.date)
+            .order_by(Compra.fecha_pub_adj)
         )
         dates = [row[0] for row in result]
         logger.info("Found %d dates with missing id_inciso/id_ue", len(dates))
@@ -84,42 +92,36 @@ def main() -> None:
 
             # 3. Parse XML and build id_compra → (id_inciso, id_ue) lookup
             lookup: dict[str, tuple[int | None, int | None]] = {}
-            for xml_record in parse_xml_report(xml_text):
-                lookup[xml_record.id_compra] = (xml_record.id_inciso, xml_record.id_ue)
+            for xml_compra in parse_xml_report(xml_text):
+                lookup[xml_compra.id_compra] = (
+                    xml_compra.id_inciso,
+                    xml_compra.id_ue,
+                )
 
             logger.info("  Parsed %d records from XML", len(lookup))
 
-            # 4. Get all records for this date that need updating
+            # 4. Get all compra rows for this date that need updating.
             rows = session.execute(
-                select(Adjudication)
-                .where(Adjudication.date == d)
-                .where(Adjudication.id_inciso.is_(None))
+                select(Compra)
+                .where(Compra.fecha_pub_adj == d)
+                .where(Compra.id_inciso.is_(None))
             ).scalars().all()
 
             updated = 0
             skipped = 0
 
             for row in rows:
-                # Extract id_compra from license_link
-                # Format: https://www.comprasestatales.gub.uy/consultas/detalle/id/123456
-                if not row.license_link:
+                if row.id_compra not in lookup:
                     skipped += 1
                     continue
-
-                id_compra = row.license_link.rsplit("/", 1)[-1]
-                if id_compra not in lookup:
-                    skipped += 1
-                    continue
-
-                id_inciso, id_ue = lookup[id_compra]
+                id_inciso, id_ue = lookup[row.id_compra]
                 if id_inciso is None or id_ue is None:
                     skipped += 1
                     continue
-
                 if not args.dry_run:
                     session.execute(
-                        update(Adjudication)
-                        .where(Adjudication.id == row.id)
+                        update(Compra)
+                        .where(Compra.id == row.id)
                         .values(id_inciso=id_inciso, id_ue=id_ue)
                     )
                 updated += 1
