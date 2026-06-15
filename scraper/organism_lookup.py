@@ -1,7 +1,7 @@
 """Static ``(id_inciso, id_ue)`` → organism name lookup.
 
 Replaces the RSS feed title-parsing that previously provided the
-``organism`` field on :class:`scraper.joiner.JoinedRecord` records. The
+``organism`` field on :class:`scraper.normalizer.JoinedRecord` records. The
 government's ``<unidades-ejecutoras>`` data is a static identifier-to-name
 map, so encoding it as a Python dictionary makes the lookup a pure
 function — no I/O, no parsing, no rate limiting.
