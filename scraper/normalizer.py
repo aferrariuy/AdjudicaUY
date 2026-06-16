@@ -80,12 +80,16 @@ CONVERSION_TABLE: dict[int, tuple[int, str]] = {
     30: (4600, "NOK"),  # CORONAS NORUEGAS
     31: (1490, "NZD"),  # DLS. NEOZELANDESES
     33: (1620, "ZAR"),  # RAND SUDAFRICANO
+    34: (501, "ARS"),  # PESO ARGENTINO
+    38: (2230, "USD"),  # DOLAR FONDO COMPRADOR
     41: (5100, "HKD"),  # DOLAR HONG KONG
     42: (5300, "KRW"),  # WON
     44: (5500, "COP"),  # PESO COLOMBIANO
     46: (5700, "INR"),  # RUPIA INDIA
     48: (4900, "ISK"),  # CORONA ISLANDESA
+    49: (2222, "USD"),  # DOLAR PIZARRA VENDEDOR
     17: (2, "XDR"),  # DER.ESP. DE GIRO (SDR)
+    19: (9900, "U.R."),  # BCU 9900, ISO U.R.
 }
 
 # Pass-through: ``amount_uyu = amount``, no BCU call. Maps to display
