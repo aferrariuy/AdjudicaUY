@@ -20,7 +20,6 @@
             <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Empresa</th>
             <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Artículo</th>
             <th scope="col" class="px-4 py-2 text-right font-medium text-slate-600">Monto</th>
-            <th scope="col" class="px-4 py-2 text-right font-medium text-slate-600">UYU</th>
             <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Tipo</th>
             <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Documento</th>
             <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Licitación</th>
@@ -35,13 +34,6 @@
               <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.article }}">{{ row.article }}</td>
               <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">
                 {{ "{:,.2f}".format(row.amount or 0) }} {{ row.currency }}
-              </td>
-              <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">
-                {% if row.amount_uyu is not none %}
-                  {{ "{:,.0f}".format(row.amount_uyu) }}
-                {% else %}
-                  <span class="text-slate-400" title="Moneda no convertible a UYU">N/D</span>
-                {% endif %}
               </td>
               <td class="px-4 py-2 text-slate-700 whitespace-nowrap">{{ row.license_type or '' }}</td>
               <td class="px-4 py-2 text-slate-700 whitespace-nowrap">
