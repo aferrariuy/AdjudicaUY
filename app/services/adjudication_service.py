@@ -45,6 +45,11 @@ from sqlalchemy import Column, and_, func, select
 
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
+from scraper.normalizer import (
+    CONVERSION_TABLE,
+    NON_CONVERTIBLE_TABLE,
+    PASSTHROUGH_TABLE,
+)
 
 if TYPE_CHECKING:
     from decimal import Decimal
@@ -469,24 +474,43 @@ def _listing_query() -> Any:
         Adjudicacion.desc_articulo.label("article"),
         Adjudicacion.id_articulo.label("article_id"),
         Adjudicacion.precio_tot_imp.label("amount"),
+        Adjudicacion.id_moneda.label("id_moneda"),
         Adjudicacion.amount_uyu.label("amount_uyu"),
         Adjudicacion.nro_doc_prov.label("company_document"),
         Adjudicacion.tipo_doc_prov.label("company_document_type"),
     ).join(Adjudicacion, Adjudicacion.compra_id == Compra.id)
 
 
+def _display_currency(id_moneda: int | None) -> str:
+    """Resolve ``id_moneda`` to the 3-letter display code shown in the table.
+
+    The mapping mirrors :mod:`scraper.normalizer`: passthrough IDs render
+    as ``"UYU"`` (no conversion), convertible IDs render as their ISO
+    4217 code (e.g. ``"USD"``), and non-convertible IDs render as the
+    custom placeholder (e.g. ``"UIX"``).     Unknown or ``None`` IDs fall back to ``"N/D"`` so the template
+    never sees a blank currency and the user knows the code is missing.
+    """
+
+    if id_moneda in PASSTHROUGH_TABLE:
+        return PASSTHROUGH_TABLE[id_moneda]
+    if id_moneda in CONVERSION_TABLE:
+        return CONVERSION_TABLE[id_moneda][1]
+    if id_moneda in NON_CONVERTIBLE_TABLE:
+        return NON_CONVERTIBLE_TABLE[id_moneda]
+    return "N/D"
+
+
 def _row_to_adjudication_row(row: Any) -> AdjudicationRow:
     """Map a SQLAlchemy row to a display-shaped :class:`AdjudicationRow`.
 
-    The ``currency`` field is the new schema's per-row display code
-    (set by the normalizer at ingest). It is not on the new schema
-    directly — the AdjudicacionRow constructor receives the resolved
-    code from the scraper. For legacy rows that did not have a
-    currency recorded, fall back to "UYU" so the template never
-    renders ``None``.
+    The ``currency`` field is derived at query time from
+    ``id_moneda`` (see :func:`_display_currency`); the database does
+    not store the display code, and the per-line-item conversion
+    tables live in :mod:`scraper.normalizer`. Unknown codes fall back
+    to ``"UYU"`` so the template never renders a blank currency.
     """
 
-    currency = getattr(row, "currency", "UYU") or "UYU"
+    currency = _display_currency(getattr(row, "id_moneda", None))
     organism = row.organism or ""
     license_type = row.license_type or ""
     return AdjudicationRow(
