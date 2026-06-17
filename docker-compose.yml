@@ -19,7 +19,9 @@ services:
     restart: unless-stopped
     networks:
       - default
-      - dokploy-network
+      - dokploy-network:
+          aliases:
+            - adjudicauy-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
