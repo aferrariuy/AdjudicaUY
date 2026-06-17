@@ -86,6 +86,7 @@ CONVERSION_TABLE: dict[int, tuple[int, str]] = {
     42: (5300, "KRW"),  # WON
     44: (5500, "COP"),  # PESO COLOMBIANO
     46: (5700, "INR"),  # RUPIA INDIA
+    14: (5900, "CHF"),  # FRANCO SUIZO
     48: (4900, "ISK"),  # CORONA ISLANDESA
     49: (2222, "USD"),  # DOLAR PIZARRA VENDEDOR
     17: (2, "XDR"),  # DER.ESP. DE GIRO (SDR)
