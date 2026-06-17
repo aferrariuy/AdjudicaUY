@@ -31,7 +31,8 @@ from __future__ import annotations
 
 import logging
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import TYPE_CHECKING, Any, cast
 
 import httpx
@@ -59,6 +60,8 @@ from scraper.xml_report import (
     fetch_xml_report,
     parse_xml_report,
 )
+
+_UY_TZ = ZoneInfo("America/Montevideo")
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -457,7 +460,7 @@ def run_scrape(
     # Resolve date range
     # ------------------------------------------------------------------
     if start_date is None and end_date is None:
-        start_date = end_date = date.today()
+        start_date = end_date = datetime.now(_UY_TZ).date()
     elif start_date is None:
         start_date = end_date  # type: ignore[assignment]
     elif end_date is None:

@@ -515,7 +515,7 @@ def test_conversion_table_every_entry_has_bcu_code_and_iso() -> None:
     for id_moneda, (bcu_code, iso) in CONVERSION_TABLE.items():
         assert isinstance(bcu_code, int)
         assert isinstance(iso, str)
-        assert len(iso) == 3
+        assert len(iso) >= 2  # ISO 4217 is 3; BCU allows "U.R." (4)
         # The same id_moneda must not appear in any other table.
         assert id_moneda not in PASSTHROUGH_TABLE
         assert id_moneda not in NON_CONVERTIBLE_TABLE
