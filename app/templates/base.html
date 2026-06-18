@@ -20,6 +20,11 @@
     /* Disable transitions on Tailwind utility toggles to keep HTMX swaps snappy. */
     .htmx-swapping { opacity: 0; transition: opacity 100ms ease-out; }
     .htmx-settling { opacity: 1; transition: opacity 100ms ease-out; }
+    /* Sticky first column on horizontally scrollable tables so the Fecha
+       column stays pinned while the rest of the row scrolls beneath it.
+       background: inherit lets the parent <thead>/<tbody>/hover:bg provide
+       the visible color, occluding scrolled content. */
+    th:first-child, td:first-child { position: sticky; left: 0; z-index: 1; background: inherit; }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
@@ -82,6 +87,29 @@
         try { spec = JSON.parse(canvas.dataset.chart); }
         catch (e) { console.error('Invalid data-chart payload', e, canvas); return null; }
 
+        // Mobile (below Tailwind's `sm` breakpoint = 640px) renders ranking
+        // bar charts as horizontal bars so long organism/company labels stay
+        // legible. Line and doughnut charts are untouched. Detected at
+        // construction time (not via resize observer) so it re-evaluates on
+        // every HTMX swap per the responsive spec.
+        var isMobile = window.innerWidth < 640;
+        var indexAxis = (isMobile && spec.type === 'bar') ? 'y' : undefined;
+
+        // Bar/line scales: value axis carries UYU formatting; category axis
+        // does not. Horizontal charts put the value axis on X.
+        var valueAxis = {
+          beginAtZero: true,
+          ticks: { callback: function (value) { return formatUYU(value); } },
+        };
+        var scales;
+        if (spec.type === 'doughnut' || spec.type === 'pie') {
+          scales = {};
+        } else if (indexAxis === 'y') {
+          scales = { x: valueAxis };
+        } else {
+          scales = { y: valueAxis };
+        }
+
         var chart = new Chart(canvas, {
           type: spec.type || 'bar',
           data: {
@@ -96,6 +124,7 @@
             responsive: true,
             maintainAspectRatio: false,
             animation: false,
+            indexAxis: indexAxis,
             // Bar click → organism profile. Only the organism
             // ranking chart is clickable; other bar charts (KPI
             // sub-cards, company ranking inside the organism
@@ -136,23 +165,22 @@
                     if (ctx.chart.config.type === 'doughnut' || ctx.chart.config.type === 'pie') {
                       return label + ': ' + (ctx.parsed || 0).toLocaleString('es-UY');
                     }
-                    // Bar/line charts: show currency amount.
-                    return label + ': ' + formatUYU(ctx.parsed.y || ctx.parsed);
+                    // Bar/line charts: show currency amount. Horizontal
+                    // bar charts (indexAxis 'y') store the value in
+                    // parsed.x; vertical charts store it in parsed.y.
+                    var value = ctx.chart.options.indexAxis === 'y'
+                      ? ctx.parsed.x
+                      : (ctx.parsed.y != null ? ctx.parsed.y : ctx.parsed);
+                    return label + ': ' + formatUYU(value);
                   },
                 },
               },
             },
             // Scales only apply to axis-based charts (bar, line).
             // Doughnut/pie charts have no axes — omit scales entirely
-            // to prevent Y-axis ticks from rendering.
-            scales: (spec.type === 'doughnut' || spec.type === 'pie') ? {} : {
-              y: {
-                beginAtZero: true,
-                ticks: {
-                  callback: function (value) { return formatUYU(value); },
-                },
-              },
-            },
+            // to prevent Y-axis ticks from rendering. Mobile horizontal
+            // bars put the value axis on X (see isMobile detection above).
+            scales: scales,
           },
         });
 

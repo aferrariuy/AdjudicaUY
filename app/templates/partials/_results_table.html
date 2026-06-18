@@ -15,20 +15,20 @@
       <table class="min-w-full divide-y divide-slate-200 text-sm">
         <thead class="bg-slate-50">
           <tr>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Fecha</th>
+            <th scope="col" class="sticky left-0 bg-inherit z-[1] px-4 py-2 text-left font-medium text-slate-600">Fecha</th>
             <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Organismo</th>
             <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Empresa</th>
             <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Artículo</th>
             <th scope="col" class="px-4 py-2 text-right font-medium text-slate-600">Monto</th>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Tipo</th>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Documento</th>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Licitación</th>
+            <th scope="col" class="hidden md:table-cell px-4 py-2 text-left font-medium text-slate-600">Tipo</th>
+            <th scope="col" class="hidden md:table-cell px-4 py-2 text-left font-medium text-slate-600">Documento</th>
+            <th scope="col" class="hidden md:table-cell px-4 py-2 text-left font-medium text-slate-600">Licitación</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100 bg-white">
           {% for row in results %}
             <tr class="hover:bg-slate-50">
-              <td class="px-4 py-2 whitespace-nowrap text-slate-700">{{ row.date.isoformat() }}</td>
+              <td class="sticky left-0 bg-inherit z-[1] px-4 py-2 whitespace-nowrap text-slate-700">{{ row.date.isoformat() }}</td>
               <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.organism }}">
                 <a
                   href="/organism/{{ row.organism | urlencode }}"
@@ -40,13 +40,13 @@
               <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">
                 {{ "{:,.2f}".format(row.amount or 0) }} {{ row.currency }}
               </td>
-              <td class="px-4 py-2 text-slate-700 whitespace-nowrap">{{ row.license_type or '' }}</td>
-              <td class="px-4 py-2 text-slate-700 whitespace-nowrap">
+              <td class="hidden md:table-cell px-4 py-2 text-slate-700 whitespace-nowrap">{{ row.license_type or '' }}</td>
+              <td class="hidden md:table-cell px-4 py-2 text-slate-700 whitespace-nowrap">
                 {% if row.company_document %}
                   {{ row.company_document_type or '' }} {{ row.company_document }}
                 {% endif %}
               </td>
-              <td class="px-4 py-2 whitespace-nowrap">
+              <td class="hidden md:table-cell px-4 py-2 whitespace-nowrap">
                 {% if row.license_link %}
                   <a href="{{ row.license_link }}" target="_blank" rel="noopener" class="text-blue-700 hover:underline">Ver</a>
                 {% endif %}

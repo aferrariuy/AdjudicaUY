@@ -17,28 +17,28 @@
   <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
     <div class="rounded-md border border-slate-200 p-4">
       <dt class="text-xs uppercase tracking-wide text-slate-500">Total adjudicado</dt>
-      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+      <dd class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums text-slate-800">
         {{ kpi.total_amount | uyu }} UYU
       </dd>
     </div>
 
     <div class="rounded-md border border-slate-200 p-4">
       <dt class="text-xs uppercase tracking-wide text-slate-500">Promedio por adjudicación</dt>
-      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+      <dd class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums text-slate-800">
         {{ kpi.average_amount | uyu }} UYU
       </dd>
     </div>
 
     <div class="rounded-md border border-slate-200 p-4">
       <dt class="text-xs uppercase tracking-wide text-slate-500">Compras</dt>
-      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+      <dd class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums text-slate-800">
         {{ kpi.purchase_count | count_uy }}
       </dd>
     </div>
 
     <div class="rounded-md border border-slate-200 p-4">
       <dt class="text-xs uppercase tracking-wide text-slate-500">Empresas</dt>
-      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+      <dd class="mt-1 text-xl sm:text-2xl font-semibold tabular-nums text-slate-800">
         {{ kpi.company_count | count_uy }}
       </dd>
     </div>
