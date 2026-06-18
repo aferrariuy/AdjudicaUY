@@ -21,10 +21,10 @@
     .htmx-swapping { opacity: 0; transition: opacity 100ms ease-out; }
     .htmx-settling { opacity: 1; transition: opacity 100ms ease-out; }
     /* Sticky first column on horizontally scrollable tables so the Fecha
-       column stays pinned while the rest of the row scrolls beneath it.
-       background: inherit lets the parent <thead>/<tbody>/hover:bg provide
-       the visible color, occluding scrolled content. */
-    th:first-child, td:first-child { position: sticky; left: 0; z-index: 1; background: inherit; }
+       column stays pinned while the rest of the row scrolls beneath it. */
+    thead th:first-child { position: sticky; left: 0; z-index: 2; background-color: rgb(248 250 252); }
+    tbody td:first-child { position: sticky; left: 0; z-index: 2; background-color: #fff; }
+    tbody tr:hover td:first-child { background-color: rgb(248 250 252); }
   </style>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
@@ -105,7 +105,10 @@
         if (spec.type === 'doughnut' || spec.type === 'pie') {
           scales = {};
         } else if (indexAxis === 'y') {
-          scales = { x: valueAxis };
+          scales = {
+            x: valueAxis,
+            y: { ticks: { padding: 8 } },
+          };
         } else {
           scales = { y: valueAxis };
         }
@@ -125,6 +128,7 @@
             maintainAspectRatio: false,
             animation: false,
             indexAxis: indexAxis,
+            layout: { padding: { left: indexAxis === 'y' ? 20 : 0 } },
             // Bar click → organism profile. Only the organism
             // ranking chart is clickable; other bar charts (KPI
             // sub-cards, company ranking inside the organism
