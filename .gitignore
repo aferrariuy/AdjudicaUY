@@ -17,3 +17,9 @@ venv/
 .env
 .env.local
 docker-compose.override.yml
+
+#SDD
+sdd/
+
+#headroom
+headroom_memory.db
