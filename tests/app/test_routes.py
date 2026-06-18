@@ -326,27 +326,17 @@ def test_combined_filters_apply_and_logic(
     assert "FILTER-WRONG-DATE" not in body
 
 
-def test_no_filters_returns_current_year(
-    client: TestClient, make_adjudication
-) -> None:
+def test_no_filters_returns_current_year(client: TestClient, make_adjudication) -> None:
     """Cold load with no params returns only current-year rows.
 
     The route injects ``date_from={year}-01-01`` and ``date_to={year}-12-31``
     when BOTH date params are absent. Older data must be excluded.
     """
 
-    make_adjudication(
-        winning_company="OLDFILTER-PREV", date=date(PREV_YEAR, 6, 1)
-    )
-    make_adjudication(
-        winning_company="CURRENTFILTER-A", date=date(CURRENT_YEAR, 3, 1)
-    )
-    make_adjudication(
-        winning_company="CURRENTFILTER-B", date=date(CURRENT_YEAR, 6, 1)
-    )
-    make_adjudication(
-        winning_company="CURRENTFILTER-C", date=date(CURRENT_YEAR, 9, 1)
-    )
+    make_adjudication(winning_company="OLDFILTER-PREV", date=date(PREV_YEAR, 6, 1))
+    make_adjudication(winning_company="CURRENTFILTER-A", date=date(CURRENT_YEAR, 3, 1))
+    make_adjudication(winning_company="CURRENTFILTER-B", date=date(CURRENT_YEAR, 6, 1))
+    make_adjudication(winning_company="CURRENTFILTER-C", date=date(CURRENT_YEAR, 9, 1))
 
     response = client.get("/adjudications")
 
@@ -549,27 +539,21 @@ def test_default_year_injection_on_cold_load(
     """Cold GET / renders form inputs at current-year bounds and returns
     only current-year rows (no other-year data leaks through)."""
 
-    make_adjudication(
-        winning_company="COLD-OLD", date=date(PREV_YEAR, 6, 1)
-    )
-    make_adjudication(
-        winning_company="COLD-NEW-A", date=date(CURRENT_YEAR, 1, 15)
-    )
-    make_adjudication(
-        winning_company="COLD-NEW-B", date=date(CURRENT_YEAR, 8, 20)
-    )
+    make_adjudication(winning_company="COLD-OLD", date=date(PREV_YEAR, 6, 1))
+    make_adjudication(winning_company="COLD-NEW-A", date=date(CURRENT_YEAR, 1, 15))
+    make_adjudication(winning_company="COLD-NEW-B", date=date(CURRENT_YEAR, 8, 20))
 
     response = client.get("/")
     assert response.status_code == 200
     body = response.text
 
     # Form inputs reflect the injected current-year bounds.
-    assert (
-        f'value="{CURRENT_YEAR}-01-01"' in body
-    ), f"Expected date_from input bound to {CURRENT_YEAR}-01-01"
-    assert (
-        f'value="{CURRENT_YEAR}-12-31"' in body
-    ), f"Expected date_to input bound to {CURRENT_YEAR}-12-31"
+    assert f'value="{CURRENT_YEAR}-01-01"' in body, (
+        f"Expected date_from input bound to {CURRENT_YEAR}-01-01"
+    )
+    assert f'value="{CURRENT_YEAR}-12-31"' in body, (
+        f"Expected date_to input bound to {CURRENT_YEAR}-12-31"
+    )
 
     # Results panel: current-year rows visible, older year filtered out.
     assert "COLD-NEW-A" in body
@@ -640,9 +624,7 @@ def test_validate_date_params_accepts_missing_keys() -> None:
 def test_validate_date_params_accepts_valid_iso() -> None:
     from app.services.adjudication_service import validate_date_params
 
-    validate_date_params(
-        {"date_from": "2024-01-15", "date_to": "2024-12-31"}
-    )
+    validate_date_params({"date_from": "2024-01-15", "date_to": "2024-12-31"})
 
 
 def test_validate_date_params_rejects_garbage_string() -> None:
@@ -666,6 +648,138 @@ def test_validate_date_params_rejects_reversed_range() -> None:
     )
 
     with pytest.raises(DateValidationError, match="Desde"):
-        validate_date_params(
-            {"date_from": "2025-12-01", "date_to": "2025-01-01"}
-        )
+        validate_date_params({"date_from": "2025-12-01", "date_to": "2025-01-01"})
+
+
+# ---------------------------------------------------------------------------
+# GET /organism/{name} — organism profile page (PR#2 of citizen-dashboard)
+# ---------------------------------------------------------------------------
+
+
+def test_organism_detail_returns_200_with_widgets_for_known_organism(
+    client: TestClient, make_adjudication, db_session
+) -> None:
+    """Known organism renders the profile page with KPI/trend/concentration/ranking."""
+
+    from app.models.oferente import Oferente
+
+    adj1 = make_adjudication(
+        organism="Ministerio del Interior",
+        winning_company="ACME",
+        amount_uyu=Decimal("1000.00"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    make_adjudication(
+        organism="Ministerio del Interior",
+        winning_company="Globex",
+        amount_uyu=Decimal("500.00"),
+        date=date(CURRENT_YEAR, 4, 1),
+    )
+    # Attach an oferente to the first compra so the concentration
+    # chart has data to render (the empty-state branch otherwise
+    # replaces the chart with a "Sin datos" message).
+    db_session.add(Oferente(compra_id=adj1.compra_id, nombre_comercial="Bidder A"))
+    db_session.commit()
+
+    response = client.get("/organism/Ministerio%20del%20Interior")
+
+    assert response.status_code == 200
+    body = response.text
+    # The organism name is rendered as the page heading.
+    assert "Ministerio del Interior" in body
+    # The dashboard widgets are all present.
+    assert "Resumen" in body  # KPI section heading
+    assert 'id="chart-trend"' in body
+    assert 'id="chart-concentration"' in body
+    assert 'id="chart-ranking"' in body  # company ranking
+    # The organism ranking chart is intentionally absent on this page.
+    assert 'id="chart-organism-ranking"' not in body
+
+
+def test_organism_detail_returns_200_with_empty_state_for_unknown_organism(
+    client: TestClient,
+) -> None:
+    """Unknown organism renders an empty profile (no 404)."""
+
+    response = client.get("/organism/Nonexistent%20Organism")
+
+    assert response.status_code == 200
+    body = response.text
+    # The page still loads and shows the requested name.
+    assert "Nonexistent Organism" in body
+    # All widgets fall back to their empty-state copy.
+    assert "No hay datos" in body
+    assert "Sin datos disponibles" in body
+
+
+def test_organism_detail_decodes_url_with_accents(
+    client: TestClient, make_adjudication
+) -> None:
+    """Accented characters in the URL are decoded to the original name."""
+
+    make_adjudication(
+        organism="Dirección Nacional de Aduanas",
+        winning_company="ADUANAS-CO",
+        amount_uyu=Decimal("100.00"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/organism/Direcci%C3%B3n%20Nacional%20de%20Aduanas")
+
+    assert response.status_code == 200
+    body = response.text
+    # The decoded name appears as the heading — the round-trip from
+    # %C3%B3 → ó is what this scenario is asserting.
+    assert "Dirección Nacional de Aduanas" in body
+
+
+def test_organism_detail_partial_returns_body_without_chrome(
+    client: TestClient, make_adjudication, db_session
+) -> None:
+    """The HTMX partial endpoint returns the body, not the full page chrome."""
+
+    from app.models.oferente import Oferente
+
+    adj = make_adjudication(
+        organism="OSE",
+        winning_company="OSE-CO",
+        amount_uyu=Decimal("100.00"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    # Concentration needs oferentes to render the chart canvas.
+    db_session.add(Oferente(compra_id=adj.compra_id, nombre_comercial="Bidder OSE"))
+    db_session.commit()
+
+    response = client.get("/organism/OSE/partial")
+
+    assert response.status_code == 200
+    body = response.text
+    # The body partial includes the dashboard widgets.
+    assert 'id="chart-trend"' in body
+    assert 'id="chart-concentration"' in body
+    assert 'id="chart-ranking"' in body
+    # The full page chrome is NOT re-rendered — no <header>, no nav,
+    # no filter form (the form lives outside the swap target).
+    assert "<header" not in body
+    assert "Volver al buscador" not in body
+
+
+def test_results_table_organism_link_uses_organism_route(
+    client: TestClient, make_adjudication
+) -> None:
+    """Organism cells in the results table are anchors pointing to /organism/..."""
+
+    make_adjudication(
+        organism="Ministerio del Interior",
+        winning_company="LINK-CO",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/")
+    body = response.text
+
+    assert response.status_code == 200
+    # The anchor is present with the URL-encoded organism name.
+    assert 'href="/organism/Ministerio%20del%20Interior"' in body
+    # The visible text is the original organism name.
+    assert ">Ministerio del Interior</a>" in body

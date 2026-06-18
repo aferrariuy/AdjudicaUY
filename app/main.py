@@ -22,6 +22,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
 from app.database import get_engine
+from app.formatting import format_count, format_percent, format_uyu
 from app.routes.adjudications import router as adjudications_router
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,15 @@ def create_app() -> FastAPI:
     # resolve them via ``request.app.state.templates``. This indirection
     # lets tests swap in a different Jinja2 environment.
     app.state.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+    # Locale-aware number formatters. The deploy image does not ship the
+    # ``es_UY`` system locale, so we wrap the pure-Python helpers from
+    # :mod:`app.formatting` as Jinja filters. Templates use them like
+    # ``{{ value | uyu }}`` / ``{{ value | count_uy }}`` /
+    # ``{{ value | pct_uy }}``; the underlying strings match the spec
+    # scenarios for total / count / percentage formatting.
+    app.state.templates.env.filters["uyu"] = format_uyu
+    app.state.templates.env.filters["count_uy"] = format_count
+    app.state.templates.env.filters["pct_uy"] = format_percent
 
     # Optional static dir — created on demand by the first deployer.
     # Mounting a missing directory crashes uvicorn, so we only mount if

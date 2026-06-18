@@ -39,12 +39,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import Column, and_, func, select
+from sqlalchemy import Column, and_, case, func, select
 
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
+from app.models.oferente import Oferente
 from scraper.normalizer import (
     CONVERSION_TABLE,
     NON_CONVERTIBLE_TABLE,
@@ -52,8 +54,6 @@ from scraper.normalizer import (
 )
 
 if TYPE_CHECKING:
-    from decimal import Decimal
-
     from sqlalchemy.orm import Session
 
 # ---------------------------------------------------------------------------
@@ -74,6 +74,7 @@ class AdjudicationFilters:
 
     company: str | None = None
     organism: str | None = None
+    organism_exact: str | None = None
     article: str | None = None
     article_id: str | None = None
     date_from: date | None = None
@@ -87,6 +88,7 @@ class AdjudicationFilters:
             for field in (
                 "company",
                 "organism",
+                "organism_exact",
                 "article",
                 "article_id",
                 "date_from",
@@ -122,6 +124,65 @@ class AdjudicationRow:
     company_document_type: str | None
     license_link: str
     article_id: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Aggregate result dataclasses
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class KpiSummary:
+    """Summary metrics for the currently filtered adjudication set.
+
+    The four values are produced by a single query so the snapshot is
+    atomic (no chance of a filter change landing between aggregates)
+    and round-trip cost stays at one DB call.
+
+    * ``total_amount``     — SUM of ``Adjudicacion.amount_uyu`` over the
+      filtered set; rows with NULL ``amount_uyu`` are excluded from the
+      sum. Coalesced to ``Decimal("0")`` so the UI can render a clean
+      "0" instead of NULL.
+    * ``average_amount``   — ``total_amount / non_null_count`` of the
+      same filtered set. When no non-null amount exists, falls back to
+      ``Decimal("0")`` (the empty-state value per the spec).
+    * ``purchase_count``   — COUNT(DISTINCT ``Compra.id``) over the
+      filtered set (a Compra with N adjudicaciones counts once).
+    * ``company_count``    — COUNT(DISTINCT
+      ``Adjudicacion.nombre_comercial``). ``nombre_comercial`` is
+      declared NOT NULL in the schema, so the DISTINCT naturally
+      excludes NULLs; this attribute is the number of distinct winning
+      companies in the filtered set.
+    """
+
+    total_amount: Decimal
+    average_amount: Decimal
+    purchase_count: int
+    company_count: int
+
+
+@dataclass(frozen=True)
+class ConcentrationResult:
+    """Result of the market-concentration aggregate.
+
+    A compra (purchase) is "single bidder" if it has exactly one
+    oferente; "multi bidder" if it has two or more. Purchases with
+    zero oferentes are excluded from BOTH numerator and denominator
+    (the metric is undefined for them — see the market-concentration
+    spec, "Definition of the metric" scenario).
+
+    * ``ratio``              — ``single_bidder_count / (single + multi)``,
+      or ``None`` when the denominator is zero (no compras with
+      oferentes match the filter). The empty-state branch in the UI
+      uses the None signal to swap in the "Sin datos disponibles"
+      message and skip the donut chart.
+    * ``single_bidder_count`` — number of compras with exactly 1 oferente.
+    * ``multi_bidder_count``  — number of compras with >= 2 oferentes.
+    """
+
+    ratio: Decimal | None
+    single_bidder_count: int
+    multi_bidder_count: int
 
 
 # ---------------------------------------------------------------------------
@@ -239,11 +300,15 @@ def filters_from_query_params(params: dict[str, str | None]) -> AdjudicationFilt
 
 
 def _is_organism_predicate(predicate: Any) -> bool:
-    """Return ``True`` if ``predicate`` is the ILIKE filter on ``organism``.
+    """Return ``True`` if ``predicate`` is any organism filter (ILIKE or exact).
 
     Used by :func:`distinct_organisms` to drop the organism filter from
     the predicate list — that way the dropdown can suggest names from
     the remaining dimensions even when an organism is already selected.
+    The exact-match predicate (used by the organism profile route) is
+    recognised alongside the existing ILIKE predicate so the
+    suggestions behave consistently regardless of which filter form
+    is active.
     """
     if not hasattr(predicate, "left") or not hasattr(predicate, "operator"):
         return False
@@ -252,7 +317,7 @@ def _is_organism_predicate(predicate: Any) -> bool:
     return (
         isinstance(left, Column)
         and left.key == "organismo"
-        and operator_name == "ilike_op"
+        and operator_name in {"ilike_op", "eq_op"}
     )
 
 
@@ -272,6 +337,13 @@ def _build_predicates(filters: AdjudicationFilters) -> list[Any]:
         predicates.append(Adjudicacion.nombre_comercial.ilike(f"%{filters.company}%"))
     if filters.organism:
         predicates.append(Compra.organismo.ilike(f"%{filters.organism}%"))
+    if filters.organism_exact:
+        # Exact-match predicate (organism profile). Equality on
+        # ``organismo`` avoids the ambiguity of ILIKE partial match
+        # when the user has clicked through from a known name — see
+        # the organism-profile spec, "Profile inherits the dashboard
+        # widgets" requirement.
+        predicates.append(Compra.organismo == filters.organism_exact)
     if filters.article:
         predicates.append(Adjudicacion.desc_articulo.ilike(f"%{filters.article}%"))
     if filters.article_id:
@@ -414,6 +486,201 @@ def ranking_by_organism(
 
 
 # ---------------------------------------------------------------------------
+# Dashboard aggregates (KPI summary, monthly trend, market concentration)
+# ---------------------------------------------------------------------------
+
+
+def kpi_summary(session: Session, filters: AdjudicationFilters) -> KpiSummary:
+    """Return a single snapshot of summary metrics for the filtered set.
+
+    The four aggregates are computed in one round-trip; the row count
+    of non-null ``amount_uyu`` values is fetched alongside the sum so
+    the average can be derived without a second query (the spec says
+    "average uses the same filtered set" — same predicates, no extra
+    scope).
+
+    Filters on the Adjudicacion side (company / article / article_id)
+    and the Compra side (organism / date_from / date_to) are honoured
+    via :func:`_apply_filters`. Rows with NULL ``amount_uyu`` are
+    excluded from both the SUM and the COUNT used for the average, so
+    non-convertible currencies do not skew the total or divide the
+    average.
+
+    Returns a :class:`KpiSummary` whose values are safe to render
+    directly: ``total_amount`` is coalesced to ``Decimal("0")`` and
+    ``average_amount`` falls back to ``Decimal("0")`` when the
+    filtered set has zero non-null amounts. ``purchase_count`` and
+    ``company_count`` come from COUNT(DISTINCT …) so they cannot be
+    NULL.
+    """
+
+    non_null_amount_count = func.coalesce(
+        func.sum(case((Adjudicacion.amount_uyu.is_not(None), 1), else_=0)),
+        0,
+    ).label("non_null_count")
+    total_amount_expr = func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label(
+        "total_amount"
+    )
+    purchase_count_expr = func.count(func.distinct(Compra.id)).label("purchase_count")
+    company_count_expr = func.count(func.distinct(Adjudicacion.nombre_comercial)).label(
+        "company_count"
+    )
+
+    stmt = select(
+        total_amount_expr,
+        non_null_amount_count,
+        purchase_count_expr,
+        company_count_expr,
+    ).join(Compra, Compra.id == Adjudicacion.compra_id)
+    stmt = _apply_filters(stmt, filters)
+
+    row = session.execute(stmt).one()
+    total = Decimal(row.total_amount or 0)
+    non_null = int(row.non_null_count or 0)
+    average = total / Decimal(non_null) if non_null > 0 else Decimal(0)
+    return KpiSummary(
+        total_amount=total,
+        average_amount=average,
+        purchase_count=int(row.purchase_count or 0),
+        company_count=int(row.company_count or 0),
+    )
+
+
+def monthly_trend(
+    session: Session, filters: AdjudicationFilters
+) -> list[tuple[str, Decimal]]:
+    """Return monthly totals of adjudicated amount in UYU for the filtered set.
+
+    The result is a list of ``(YYYY-MM, total_uyu)`` pairs in
+    chronological order. Sparse months — months within the active
+    window that have no adjudicaciones — are filled in with a value of
+    ``Decimal(0)`` so the X-axis of the trend chart has no gaps
+    (temporal-trend spec, "Sparse months are preserved" scenario).
+
+    The window is determined by, in order of preference:
+
+    1. The active ``date_from`` / ``date_to`` filters, when both are
+       present (the route always injects the current-year window on
+       cold load, so the active window is almost always available).
+    2. The data extent — from the earliest to the latest non-empty
+       month in the result. Used when no date filter is set so the
+       trend still covers every observed month with zero-fill.
+
+    Rows with NULL ``amount_uyu`` are excluded from the aggregation
+    (consistent with the company / organism rankings and with the
+    empty-state spec — "Data exists but all amounts are null" shows
+    the "Sin datos disponibles" message).
+
+    Returns ``[]`` when the filtered set has no adjudicaciones with
+    non-null ``amount_uyu``; the route translates an empty result
+    into the empty-state message.
+    """
+
+    # Dialect-aware month formatting: strftime for SQLite (tests),
+    # to_char for PostgreSQL (production).
+    dialect = session.bind.dialect.name
+    if dialect == "postgresql":
+        ym_expr = func.to_char(Compra.fecha_pub_adj, "YYYY-MM").label("ym")
+    else:
+        ym_expr = func.strftime("%Y-%m", Compra.fecha_pub_adj).label("ym")
+    total_expr = func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label("total")
+
+    stmt = select(ym_expr, total_expr).join(Compra, Compra.id == Adjudicacion.compra_id)
+    stmt = stmt.where(Adjudicacion.amount_uyu.is_not(None))
+    stmt = stmt.group_by(ym_expr)
+    stmt = _apply_filters(stmt, filters)
+
+    rows = [(row.ym, Decimal(row.total)) for row in session.execute(stmt)]
+    if not rows:
+        return []
+
+    # Determine the fill range. Use the data's natural extent so
+    # the line only reaches the last month with actual data — no
+    # trailing zero months that produce NaN tooltips on future dates.
+    first_label, _ = min(rows, key=lambda r: r[0])
+    last_label, _ = max(rows, key=lambda r: r[0])
+    start = date(int(first_label[:4]), int(first_label[5:7]), 1)
+    end = date(int(last_label[:4]), int(last_label[5:7]), 1)
+
+    data_by_label = dict(rows)
+    result: list[tuple[str, Decimal]] = []
+    current = start
+    # ``end`` is included; we walk month-by-month until we pass it.
+    while current <= end:
+        label = f"{current.year:04d}-{current.month:02d}"
+        result.append((label, Decimal(data_by_label.get(label, 0))))
+        if current.month == 12:
+            current = date(current.year + 1, 1, 1)
+        else:
+            current = date(current.year, current.month + 1, 1)
+    return result
+
+
+def concentration_ratio(
+    session: Session, filters: AdjudicationFilters
+) -> ConcentrationResult:
+    """Return the single-bidder share of the filtered set.
+
+    Counts compras (purchases) by their oferente count: a compra with
+    exactly one oferente is "single bidder", two or more is
+    "multi bidder"; compras with zero oferentes are excluded from
+    BOTH the numerator and the denominator (the metric is undefined
+    for them, see the market-concentration spec).
+
+    The per-compra oferente count is computed via a correlated
+    subquery (``scalar_subquery`` on ``Oferente.compra_id``). This
+    keeps the whole aggregate to a single SQL trip, and the
+    correlated-subquery form is portable to SQLite — the test
+    database — as well as PostgreSQL.
+
+    ``ratio`` is ``None`` when no compras in the filtered set have
+    any oferentes at all (denominator is zero). The route / template
+    treats that as the empty state and skips the donut chart.
+    """
+
+    oferente_count = (
+        select(func.count(Oferente.id))
+        .where(Oferente.compra_id == Compra.id)
+        .correlate(Compra)
+        .scalar_subquery()
+    )
+
+    # Comprehensively apply the same filters as the listing: a Compra
+    # is in scope when at least one of its Adjudicaciones matches the
+    # filter (organism / company / article / article_id / date range).
+    # We resolve the matching Compra IDs in a subquery, then bucket
+    # them by their oferente count.
+    matching_compras = (
+        select(Compra.id)
+        .join(Adjudicacion, Adjudicacion.compra_id == Compra.id)
+        .distinct()
+    )
+    matching_compras = _apply_filters(matching_compras, filters).subquery()
+
+    single_expr = func.coalesce(
+        func.sum(case((oferente_count == 1, 1), else_=0)), 0
+    ).label("single")
+    multi_expr = func.coalesce(
+        func.sum(case((oferente_count >= 2, 1), else_=0)), 0
+    ).label("multi")
+
+    stmt = select(single_expr, multi_expr).where(
+        Compra.id.in_(select(matching_compras))
+    )
+
+    row = session.execute(stmt).one()
+    single = int(row.single)
+    multi = int(row.multi)
+    total = single + multi
+    ratio = Decimal(single) / Decimal(total) if total > 0 else None
+    return ConcentrationResult(
+        ratio=ratio,
+        single_bidder_count=single,
+        multi_bidder_count=multi,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Filter value sources
 # ---------------------------------------------------------------------------
 
@@ -487,7 +754,8 @@ def _display_currency(id_moneda: int | None) -> str:
     The mapping mirrors :mod:`scraper.normalizer`: passthrough IDs render
     as ``"UYU"`` (no conversion), convertible IDs render as their ISO
     4217 code (e.g. ``"USD"``), and non-convertible IDs render as the
-    custom placeholder (e.g. ``"UIX"``).     Unknown or ``None`` IDs fall back to ``"N/D"`` so the template
+    custom placeholder (e.g. ``"UIX"``). Unknown or ``None`` IDs fall
+    back to ``"N/D"`` so the template
     never sees a blank currency and the user knows the code is missing.
     """
 
@@ -532,11 +800,16 @@ def _row_to_adjudication_row(row: Any) -> AdjudicationRow:
 __all__ = [
     "AdjudicationFilters",
     "AdjudicationRow",
+    "ConcentrationResult",
     "DateValidationError",
+    "KpiSummary",
+    "concentration_ratio",
     "count_adjudications",
     "distinct_organisms",
     "filters_from_query_params",
+    "kpi_summary",
     "list_adjudications",
+    "monthly_trend",
     "ranking_by_company",
     "ranking_by_organism",
     "validate_date_params",

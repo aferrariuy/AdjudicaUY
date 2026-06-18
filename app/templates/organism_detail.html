@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{# Organism profile page — full HTML document extending base.html.
+
+   The route injects the same payload shape as the partial (see
+   ``_build_organism_context`` in ``app/routes/adjudications.py``):
+   the KPI summary, monthly trend, concentration, and the top-N
+   winning companies for the named organism. The page also
+   includes a filter form (article / article_id / date range) that
+   targets the partial endpoint, mirroring the index page's HTMX
+   pattern. There is intentionally NO organism ranking chart on
+   this page — the user is already on a single organism's view, so
+   the ranking of organisms would be trivial (one row). #}
+
+{% block title %}{{ organism_name }} — AdjudicaUY{% endblock %}
+
+{% block content %}
+  <div class="mb-4">
+    <a
+      href="/"
+      class="text-sm text-blue-700 hover:underline"
+    >&larr; Volver al buscador</a>
+  </div>
+
+  <header class="mb-6">
+    <h1 class="text-2xl font-semibold tracking-tight text-slate-800">
+      {{ organism_name }}
+    </h1>
+    <p class="text-sm text-slate-500">Perfil del organismo — actividad de adjudicaciones</p>
+  </header>
+
+  <section
+    aria-labelledby="organism-filters-heading"
+    class="bg-white border border-slate-200 rounded-lg p-4 sm:p-6 mb-6"
+  >
+    <h2 id="organism-filters-heading" class="text-lg font-semibold mb-4">Filtros</h2>
+
+    <form
+      hx-get="/organism/{{ organism_name | urlencode }}/partial"
+      hx-target="#organism-body"
+      hx-trigger="submit"
+      hx-swap="innerHTML"
+      class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+    >
+      <div>
+        <label for="org-filter-article" class="block text-sm font-medium text-slate-700 mb-1">Artículo</label>
+        <input
+          id="org-filter-article"
+          type="text"
+          name="article"
+          value="{{ filters.article or '' }}"
+          placeholder="Ej: laptop"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+      </div>
+
+      <div>
+        <label for="org-filter-article-id" class="block text-sm font-medium text-slate-700 mb-1">ID de artículo</label>
+        <input
+          id="org-filter-article-id"
+          type="text"
+          name="article_id"
+          value="{{ filters.article_id or '' }}"
+          placeholder="IDs separados por coma"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+      </div>
+
+      <div>
+        <label for="org-filter-date-from" class="block text-sm font-medium text-slate-700 mb-1">Desde</label>
+        <input
+          id="org-filter-date-from"
+          type="date"
+          name="date_from"
+          value="{{ filters.date_from.isoformat() if filters.date_from else '' }}"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+      </div>
+
+      <div>
+        <label for="org-filter-date-to" class="block text-sm font-medium text-slate-700 mb-1">Hasta</label>
+        <input
+          id="org-filter-date-to"
+          type="date"
+          name="date_to"
+          value="{{ filters.date_to.isoformat() if filters.date_to else '' }}"
+          class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+        >
+      </div>
+
+      <div class="flex items-end gap-2">
+        <button
+          type="submit"
+          class="inline-flex items-center rounded-md bg-blue-700 px-4 py-2 text-sm font-medium text-white hover:bg-blue-800"
+        >Aplicar</button>
+        <button
+          type="button"
+          onclick="limpiarFiltrosOrganismo()"
+          class="inline-flex items-center rounded-md border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
+        >Limpiar</button>
+      </div>
+    </form>
+  </section>
+
+  <div id="organism-body">
+    {% include "partials/_organism_detail_content.html" %}
+  </div>
+
+  <script>
+    // Reset the date inputs on the organism page and re-submit the
+    // form. The article / article_id fields keep their values so the
+    // user does not lose their narrower selection — only the date
+    // range is cleared back to "all time" (the organism profile's
+    // default scope is the full history of the organism, not the
+    // current calendar year).
+    window.limpiarFiltrosOrganismo = function () {
+      var form = document.querySelector(
+        'form[hx-get="/organism/{{ organism_name | urlencode }}/partial"]'
+      );
+      if (!form) return;
+      var from = form.querySelector('input[name="date_from"]');
+      var to = form.querySelector('input[name="date_to"]');
+      if (from) from.value = '';
+      if (to) to.value = '';
+      htmx.trigger(form, 'submit');
+    };
+  </script>
+{% endblock %}

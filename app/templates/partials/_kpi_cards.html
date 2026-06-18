@@ -1,0 +1,52 @@
+{# KPI summary row: four cards summarising the active filter set.
+
+   The route injects a ``KpiSummary`` dataclass with four values:
+   total_amount, average_amount, purchase_count, company_count.
+
+   * Monetary values are formatted in es-UY with the UYU currency.
+   * Counts use the same locale for the thousands separator.
+   * The empty-state rule (kpi-summary spec, "Zero results show
+     zero and a message") is satisfied by an extra message block
+     that renders when the filtered set has no purchases. The
+     individual card values still display "0" because the service
+     already coalesces them. #}
+
+<section aria-labelledby="kpi-heading" class="bg-white border border-slate-200 rounded-lg p-4 sm:p-6">
+  <h2 id="kpi-heading" class="text-lg font-semibold mb-4">Resumen</h2>
+
+  <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="rounded-md border border-slate-200 p-4">
+      <dt class="text-xs uppercase tracking-wide text-slate-500">Total adjudicado</dt>
+      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+        {{ kpi.total_amount | uyu }} UYU
+      </dd>
+    </div>
+
+    <div class="rounded-md border border-slate-200 p-4">
+      <dt class="text-xs uppercase tracking-wide text-slate-500">Promedio por adjudicación</dt>
+      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+        {{ kpi.average_amount | uyu }} UYU
+      </dd>
+    </div>
+
+    <div class="rounded-md border border-slate-200 p-4">
+      <dt class="text-xs uppercase tracking-wide text-slate-500">Compras</dt>
+      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+        {{ kpi.purchase_count | count_uy }}
+      </dd>
+    </div>
+
+    <div class="rounded-md border border-slate-200 p-4">
+      <dt class="text-xs uppercase tracking-wide text-slate-500">Empresas</dt>
+      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+        {{ kpi.company_count | count_uy }}
+      </dd>
+    </div>
+  </dl>
+
+  {% if kpi.purchase_count == 0 %}
+    <p class="mt-4 text-sm text-slate-500" role="status">
+      No hay datos para los filtros aplicados.
+    </p>
+  {% endif %}
+</section>
