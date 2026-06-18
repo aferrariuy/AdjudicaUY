@@ -101,13 +101,21 @@
           beginAtZero: true,
           ticks: { callback: function (value) { return formatUYU(value); } },
         };
+        // Truncate long labels so they fit inside the chart area.
+        // ~12 chars per 100px is a safe heuristic for 13px font.
+        var maxLabelChars = Math.max(10, Math.floor((canvas.parentElement ? canvas.parentElement.offsetWidth : 300) / 8));
+        function truncateLabel(label) {
+          if (!label || label.length <= maxLabelChars) return label || '';
+          return label.substring(0, maxLabelChars) + '…';
+        }
+
         var scales;
         if (spec.type === 'doughnut' || spec.type === 'pie') {
           scales = {};
         } else if (indexAxis === 'y') {
           scales = {
             x: valueAxis,
-            y: { ticks: { padding: 8 } },
+            y: { ticks: { callback: function (value) { return truncateLabel(value); }, padding: 8 } },
           };
         } else {
           scales = { y: valueAxis };
