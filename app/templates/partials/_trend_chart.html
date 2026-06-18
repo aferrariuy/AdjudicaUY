@@ -1,0 +1,33 @@
+{# Temporal trend: line/area chart of monthly adjudicated amount.
+
+   The route injects:
+   * ``trend_rows``   — list of (YYYY-MM, total_uyu) pairs in
+     chronological order, with sparse months zero-filled by the
+     service.
+   * ``trend_json``   — the JSON-encoded ``data-chart`` payload.
+   * ``has_trend_data`` — boolean flag the partial uses to swap in
+     the "Sin datos disponibles" empty state.
+
+   See the temporal-trend spec, "Empty State" requirement for the
+   empty-state messaging. The base.html Chart.js bootstrap reads
+   the ``data-chart`` attribute off the canvas to instantiate the
+   chart; the re-attach flow runs on every HTMX swap and on first
+   load, so a partial swap keeps the new data live. #}
+
+<section aria-labelledby="trend-heading" class="bg-white border border-slate-200 rounded-lg p-4 sm:p-6">
+  <h2 id="trend-heading" class="text-lg font-semibold mb-4">Tendencia mensual</h2>
+
+  {% if has_trend_data %}
+    <div class="relative h-72 sm:h-96 w-full">
+      <canvas
+        class="block w-full"
+        id="chart-trend"
+        data-chart='{{ trend_json | safe }}'
+        aria-label="Total adjudicado por mes en UYU"
+        role="img"
+      ></canvas>
+    </div>
+  {% else %}
+    <p class="text-slate-500 text-sm">Sin datos disponibles para los filtros aplicados.</p>
+  {% endif %}
+</section>

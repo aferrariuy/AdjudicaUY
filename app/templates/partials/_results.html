@@ -1,6 +1,13 @@
 {# Wrapper partial rendered into the #results container on every filter
-   change. It composes the three child partials (results table, ranking
-   chart, organism ranking chart) and the small "showing N of M" header.
+   change. It composes the child partials (KPI cards, trend chart,
+   concentration chart, results table, ranking chart, organism
+   ranking chart) and the small "showing N of M" header.
+
+   Order: KPI cards first (summary at a glance), then the trend
+   chart, then the concentration chart, then the existing table
+   and the two ranking charts. The dashboard widgets sit above the
+   table so the user sees the aggregate story before the line
+   items, matching the citizen-dashboard proposal layout.
 
    This file is a Jinja2 partial only — it is not an HTML document. #}
 
@@ -21,6 +28,9 @@
     </p>
   </div>
 
+  {% include "partials/_kpi_cards.html" %}
+  {% include "partials/_trend_chart.html" %}
+  {% include "partials/_concentration_chart.html" %}
   {% include "partials/_results_table.html" %}
   {% include "partials/_ranking_chart.html" %}
   {% include "partials/_organism_ranking_chart.html" %}

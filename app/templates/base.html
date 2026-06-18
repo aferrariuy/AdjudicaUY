@@ -96,18 +96,56 @@
             responsive: true,
             maintainAspectRatio: false,
             animation: false,
+            // Bar click → organism profile. Only the organism
+            // ranking chart is clickable; other bar charts (KPI
+            // sub-cards, company ranking inside the organism
+            // page) keep the default cursor and ignore clicks.
+            // The handler reads the label of the clicked bar and
+            // navigates to /organism/{label} via window.location
+            // — a normal page load, not a modal or HTMX swap, per
+            // the organism-profile spec, "Link from organism
+            // ranking chart" scenario.
+            onClick: function (event, activeElements, chartInstance) {
+              if (chartInstance.canvas.id !== 'chart-organism-ranking') return;
+              if (!activeElements || !activeElements.length) return;
+              var idx = activeElements[0].index;
+              var label = chartInstance.data.labels[idx];
+              if (!label) return;
+              window.location.href = '/organism/' + encodeURIComponent(label);
+            },
+            // Cursor feedback: pointer on the organism ranking
+            // chart (signals clickability), default elsewhere.
+            onHover: function (event, activeElements, chartInstance) {
+              if (
+                chartInstance.canvas.id === 'chart-organism-ranking' &&
+                activeElements &&
+                activeElements.length
+              ) {
+                chartInstance.canvas.style.cursor = 'pointer';
+              } else {
+                chartInstance.canvas.style.cursor = 'default';
+              }
+            },
             plugins: {
               legend: { position: 'bottom' },
               tooltip: {
                 callbacks: {
                   label: function (ctx) {
-                    var label = ctx.dataset.label || '';
+                    var label = ctx.label || ctx.dataset.label || '';
+                    // Doughnut/pie charts: show count, not currency.
+                    if (ctx.chart.config.type === 'doughnut' || ctx.chart.config.type === 'pie') {
+                      return label + ': ' + (ctx.parsed || 0).toLocaleString('es-UY');
+                    }
+                    // Bar/line charts: show currency amount.
                     return label + ': ' + formatUYU(ctx.parsed.y || ctx.parsed);
                   },
                 },
               },
             },
-            scales: {
+            // Scales only apply to axis-based charts (bar, line).
+            // Doughnut/pie charts have no axes — omit scales entirely
+            // to prevent Y-axis ticks from rendering.
+            scales: (spec.type === 'doughnut' || spec.type === 'pie') ? {} : {
               y: {
                 beginAtZero: true,
                 ticks: {

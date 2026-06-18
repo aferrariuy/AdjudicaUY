@@ -29,7 +29,12 @@
           {% for row in results %}
             <tr class="hover:bg-slate-50">
               <td class="px-4 py-2 whitespace-nowrap text-slate-700">{{ row.date.isoformat() }}</td>
-              <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.organism }}">{{ row.organism }}</td>
+              <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.organism }}">
+                <a
+                  href="/organism/{{ row.organism | urlencode }}"
+                  class="text-blue-700 hover:underline"
+                >{{ row.organism }}</a>
+              </td>
               <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.winning_company }}">{{ row.winning_company }}</td>
               <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.article }}">{{ row.article }}</td>
               <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">

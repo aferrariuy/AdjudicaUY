@@ -23,17 +23,23 @@ from datetime import date
 from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, Response
 
 from app.database import get_db
 from app.services.adjudication_service import (
+    AdjudicationFilters,
+    ConcentrationResult,
     DateValidationError,
+    concentration_ratio,
     count_adjudications,
     distinct_organisms,
     filters_from_query_params,
+    kpi_summary,
     list_adjudications,
+    monthly_trend,
     ranking_by_company,
     ranking_by_organism,
     validate_date_params,
@@ -69,7 +75,7 @@ ORGANISM_SUGGEST_LIMIT = 200
 _ERROR_FRAGMENT_TEMPLATE = (
     '<div class="bg-red-50 border border-red-300 rounded-lg p-4" role="alert">'
     '<p class="text-red-800 text-sm">{message}</p>'
-    '</div>'
+    "</div>"
 )
 
 
@@ -187,6 +193,83 @@ def _build_organism_ranking_payload(
     }
 
 
+def _build_trend_chart_payload(
+    rows: list[tuple[str, Decimal]],
+) -> dict[str, Any]:
+    """Shape monthly trend rows for a Chart.js line/area chart.
+
+    The service already returns the labels in chronological order
+    and fills in sparse months with ``Decimal(0)``; we just project
+    them to the data Chart.js consumes (see the temporal-trend
+    spec, "Chart renders with multi-month data" scenario).
+
+    * ``type`` — ``"line"`` (with ``fill: true`` so the area below
+      the line is shaded, giving the "area chart" visual the spec
+      calls for).
+    * ``labels`` — ``YYYY-MM`` strings, chronological.
+    * ``datasets[0].data`` — totals per month, parallel to labels.
+    * ``format`` — ``es-UY`` UYU currency, consistent with the other
+      charts on the page.
+    """
+
+    return {
+        "type": "line",
+        "labels": [label for label, _total in rows],
+        "datasets": [
+            {
+                "label": "Total adjudicado (UYU)",
+                "data": [float(total) for _label, total in rows],
+                "fill": True,
+                "borderColor": "#1d4ed8",
+                "backgroundColor": "rgba(29, 78, 216, 0.1)",
+                "tension": 0.1,
+            },
+        ],
+        "format": {
+            "locale": "es-UY",
+            "currency": "UYU",
+        },
+    }
+
+
+def _build_concentration_chart_payload(
+    result: ConcentrationResult,
+) -> dict[str, Any]:
+    """Shape the market-concentration metric for a Chart.js doughnut.
+
+    Two segments — "1 oferente" (single bidder) and ">1 oferentes"
+    (multi bidder). Purchases with zero oferentes are excluded from
+    both, so the segments always sum to the total compras that
+    received at least one bid. The ``format`` hint carries the
+    ``es-UY`` percentage locale so the donut tooltip can format
+    share values per the market-concentration spec, "Percentage
+    formatting" scenario.
+
+    The route only invokes this builder when ``result.ratio`` is
+    not ``None`` (denominator > 0); the empty state is rendered
+    separately by the partial.
+    """
+
+    return {
+        "type": "doughnut",
+        "labels": ["1 oferente", ">1 oferentes"],
+        "datasets": [
+            {
+                "label": "Compras por oferentes",
+                "data": [
+                    result.single_bidder_count,
+                    result.multi_bidder_count,
+                ],
+                "backgroundColor": ["#b91c1c", "#1d4ed8"],
+            },
+        ],
+        "format": {
+            "locale": "es-UY",
+            "percentage": True,
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
@@ -226,6 +309,18 @@ def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     organism_rows = ranking_by_organism(db, filters, limit=RANKING_LIMIT)
     organisms = distinct_organisms(db, filters, limit=ORGANISM_SUGGEST_LIMIT)
 
+    # Citizen-dashboard aggregates (PR#1). Each one honours the same
+    # filter set as the listing so the KPI / trend / concentration
+    # numbers are consistent with what the user sees in the table.
+    kpi = kpi_summary(db, filters)
+    trend_rows = monthly_trend(db, filters)
+    concentration = concentration_ratio(db, filters)
+    concentration_payload = (
+        _build_concentration_chart_payload(concentration)
+        if concentration.ratio is not None
+        else None
+    )
+
     return _render(
         "index.html",
         request,
@@ -244,6 +339,20 @@ def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
             "organisms": organisms,
             "has_ranking_data": bool(ranking_rows),
             "has_organism_ranking_data": bool(organism_rows),
+            # Citizen-dashboard payloads.
+            "kpi": kpi,
+            "trend_rows": trend_rows,
+            "trend_payload": _build_trend_chart_payload(trend_rows),
+            "trend_json": _json_dumps(_build_trend_chart_payload(trend_rows)),
+            "has_trend_data": bool(trend_rows),
+            "concentration": concentration,
+            "concentration_payload": concentration_payload,
+            "concentration_json": (
+                _json_dumps(concentration_payload)
+                if concentration_payload is not None
+                else ""
+            ),
+            "has_concentration_data": concentration.ratio is not None,
         },
     )
 
@@ -272,6 +381,17 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
     ranking_rows = ranking_by_company(db, filters, limit=RANKING_LIMIT)
     organism_rows = ranking_by_organism(db, filters, limit=RANKING_LIMIT)
 
+    # Citizen-dashboard aggregates (PR#1). See the index route for the
+    # rationale on the empty-state payload rule for concentration.
+    kpi = kpi_summary(db, filters)
+    trend_rows = monthly_trend(db, filters)
+    concentration = concentration_ratio(db, filters)
+    concentration_payload = (
+        _build_concentration_chart_payload(concentration)
+        if concentration.ratio is not None
+        else None
+    )
+
     logger.info(
         "HTMX partial render: htmx=%s filters=%s total=%d",
         is_htmx,
@@ -296,8 +416,172 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
             ),
             "has_ranking_data": bool(ranking_rows),
             "has_organism_ranking_data": bool(organism_rows),
+            # Citizen-dashboard payloads.
+            "kpi": kpi,
+            "trend_rows": trend_rows,
+            "trend_payload": _build_trend_chart_payload(trend_rows),
+            "trend_json": _json_dumps(_build_trend_chart_payload(trend_rows)),
+            "has_trend_data": bool(trend_rows),
+            "concentration": concentration,
+            "concentration_payload": concentration_payload,
+            "concentration_json": (
+                _json_dumps(concentration_payload)
+                if concentration_payload is not None
+                else ""
+            ),
+            "has_concentration_data": concentration.ratio is not None,
         },
     )
+
+
+# ---------------------------------------------------------------------------
+# Organism profile (PR#2 of citizen-dashboard)
+# ---------------------------------------------------------------------------
+
+
+def _build_organism_context(
+    db: Session,
+    *,
+    decoded_name: str,
+    raw_params: dict[str, str | None],
+) -> dict[str, Any]:
+    """Build the view-model shared by the full organism page and its partial.
+
+    Both ``GET /organism/{name}`` and ``GET /organism/{name}/partial``
+    share the same data shape: an exact-match organism filter combined
+    with the user-supplied ``date_from`` / ``date_to`` / ``article`` /
+    ``article_id`` filters. Keeping the assembly in one helper ensures
+    the page and its HTMX refresh are guaranteed to render the same
+    widgets against the same snapshot.
+
+    The function does NOT call ``_inject_default_year_params`` — the
+    organism profile shows the full history for that organism on cold
+    load, not a single calendar year. The behaviour mirrors the
+    spec's "Profile page renders for known organism" scenario: the
+    user navigates to ``/organism/Ministerio del Interior`` and gets
+    the lifetime activity of that organism.
+    """
+
+    validate_date_params(raw_params)
+    # Parse the user-supplied secondary filters (date / article / id) but
+    # override the organism slot with the exact name decoded from the
+    # path. The service treats ``organism_exact`` as a strict equality
+    # predicate — see ``_build_predicates`` in the service layer.
+    filters = filters_from_query_params(raw_params)
+    filters = AdjudicationFilters(
+        company=filters.company,
+        organism_exact=decoded_name,
+        article=filters.article,
+        article_id=filters.article_id,
+        date_from=filters.date_from,
+        date_to=filters.date_to,
+    )
+
+    kpi = kpi_summary(db, filters)
+    trend_rows = monthly_trend(db, filters)
+    concentration = concentration_ratio(db, filters)
+    concentration_payload = (
+        _build_concentration_chart_payload(concentration)
+        if concentration.ratio is not None
+        else None
+    )
+    company_ranking = ranking_by_company(db, filters, limit=RANKING_LIMIT)
+
+    return {
+        "filters": filters,
+        "organism_name": decoded_name,
+        "kpi": kpi,
+        "trend_rows": trend_rows,
+        "trend_payload": _build_trend_chart_payload(trend_rows),
+        "trend_json": _json_dumps(_build_trend_chart_payload(trend_rows)),
+        "has_trend_data": bool(trend_rows),
+        "concentration": concentration,
+        "concentration_payload": concentration_payload,
+        "concentration_json": (
+            _json_dumps(concentration_payload)
+            if concentration_payload is not None
+            else ""
+        ),
+        "has_concentration_data": concentration.ratio is not None,
+        # The company ranking on the organism page reuses the same
+        # variable names as the index page's ``_ranking_chart.html``
+        # partial — the partial reads ``ranking_json`` /
+        # ``has_ranking_data`` regardless of which route rendered it.
+        "ranking_payload": _build_ranking_chart_payload(company_ranking),
+        "ranking_json": _json_dumps(_build_ranking_chart_payload(company_ranking)),
+        "has_ranking_data": bool(company_ranking),
+    }
+
+
+@router.get(
+    "/organism/{name}",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+def organism_detail(
+    name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Render the full organism profile page.
+
+    FastAPI already URL-decodes the path segment (``Ministerio%20del%20Interior``
+    arrives as ``"Ministerio del Interior"``), but the design requires
+    an explicit ``urllib.parse.unquote`` step so a doubled encoding
+    (e.g. ``%2520``) round-trips cleanly. The decoded name is then
+    matched exactly against ``Compra.organismo`` so the route only
+    shows rows for that organism — see the organism-profile spec,
+    "Organism Profile Route" requirement.
+    """
+
+    decoded_name = unquote(name).strip()
+    raw_params = cast("dict[str, str | None]", dict(request.query_params))
+    try:
+        context = _build_organism_context(
+            db, decoded_name=decoded_name, raw_params=raw_params
+        )
+    except DateValidationError as exc:
+        return _validation_error_response(exc.message)
+
+    return _render("organism_detail.html", request, context)
+
+
+@router.get(
+    "/organism/{name}/partial",
+    response_class=HTMLResponse,
+    include_in_schema=False,
+)
+def organism_detail_partial(
+    name: str,
+    request: Request,
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Render the HTMX-swappable body of the organism profile.
+
+    The form on the organism page targets this endpoint, and the
+    response replaces only the body container — the page chrome
+    (header, footer, filter form) is NOT re-rendered. The shape of
+    the body is identical to the body section of ``organism_detail.html``
+    (KPI cards, trend, concentration, company ranking), so the user
+    sees the dashboard widgets refresh in place when a filter
+    changes.
+    """
+
+    decoded_name = unquote(name).strip()
+    raw_params = cast("dict[str, str | None]", dict(request.query_params))
+    try:
+        context = _build_organism_context(
+            db, decoded_name=decoded_name, raw_params=raw_params
+        )
+    except DateValidationError as exc:
+        return _validation_error_response(exc.message)
+
+    logger.info(
+        "Organism partial render: organism=%s filters=%s",
+        decoded_name,
+        context["filters"],
+    )
+    return _render("partials/_organism_detail_content.html", request, context)
 
 
 __all__ = ["router"]
