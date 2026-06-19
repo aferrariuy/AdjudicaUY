@@ -474,6 +474,12 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
     page = max(_coerce_page(params.get("page")), 1)
     offset = (page - 1) * PAGE_SIZE
 
+    # When ``partial=table`` is present, the request comes from a
+    # pagination link that only needs the table + pagination bar.
+    # We skip the expensive aggregate queries (rankings, KPI, trend,
+    # concentration) since they don't change between pages.
+    table_only = params.get("partial") == "table"
+
     total = count_adjudications(db, filters)
     total_pages = max(1, math.ceil(total / PAGE_SIZE)) if total > 0 else 1
     if page > total_pages and total > 0:
@@ -481,6 +487,32 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
 
     results = list_adjudications(db, filters, limit=PAGE_SIZE, offset=offset)
     page_numbers = _build_page_numbers(page, total_pages)
+
+    if table_only:
+        # Lightweight response: only the table + pagination bar.
+        logger.info(
+            "HTMX partial render (table-only): filters=%s total=%d page=%d/%d",
+            filters,
+            total,
+            page,
+            total_pages,
+        )
+        return _render(
+            "partials/_results_table.html",
+            request,
+            {
+                "filters": filters,
+                "results": results,
+                "total": total,
+                "shown": len(results),
+                "page_size": PAGE_SIZE,
+                "page": page,
+                "total_pages": total_pages,
+                "page_numbers": page_numbers,
+            },
+        )
+
+    # Full response: table + all dashboard aggregates.
     ranking_rows = ranking_by_company(db, filters, limit=RANKING_LIMIT)
     organism_rows = ranking_by_organism(db, filters, limit=RANKING_LIMIT)
 

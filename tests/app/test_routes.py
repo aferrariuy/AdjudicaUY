@@ -971,9 +971,10 @@ def test_pagination_multi_page_renders_correct_page_numbers(
     # The active page (1) is rendered as a non-link <span> with
     # ``aria-current="page"``.
     assert 'aria-current="page"' in body
-    # Page 2 and 3 are rendered as HTMX links targeting /adjudications.
-    assert 'hx-get="/adjudications?page=2"' in body
-    assert 'hx-get="/adjudications?page=3"' in body
+    # Page 2 and 3 are rendered as HTMX links targeting /adjudications
+    # with partial=table for lightweight pagination.
+    assert 'hx-get="/adjudications?page=2&partial=table"' in body
+    assert 'hx-get="/adjudications?page=3&partial=table"' in body
     # The links include hx-include for the filter form values so the
     # active filter set is preserved across page changes.
     assert 'hx-include="#filter-form input"' in body
