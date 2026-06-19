@@ -19,6 +19,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -62,6 +63,14 @@ class Oferente(Base):
     compra = relationship("Compra", lazy="raise")
 
     __table_args__ = (
+        # One bidder entry per (compra, company) pair. The pair is
+        # the natural key — re-runs of the scraper hit ON CONFLICT
+        # DO NOTHING and stay idempotent.
+        UniqueConstraint(
+            "compra_id",
+            "nombre_comercial",
+            name="uq_oferente_bidder",
+        ),
         Index("ix_oferente_compra_id", "compra_id"),
     )
 

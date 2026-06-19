@@ -19,6 +19,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship
 
@@ -61,6 +62,16 @@ class Adjudicacion(Base):
     compra = relationship("Compra", lazy="raise")
 
     __table_args__ = (
+        # One adjudication = one line item awarded to one company on
+        # one purchase. The triple (compra, company, article) is the
+        # natural key — re-runs of the scraper hit ON CONFLICT
+        # DO NOTHING and stay idempotent.
+        UniqueConstraint(
+            "compra_id",
+            "nombre_comercial",
+            "desc_articulo",
+            name="uq_adjudicacion_line_item",
+        ),
         Index("ix_adjudicacion_compra_id", "compra_id"),
         Index("ix_adjudicacion_id_articulo", "id_articulo"),
     )
