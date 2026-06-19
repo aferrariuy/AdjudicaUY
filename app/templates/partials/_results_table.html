@@ -65,8 +65,7 @@
     {# Pagination control bar. Hidden when the filtered set fits on a
        single page (total_pages == 1) or is empty. ``hx-include`` pulls
        in the filter form values so the new page preserves the active
-       filter set; ``hx-push-url`` keeps the browser address bar in
-       sync. #}
+       filter set. #}
     {% if total_pages > 1 %}
       <nav aria-label="Paginación" class="px-4 py-3 border-t border-slate-200 flex items-center justify-center gap-1 flex-wrap">
         {% if page > 1 %}
@@ -74,7 +73,6 @@
             hx-get="/adjudications?page={{ page - 1 }}"
             hx-target="#results"
             hx-include="#filter-form input"
-            hx-push-url="true"
             class="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-100"
           >Anterior</a>
         {% else %}
@@ -97,7 +95,6 @@
               hx-get="/adjudications?page={{ n }}"
               hx-target="#results"
               hx-include="#filter-form input"
-              hx-push-url="true"
               class="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-100"
             >{{ n }}</a>
           {% endif %}
@@ -108,7 +105,6 @@
             hx-get="/adjudications?page={{ page + 1 }}"
             hx-target="#results"
             hx-include="#filter-form input"
-            hx-push-url="true"
             class="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-100"
           >Siguiente</a>
         {% else %}

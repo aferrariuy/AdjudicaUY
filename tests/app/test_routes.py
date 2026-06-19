@@ -974,10 +974,9 @@ def test_pagination_multi_page_renders_correct_page_numbers(
     # Page 2 and 3 are rendered as HTMX links targeting /adjudications.
     assert 'hx-get="/adjudications?page=2"' in body
     assert 'hx-get="/adjudications?page=3"' in body
-    # The links include hx-include for the filter form values and
-    # hx-push-url so the browser address bar tracks the new page.
+    # The links include hx-include for the filter form values so the
+    # active filter set is preserved across page changes.
     assert 'hx-include="#filter-form input"' in body
-    assert 'hx-push-url="true"' in body
     # On page 1, the "Anterior" control is the disabled span (not a
     # link); the "Siguiente" control is a link to page 2.
     assert ">Anterior</span>" in body
