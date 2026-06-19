@@ -16,31 +16,25 @@ import argparse
 import logging
 import time
 from datetime import date, timedelta
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_session_factory
-from app.models.adjudicacion import Adjudicacion
-from app.models.compra import Compra
-from app.models.oferente import Oferente
 from scraper.bcu_client import BcuClient
 from scraper.main import (
     build_source_a_url,
     enrich_xml_compra,
 )
 from scraper.normalizer import (
-    AdjudicacionRow,
     CompraRow,
-    OferenteRow,
     normalize_compra,
 )
+from scraper.persistence import _bulk_insert as _bulk_insert_hard
 from scraper.xml_report import (
     XmlCompra,
     fetch_xml_report,
@@ -55,99 +49,34 @@ logger = logging.getLogger("scrape_day_by_day")
 
 
 # ── DB insert ───────────────────────────────────────────────────────
-def _compra_dict(row: CompraRow) -> dict[str, Any]:
-    return {
-        "id_compra": row.id_compra,
-        "fecha_pub_adj": row.fecha_pub_adj,
-        "objeto": row.objeto,
-        "monto_adj": row.monto_adj,
-        "id_moneda_monto_adj": row.id_moneda_monto_adj,
-        "num_compra": row.num_compra,
-        "anio_compra": row.anio_compra,
-        "id_tipocompra": row.id_tipocompra,
-        "subtipo_compra": row.subtipo_compra,
-        "id_inciso": row.id_inciso,
-        "id_ue": row.id_ue,
-        "id_ucc": row.id_ucc,
-        "organismo": row.organismo or None,
-        "source_url": row.source_url,
-    }
-
-
-def _adjudicacion_dict(
-    compra_id: int, row: AdjudicacionRow
-) -> dict[str, Any]:
-    return {
-        "compra_id": compra_id,
-        "nombre_comercial": row.nombre_comercial,
-        "nro_doc_prov": row.nro_doc_prov,
-        "tipo_doc_prov": row.tipo_doc_prov,
-        "cant_adj": row.cant_adj,
-        "precio_unit": row.precio_unit,
-        "precio_tot_imp": row.precio_tot_imp,
-        "id_moneda": row.id_moneda,
-        "desc_articulo": row.desc_articulo,
-        "id_articulo": row.id_articulo,
-        "amount_uyu": row.amount_uyu,
-    }
-
-
-def _oferente_dict(compra_id: int, row: OferenteRow) -> dict[str, Any]:
-    return {
-        "compra_id": compra_id,
-        "nombre_comercial": row.nombre_comercial,
-        "nro_doc_prov": row.nro_doc_prov,
-        "tipo_doc_prov": row.tipo_doc_prov,
-        "cant_ofertada": row.cant_ofertada,
-        "precio_unit_ofertado": row.precio_unit_ofertado,
-        "id_moneda": row.id_moneda,
-        "variacion": row.variacion,
-        "alternativas": row.alternativas,
-    }
+# The dict projections and the canonical insert live in
+# :mod:`scraper.persistence`. The day-by-day backfill script
+# prefers **soft-failure** — a failed flush should not abort the
+# whole run, so this thin wrapper catches the ``SQLAlchemyError``
+# the canonical ``_bulk_insert`` propagates and turns it into a
+# logged warning + a 0 return. The canonical worker
+# (``scraper.main``) calls ``_bulk_insert`` directly with no
+# wrapper because it wants the orchestrating cron / Dokploy job
+# to see the DB error.
 
 
 def _bulk_insert(session: Session, rows: list[CompraRow]) -> int:
+    """Soft-failure wrapper around :func:`scraper.persistence._bulk_insert`.
+
+    Rolls the session back on any exception (matching the legacy
+    behavior) and logs only ``exc.orig`` — SQLAlchemy dumps the
+    full SQL + all parameters on failure, useless with 1000+ rows.
+    Returns 0 on error so the backfill can keep walking days.
+    """
     if not rows:
         return 0
     try:
-        # 1. Upsert compra rows (idempotent on id_compra).
-        compra_payloads = [_compra_dict(r) for r in rows]
-        stmt = pg_insert(Compra).values(compra_payloads)
-        stmt = stmt.on_conflict_do_nothing(index_elements=["id_compra"])
-        session.execute(stmt)
-
-        # 2. Resolve compra primary keys.
-        id_compras = {r.id_compra for r in rows}
-        rows_pk = session.execute(
-            select(Compra.id_compra, Compra.id).where(Compra.id_compra.in_(id_compras))
-        ).all()
-        id_compra_to_pk: dict[str, int] = {row[0]: row[1] for row in rows_pk}
-
-        # 3. Insert adjudicacion and oferente rows. Only do this for
-        #    compras we just inserted — the parent-level skip in step
-        #    1 is the idempotency guarantee.
-        adj_payloads: list[dict[str, Any]] = []
-        oferente_payloads: list[dict[str, Any]] = []
-        for r in rows:
-            pk = id_compra_to_pk.get(r.id_compra)
-            if pk is None:
-                continue
-            adj_payloads.extend(_adjudicacion_dict(pk, a) for a in r.adjudicaciones)
-            oferente_payloads.extend(_oferente_dict(pk, o) for o in r.oferentes)
-
-        if adj_payloads:
-            session.execute(pg_insert(Adjudicacion).values(adj_payloads))
-        if oferente_payloads:
-            session.execute(pg_insert(Oferente).values(oferente_payloads))
-        session.commit()
+        return _bulk_insert_hard(session, rows)
     except Exception as exc:
         session.rollback()
-        # SQLAlchemy dumps the full SQL + all parameters on failure —
-        # useless with 1000+ rows. Log only the cause.
         orig = exc.orig if hasattr(exc, "orig") else exc
         logger.error("DB insert failed (%d rows): %s", len(rows), orig)
         return 0
-    return len(rows)
 
 
 # ── Main ────────────────────────────────────────────────────────────

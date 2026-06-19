@@ -20,8 +20,9 @@ from typing import Any
 
 import pytest
 
-from scraper.main import _compra_dict, enrich_xml_compra
+from scraper.main import enrich_xml_compra
 from scraper.normalizer import CompraEnrichment, CompraRow
+from scraper.persistence import _compra_dict
 from scraper.xml_report import XmlAdjudicacion, XmlCompra
 
 # ---------------------------------------------------------------------------
