@@ -12,8 +12,11 @@
     <h2 id="filters-heading" class="text-lg font-semibold mb-4">Filtros</h2>
 
     {# The form has no action: HTMX intercepts the submit/change events
-       and turns them into a GET against /adjudications. #}
+       and turns them into a GET against /adjudications. The id is
+       used by the pagination links (``hx-include="#filter-form input"``)
+       to preserve the active filter values when changing pages. #}
     <form
+      id="filter-form"
       hx-get="/adjudications"
       hx-target="#results"
       hx-trigger="submit"

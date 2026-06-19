@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -26,7 +27,7 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.database import get_db
 from app.services.adjudication_service import (
@@ -271,6 +272,67 @@ def _build_concentration_chart_payload(
 
 
 # ---------------------------------------------------------------------------
+# Pagination helpers
+# ---------------------------------------------------------------------------
+
+
+def _coerce_page(raw: str | None) -> int:
+    """Parse a raw ``page`` query param, returning 1 for missing/garbage values.
+
+    The route never returns a 4xx for a malformed ``page`` value — we
+    silently fall back to the first page. The caller is responsible for
+    clamping to ``>= 1`` (negative values map to 1 too, but a positive
+    integer stays as-is at this layer so the caller can distinguish
+    ``page=0`` from ``page=1`` if it wants to).
+    """
+
+    if raw is None:
+        return 1
+    try:
+        return int(raw.strip())
+    except (ValueError, AttributeError):
+        return 1
+
+
+def _build_page_numbers(current: int, total: int) -> list[int | str]:
+    """Return the visible page numbers + ellipsis markers for the pagination bar.
+
+    The list is at most 7 entries long. The first (1) and last (total)
+    pages are always present; the current page is always present and
+    centered when the window is truncated. ``"…"`` (ellipsis) entries
+    mark skipped ranges. With 7 or fewer pages, all numbers are shown
+    with no truncation.
+    """
+
+    if total <= 7:
+        return list(range(1, total + 1))
+
+    # Three middle slots around the current page (``current ± 1``); the
+    # two edges (1, total) are always added separately. The total entry
+    # count is 7 = 1 + 3 + 1 + 1 + 1 (edges + middle + two possible
+    # ellipsis markers).
+    half = 1
+    start = max(2, current - half)
+    end = min(total - 1, current + half)
+    # Push the window away from an edge when it would be squashed, so
+    # the current page still has a neighbor on the inside.
+    if end - start < 2 * half:
+        if start == 2:
+            end = min(total - 1, start + 2 * half)
+        elif end == total - 1:
+            start = max(2, end - 2 * half)
+
+    pages: list[int | str] = [1]
+    if start > 2:
+        pages.append("…")
+    pages.extend(range(start, end + 1))
+    if end < total - 1:
+        pages.append("…")
+    pages.append(total)
+    return pages
+
+
+# ---------------------------------------------------------------------------
 # Route handlers
 # ---------------------------------------------------------------------------
 
@@ -286,13 +348,18 @@ def _render(
 
 
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
-def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
+def index(request: Request, db: Session = Depends(get_db)) -> Response:
     """Render the full index page.
 
     On the first GET (no filters in the query string), this returns the
     same data the ``/adjudications`` partial would return so the page is
     useful on cold load. The cost of a no-filter COUNT + 50-row scan is
     negligible at the data volumes the scraper produces.
+
+    The return type is ``Response`` (not ``HTMLResponse``) because the
+    pagination spec requires a 302 ``RedirectResponse`` for
+    out-of-bounds page requests (``adjudication-pagination`` spec,
+    "Out-of-Bounds Redirect" requirement).
     """
 
     params = cast("dict[str, str | None]", dict(request.query_params))
@@ -303,8 +370,29 @@ def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
         return _validation_error_response(exc.message)
     filters = filters_from_query_params(params)
 
-    results = list_adjudications(db, filters, limit=PAGE_SIZE, offset=0)
+    # Pagination. The ``page`` param is parsed manually so missing /
+    # empty / non-integer / negative values all collapse to page 1
+    # (the spec forbids a 4xx for malformed input).
+    page = max(_coerce_page(params.get("page")), 1)
+    offset = (page - 1) * PAGE_SIZE
+
+    # Count BEFORE listing so we can redirect out-of-bounds pages
+    # without spending a second query for the slice that will be
+    # discarded. ``total_pages`` is at least 1 even when the result
+    # set is empty — the empty-state branch uses ``total == 0`` to
+    # show the "no results" panel and the pagination bar is gated on
+    # ``total_pages > 1`` in the template.
     total = count_adjudications(db, filters)
+    total_pages = max(1, math.ceil(total / PAGE_SIZE)) if total > 0 else 1
+    if page > total_pages and total > 0:
+        # Out-of-bounds: land the user on the last valid page so they
+        # see real data instead of an empty slice. The relative URL
+        # preserves the current path (``/``) and the surrounding
+        # browser state.
+        return RedirectResponse(url=f"?page={total_pages}", status_code=302)
+
+    results = list_adjudications(db, filters, limit=PAGE_SIZE, offset=offset)
+    page_numbers = _build_page_numbers(page, total_pages)
     ranking_rows = ranking_by_company(db, filters, limit=RANKING_LIMIT)
     organism_rows = ranking_by_organism(db, filters, limit=RANKING_LIMIT)
     organisms = distinct_organisms(db, filters, limit=ORGANISM_SUGGEST_LIMIT)
@@ -312,6 +400,9 @@ def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
     # Citizen-dashboard aggregates (PR#1). Each one honours the same
     # filter set as the listing so the KPI / trend / concentration
     # numbers are consistent with what the user sees in the table.
+    # The aggregates are NOT paginated — they reflect the full
+    # filtered set, not the current page slice (adjudication-
+    # pagination spec, "Dashboard Aggregates Use Full Filtered Set").
     kpi = kpi_summary(db, filters)
     trend_rows = monthly_trend(db, filters)
     concentration = concentration_ratio(db, filters)
@@ -330,6 +421,9 @@ def index(request: Request, db: Session = Depends(get_db)) -> HTMLResponse:
             "total": total,
             "shown": len(results),
             "page_size": PAGE_SIZE,
+            "page": page,
+            "total_pages": total_pages,
+            "page_numbers": page_numbers,
             "ranking_payload": _build_ranking_chart_payload(ranking_rows),
             "ranking_json": _json_dumps(_build_ranking_chart_payload(ranking_rows)),
             "organism_ranking_payload": _build_organism_ranking_payload(organism_rows),
@@ -376,13 +470,24 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
         return _validation_error_response(exc.message)
     filters = filters_from_query_params(params)
 
-    results = list_adjudications(db, filters, limit=PAGE_SIZE, offset=0)
+    # Pagination — see the index route for the parsing rationale.
+    page = max(_coerce_page(params.get("page")), 1)
+    offset = (page - 1) * PAGE_SIZE
+
     total = count_adjudications(db, filters)
+    total_pages = max(1, math.ceil(total / PAGE_SIZE)) if total > 0 else 1
+    if page > total_pages and total > 0:
+        return RedirectResponse(url=f"?page={total_pages}", status_code=302)
+
+    results = list_adjudications(db, filters, limit=PAGE_SIZE, offset=offset)
+    page_numbers = _build_page_numbers(page, total_pages)
     ranking_rows = ranking_by_company(db, filters, limit=RANKING_LIMIT)
     organism_rows = ranking_by_organism(db, filters, limit=RANKING_LIMIT)
 
     # Citizen-dashboard aggregates (PR#1). See the index route for the
     # rationale on the empty-state payload rule for concentration.
+    # Aggregates are NOT paginated — they reflect the full filtered
+    # set, not the current page slice.
     kpi = kpi_summary(db, filters)
     trend_rows = monthly_trend(db, filters)
     concentration = concentration_ratio(db, filters)
@@ -393,10 +498,12 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
     )
 
     logger.info(
-        "HTMX partial render: htmx=%s filters=%s total=%d",
+        "HTMX partial render: htmx=%s filters=%s total=%d page=%d/%d",
         is_htmx,
         filters,
         total,
+        page,
+        total_pages,
     )
 
     return _render(
@@ -408,6 +515,9 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
             "total": total,
             "shown": len(results),
             "page_size": PAGE_SIZE,
+            "page": page,
+            "total_pages": total_pages,
+            "page_numbers": page_numbers,
             "ranking_payload": _build_ranking_chart_payload(ranking_rows),
             "ranking_json": _json_dumps(_build_ranking_chart_payload(ranking_rows)),
             "organism_ranking_payload": _build_organism_ranking_payload(organism_rows),

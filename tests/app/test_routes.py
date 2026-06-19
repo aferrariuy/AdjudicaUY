@@ -7,7 +7,7 @@ contract, using the in-memory SQLite engine from ``conftest.py``.
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -783,3 +783,204 @@ def test_results_table_organism_link_uses_organism_route(
     assert 'href="/organism/Ministerio%20del%20Interior"' in body
     # The visible text is the original organism name.
     assert ">Ministerio del Interior</a>" in body
+
+
+# ---------------------------------------------------------------------------
+# Pagination
+# ---------------------------------------------------------------------------
+
+
+def _make_pagination_fixtures(make_adjudication, n: int, prefix: str) -> None:
+    """Insert ``n`` adjudications with distinct dates AND amounts.
+
+    Two uniqueness keys are needed for clean pagination assertions:
+
+    * **Dates** are incremented by one day per row so the result-set
+      ordering (``fecha_pub_adj DESC, adjudicacion.id DESC``) puts the
+      LAST inserted row at position 1. Position ``i`` (1-based) of the
+      result set is the row with ``winning_company == f"{prefix}-{i:03d}"``.
+    * **Amounts** are also distinct (``i * 100``) so the
+      ``ranking_by_company`` aggregate returns a predictable top-10
+      (the 10 highest amounts = the 10 most recently inserted rows).
+      Without this, the ranking's 10 company names would leak into the
+      rendered body and confuse the "row X is NOT on page Y" checks.
+
+    All dates live in the current calendar year so the route's default
+    year filter (injected on cold load) does not exclude any fixture.
+    """
+
+    for i in range(1, n + 1):
+        make_adjudication(
+            winning_company=f"{prefix}-{i:03d}",
+            date=date(CURRENT_YEAR, 1, 1) + timedelta(days=i - 1),
+            amount_uyu=Decimal(i * 100),
+        )
+
+
+def test_pagination_default_page_returns_first_50_rows(
+    client: TestClient, make_adjudication
+) -> None:
+    """GET / without ?page returns the first 50 rows of a 60-row set.
+
+    PAGE_SIZE is 50 and the default ``page`` is 1, so the 10 oldest
+    rows (positions 51-60) are on page 2 and MUST NOT appear in the
+    default response.
+    """
+
+    _make_pagination_fixtures(make_adjudication, 60, "PG-DEF")
+
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+
+    # Page 1 holds positions 1-50 — the most-recent 50 rows. In our
+    # setup those are rows 11..60 (rows 1..10 are the oldest, on page 2).
+    for i in range(11, 61):
+        assert f"PG-DEF-{i:03d}" in body, f"Expected PG-DEF-{i:03d} on page 1"
+    # The 10 oldest rows (positions 51-60) are on page 2 and MUST be
+    # excluded from the default response.
+    for i in range(1, 11):
+        assert f"PG-DEF-{i:03d}" not in body, (
+            f"PG-DEF-{i:03d} should be on page 2, not page 1"
+        )
+
+
+def test_pagination_page_zero_clamps_to_page_one(
+    client: TestClient, make_adjudication
+) -> None:
+    """?page=0 is treated as page 1 (no 4xx, no off-by-one)."""
+
+    _make_pagination_fixtures(make_adjudication, 60, "PG-ZERO")
+
+    response = client.get("/?page=0")
+    assert response.status_code == 200
+    body = response.text
+
+    for i in range(11, 61):
+        assert f"PG-ZERO-{i:03d}" in body
+    for i in range(1, 11):
+        assert f"PG-ZERO-{i:03d}" not in body
+
+
+def test_pagination_negative_page_clamps_to_page_one(
+    client: TestClient, make_adjudication
+) -> None:
+    """?page=-5 is treated as page 1 — negative values do not 4xx."""
+
+    _make_pagination_fixtures(make_adjudication, 60, "PG-NEG")
+
+    response = client.get("/?page=-5")
+    assert response.status_code == 200
+    body = response.text
+
+    for i in range(11, 61):
+        assert f"PG-NEG-{i:03d}" in body
+    for i in range(1, 11):
+        assert f"PG-NEG-{i:03d}" not in body
+
+
+def test_pagination_page_two_returns_rows_51_to_60(
+    client: TestClient, make_adjudication
+) -> None:
+    """?page=2 with 60 rows returns the last 10 rows (positions 51-60)."""
+
+    _make_pagination_fixtures(make_adjudication, 60, "PG-P2")
+
+    response = client.get("/?page=2")
+    assert response.status_code == 200
+    body = response.text
+
+    # The 10 oldest rows are on page 2.
+    for i in range(1, 11):
+        assert f"PG-P2-{i:03d}" in body, f"Expected PG-P2-{i:03d} on page 2"
+    # The 40 middle rows (positions 11-50) MUST be excluded — they
+    # belong to page 1. The 10 most-recent rows (51-60) are also
+    # present in the body via the ``ranking_by_company`` chart
+    # payload (they have the highest ``amount_uyu`` and top the
+    # ranking), so we don't assert on them here — the table-level
+    # pagination is what this scenario is verifying.
+    for i in range(11, 51):
+        assert f"PG-P2-{i:03d}" not in body, (
+            f"PG-P2-{i:03d} should be on page 1, not page 2"
+        )
+
+
+def test_pagination_out_of_bounds_redirects_to_last_valid_page(
+    client: TestClient, make_adjudication
+) -> None:
+    """?page=999 with 60 rows (2 valid pages) returns 302 → ?page=2."""
+
+    _make_pagination_fixtures(make_adjudication, 60, "PG-REDIR")
+
+    response = client.get("/?page=999", follow_redirects=False)
+
+    assert response.status_code == 302
+    # The Location header points to the last valid page. FastAPI
+    # preserves the relative URL form (``?page=N``).
+    assert response.headers["location"].endswith("?page=2")
+
+
+def test_pagination_empty_dataset_hides_pagination_nav(
+    client: TestClient,
+) -> None:
+    """Zero results → no pagination <nav> rendered, empty state shown."""
+
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+
+    # The pagination bar carries an ``aria-label="Paginación"`` —
+    # checking for that is the cleanest signal that the nav is
+    # absent (regardless of how the rest of the markup evolves).
+    assert 'aria-label="Paginación"' not in body
+    # The empty-state panel is still rendered.
+    assert "No se encontraron adjudicaciones" in body
+
+
+def test_pagination_single_page_hides_pagination_nav(
+    client: TestClient, make_adjudication
+) -> None:
+    """40 rows fit on one page → no pagination <nav>; all rows visible."""
+
+    _make_pagination_fixtures(make_adjudication, 40, "PG-1PG")
+
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+
+    # 40 rows / 50 per page = 1 page → no nav.
+    assert 'aria-label="Paginación"' not in body
+    # All 40 rows are visible.
+    for i in range(1, 41):
+        assert f"PG-1PG-{i:03d}" in body
+
+
+def test_pagination_multi_page_renders_correct_page_numbers(
+    client: TestClient, make_adjudication
+) -> None:
+    """120 rows (3 pages) → nav rendered with links to pages 1, 2, 3."""
+
+    _make_pagination_fixtures(make_adjudication, 120, "PG-MULTI")
+
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+
+    # The nav is rendered.
+    assert 'aria-label="Paginación"' in body
+    # The active page (1) is rendered as a non-link <span> with
+    # ``aria-current="page"``.
+    assert 'aria-current="page"' in body
+    # Page 2 and 3 are rendered as HTMX links targeting /adjudications.
+    assert 'hx-get="/adjudications?page=2"' in body
+    assert 'hx-get="/adjudications?page=3"' in body
+    # The links include hx-include for the filter form values and
+    # hx-push-url so the browser address bar tracks the new page.
+    assert 'hx-include="#filter-form input"' in body
+    assert 'hx-push-url="true"' in body
+    # On page 1, the "Anterior" control is the disabled span (not a
+    # link); the "Siguiente" control is a link to page 2.
+    assert ">Anterior</span>" in body
+    # Siguiente is the only link with hx-get for page 2 on page 1
+    # (the Siguiente button itself, plus the page-2 number link).
+    # We already asserted the hx-get for page 2 above.
