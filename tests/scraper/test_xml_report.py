@@ -570,7 +570,7 @@ def test_parse_xml_report_handles_latin1_encoding() -> None:
     assert len(compras) == 1
     adj = compras[0].adjudicaciones[0]
     assert adj.nombre_comercial == "KPMG SOCIEDAD CIVIL"
-    assert adj.desc_articulo == u"Servicio de soporte t\u00e9cnico"
+    assert adj.desc_articulo == "Servicio de soporte t\u00e9cnico"
 
 
 # ---------------------------------------------------------------------------

@@ -15,15 +15,14 @@ documented in the ``compra-normalization`` spec:
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
 from typing import Any
 
 import pytest
 
 from scraper.main import enrich_xml_compra
-from scraper.normalizer import CompraEnrichment, CompraRow
+from scraper.normalizer import CompraRow
 from scraper.persistence import _compra_dict
-from scraper.xml_report import XmlAdjudicacion, XmlCompra
+from scraper.xml_report import XmlCompra
 
 # ---------------------------------------------------------------------------
 # XmlCompra factory — minimal fields needed to drive enrich_xml_compra
