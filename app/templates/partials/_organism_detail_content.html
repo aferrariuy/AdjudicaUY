@@ -5,21 +5,21 @@
    The widgets mirror the citizen-dashboard index page: KPI cards,
    monthly trend, market concentration, and the top-N winning
    companies for the named organism. The only difference is the
-   absence of the organism ranking chart — on a single-organism
+   absence of the organism ranking list — on a single-organism
    page, a "ranking of organisms" would have one row, so it is
    intentionally omitted. The company ranking IS shown because
    within a single organism the question "which companies won
    the most contracts?" is non-trivial.
 
-   The partial renders the same canvas / data-chart payloads used
-   elsewhere, so the base.html chart lifecycle mounts the Chart.js
-   instances on the first load AND on every HTMX swap. The empty
-   states are handled by the per-widget partials (KPI, trend,
-   concentration, ranking) — this file is just a layout shell. #}
+   The trend / concentration widgets still mount Chart.js via
+   base.html; the company ranking is rendered as a plain HTML
+   list. The empty states are handled by the per-widget partials
+   (KPI, trend, concentration, ranking) — this file is just a
+   layout shell. #}
 
 <div class="space-y-6">
   {% include "partials/_kpi_cards.html" %}
   {% include "partials/_trend_chart.html" %}
   {% include "partials/_concentration_chart.html" %}
-  {% include "partials/_ranking_chart.html" %}
+  {% include "partials/_ranking_list.html" %}
 </div>

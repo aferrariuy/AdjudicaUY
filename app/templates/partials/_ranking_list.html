@@ -1,0 +1,33 @@
+{# Ranking de empresas — top-N list, replacing the old Chart.js bar chart.
+
+   Consumes ``ranking_rows`` (a list of :class:`app.services.adjudication_service.RankingEntry`):
+   each entry has ``name``, ``total_amount_uyu`` and ``adjudication_count``.
+
+   The empty branch shows the same "Sin datos disponibles" copy as the
+   other dashboard widgets, so the section never renders an empty <ol>
+   when the active filter set has no rows. #}
+
+<section aria-labelledby="ranking-heading" class="bg-folio border border-linea p-4 sm:p-6 rounded-lg">
+  <h2 id="ranking-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Ranking de empresas</h2>
+
+  {% if ranking_rows %}
+    <ol class="divide-y divide-linea">
+      {% for entry in ranking_rows %}
+        <li class="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
+          <span class="flex-shrink-0 w-8 h-8 rounded-full bg-amber-100 text-amber-800 font-bold text-sm flex items-center justify-center" aria-hidden="true">
+            {{ "%02d" | format(loop.index) }}
+          </span>
+          <div class="flex-1 min-w-0">
+            <p class="text-ink font-medium truncate">{{ entry.name }}</p>
+            <p class="text-texto-sec text-xs">{{ entry.adjudication_count }} adjudicaciones</p>
+          </div>
+          <span class="flex-shrink-0 text-ink font-bold tabular-nums text-sm">
+            {{ "{:,.0f}".format(entry.total_amount_uyu) }} UYU
+          </span>
+        </li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <p class="text-texto-sec text-sm">Sin datos disponibles para los filtros aplicados.</p>
+  {% endif %}
+</section>
