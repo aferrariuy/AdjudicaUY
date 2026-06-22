@@ -11,41 +11,41 @@
      individual card values still display "0" because the service
      already coalesces them. #}
 
-<section aria-labelledby="kpi-heading" class="bg-white border border-slate-200 rounded-lg p-4 sm:p-6">
-  <h2 id="kpi-heading" class="text-lg font-semibold mb-4">Resumen</h2>
+<section aria-labelledby="kpi-heading" class="bg-folio border border-linea p-4 sm:p-6">
+  <h2 id="kpi-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Resumen</h2>
 
   <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-    <div class="rounded-md border border-slate-200 p-4">
-      <dt class="text-xs uppercase tracking-wide text-slate-500">Total adjudicado</dt>
-      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+    <div class="rounded-md border border-linea p-4">
+      <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Total adjudicado</dt>
+      <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">
         {{ kpi.total_amount | uyu }} UYU
       </dd>
     </div>
 
-    <div class="rounded-md border border-slate-200 p-4">
-      <dt class="text-xs uppercase tracking-wide text-slate-500">Promedio por adjudicación</dt>
-      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+    <div class="rounded-md border border-linea p-4">
+      <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Promedio por adjudicación</dt>
+      <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">
         {{ kpi.average_amount | uyu }} UYU
       </dd>
     </div>
 
-    <div class="rounded-md border border-slate-200 p-4">
-      <dt class="text-xs uppercase tracking-wide text-slate-500">Compras</dt>
-      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+    <div class="rounded-md border border-linea p-4">
+      <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Compras</dt>
+      <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">
         {{ kpi.purchase_count | count_uy }}
       </dd>
     </div>
 
-    <div class="rounded-md border border-slate-200 p-4">
-      <dt class="text-xs uppercase tracking-wide text-slate-500">Empresas</dt>
-      <dd class="mt-1 text-2xl font-semibold tabular-nums text-slate-800">
+    <div class="rounded-md border border-linea p-4">
+      <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Empresas</dt>
+      <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">
         {{ kpi.company_count | count_uy }}
       </dd>
     </div>
   </dl>
 
   {% if kpi.purchase_count == 0 %}
-    <p class="mt-4 text-sm text-slate-500" role="status">
+    <p class="mt-4 text-sm text-texto-sec" role="status">
       No hay datos para los filtros aplicados.
     </p>
   {% endif %}

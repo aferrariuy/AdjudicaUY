@@ -3,8 +3,8 @@
    client-side script in base.html consumes to build the Chart.js
    instance. #}
 
-<section aria-labelledby="organism-ranking-heading" class="bg-white border border-slate-200 rounded-lg p-4 sm:p-6">
-  <h2 id="organism-ranking-heading" class="text-lg font-semibold mb-4">Ranking de organismos</h2>
+<section aria-labelledby="organism-ranking-heading" class="bg-folio border border-linea p-4 sm:p-6">
+  <h2 id="organism-ranking-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Ranking de organismos</h2>
 
   {% if has_organism_ranking_data %}
     <div class="relative h-72 sm:h-96 w-full">
@@ -17,6 +17,6 @@
       ></canvas>
     </div>
   {% else %}
-    <p class="text-slate-500 text-sm">Sin datos disponibles para los filtros aplicados.</p>
+    <p class="text-texto-sec text-sm">Sin datos disponibles para los filtros aplicados.</p>
   {% endif %}
 </section>

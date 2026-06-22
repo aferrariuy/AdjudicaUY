@@ -1,0 +1,11 @@
+/* Tailwind input file. Imports the custom layer first so its rules are
+   available before utilities are emitted, then layers in Tailwind's
+   base / components / utilities. Compiled output lands in
+   ``static/css/style.css`` via the ``tailwind`` Docker stage (or the
+   local ``npx tailwindcss`` invocation in development). */
+
+@import "../css/custom.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

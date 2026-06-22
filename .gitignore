@@ -23,3 +23,11 @@ sdd/
 
 #headroom
 headroom_memory.db
+
+# Compiled Tailwind output — built by the ``tailwind`` Docker stage
+# and by ``npm run build:css`` in local dev. Never commit it.
+app/static/css/style.css
+
+# Local Node.js artifacts (the ``package-lock.json`` IS committed so
+# the Docker build is reproducible).
+node_modules/

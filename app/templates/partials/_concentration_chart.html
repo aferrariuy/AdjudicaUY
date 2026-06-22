@@ -15,8 +15,8 @@
    percentage in a small text block under the chart for accessibility
    and low-bandwidth fallback. #}
 
-<section aria-labelledby="concentration-heading" class="bg-white border border-slate-200 rounded-lg p-4 sm:p-6">
-  <h2 id="concentration-heading" class="text-lg font-semibold mb-4">Concentración del mercado</h2>
+<section aria-labelledby="concentration-heading" class="bg-folio border border-linea p-4 sm:p-6">
+  <h2 id="concentration-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Concentración del mercado</h2>
 
   {% if has_concentration_data %}
     <div class="relative h-72 sm:h-96 w-full">
@@ -28,13 +28,13 @@
         role="img"
       ></canvas>
     </div>
-    <p class="mt-3 text-sm text-slate-600">
-      <span class="font-semibold">{{ concentration.single_bidder_count | count_uy }}</span>
+    <p class="mt-3 text-sm text-texto-sec">
+      <span class="font-semibold text-ink">{{ concentration.single_bidder_count | count_uy }}</span>
       compra(s) con un solo oferente sobre
-      <span class="font-semibold">{{ (concentration.single_bidder_count + concentration.multi_bidder_count) | count_uy }}</span>
+      <span class="font-semibold text-ink">{{ (concentration.single_bidder_count + concentration.multi_bidder_count) | count_uy }}</span>
       ({{ concentration.ratio | pct_uy }})
     </p>
   {% else %}
-    <p class="text-slate-500 text-sm">Sin datos disponibles para los filtros aplicados.</p>
+    <p class="text-texto-sec text-sm">Sin datos disponibles para los filtros aplicados.</p>
   {% endif %}
 </section>

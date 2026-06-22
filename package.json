@@ -1,0 +1,13 @@
+{
+  "name": "adjudica-uy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Front-end tooling for AdjudicaUY — Tailwind CLI build for the rebrand.",
+  "scripts": {
+    "build:css": "tailwindcss -i static/src/input.css -o app/static/css/style.css --minify",
+    "watch:css": "tailwindcss -i static/src/input.css -o app/static/css/style.css --watch"
+  },
+  "devDependencies": {
+    "tailwindcss": "^3.4.17"
+  }
+}

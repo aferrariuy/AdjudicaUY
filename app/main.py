@@ -29,7 +29,10 @@ logger = logging.getLogger(__name__)
 
 # Resolve paths once at import time so the app factory is cheap to call.
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
-STATIC_DIR = TEMPLATES_DIR / "static"
+# Static assets live next to the package (``app/static``) rather than
+# under ``app/templates/static`` so the Tailwind build output and any
+# other compiled bundles have a stable, framework-agnostic home.
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def _validate_environment() -> None:

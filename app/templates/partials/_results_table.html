@@ -8,52 +8,52 @@
    ``total_pages > 1`` — empty result sets and single-page listings
    skip the bar entirely. #}
 
-<section aria-labelledby="results-heading" class="bg-white border border-slate-200 rounded-lg overflow-hidden">
+<section aria-labelledby="results-heading" class="bg-folio border border-linea overflow-hidden">
   <h2 id="results-heading" class="sr-only">Resultados</h2>
 
   {% if not results %}
     <div class="p-6 text-center">
-      <p class="text-slate-600">No se encontraron adjudicaciones con los filtros aplicados.</p>
+      <p class="text-texto-sec">No se encontraron adjudicaciones con los filtros aplicados.</p>
     </div>
   {% else %}
     <div class="overflow-x-auto">
-      <table class="min-w-full divide-y divide-slate-200 text-sm">
-        <thead class="bg-slate-50">
+      <table class="min-w-full divide-y divide-linea text-sm">
+        <thead class="bg-ink text-paper">
           <tr>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Fecha</th>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Organismo</th>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Empresa</th>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Artículo</th>
-            <th scope="col" class="px-4 py-2 text-right font-medium text-slate-600">Monto</th>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Tipo</th>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Documento</th>
-            <th scope="col" class="px-4 py-2 text-left font-medium text-slate-600">Licitación</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-paper">Fecha</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-paper">Organismo</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-paper">Empresa</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-paper">Artículo</th>
+            <th scope="col" class="px-4 py-2 text-right font-medium text-paper">Monto</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-paper">Tipo</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-paper">Documento</th>
+            <th scope="col" class="px-4 py-2 text-left font-medium text-paper">Licitación</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-slate-100 bg-white">
+        <tbody class="divide-y divide-linea bg-folio">
           {% for row in results %}
-            <tr class="hover:bg-slate-50">
-              <td class="px-4 py-2 whitespace-nowrap text-slate-700">{{ row.date.isoformat() }}</td>
-              <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.organism }}">
+            <tr class="hover:bg-paper">
+              <td class="px-4 py-2 whitespace-nowrap text-ink">{{ row.date.isoformat() }}</td>
+              <td class="px-4 py-2 text-ink max-w-xs truncate" title="{{ row.organism }}">
                 <a
                   href="/organism/{{ row.organism | urlencode }}"
-                  class="text-blue-700 hover:underline"
+                  class="text-sello hover:underline"
                 >{{ row.organism }}</a>
               </td>
-              <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.winning_company }}">{{ row.winning_company }}</td>
-              <td class="px-4 py-2 text-slate-700 max-w-xs truncate" title="{{ row.article }}">{{ row.article }}</td>
+              <td class="px-4 py-2 text-ink max-w-xs truncate" title="{{ row.winning_company }}">{{ row.winning_company }}</td>
+              <td class="px-4 py-2 text-ink max-w-xs truncate" title="{{ row.article }}">{{ row.article }}</td>
               <td class="px-4 py-2 text-right tabular-nums whitespace-nowrap">
                 {{ "{:,.2f}".format(row.amount or 0) }} {{ row.currency }}
               </td>
-              <td class="px-4 py-2 text-slate-700 whitespace-nowrap">{{ row.license_type or '' }}</td>
-              <td class="px-4 py-2 text-slate-700 whitespace-nowrap">
+              <td class="px-4 py-2 text-ink whitespace-nowrap">{{ row.license_type or '' }}</td>
+              <td class="px-4 py-2 text-ink whitespace-nowrap">
                 {% if row.company_document %}
                   {{ row.company_document_type or '' }} {{ row.company_document }}
                 {% endif %}
               </td>
               <td class="px-4 py-2 whitespace-nowrap">
                 {% if row.license_link %}
-                  <a href="{{ row.license_link }}" target="_blank" rel="noopener" class="text-blue-700 hover:underline">Ver</a>
+                  <a href="{{ row.license_link }}" target="_blank" rel="noopener" class="text-sello hover:underline">Ver</a>
                 {% endif %}
               </td>
             </tr>
@@ -67,35 +67,35 @@
        in the filter form values so the new page preserves the active
        filter set. #}
     {% if total_pages > 1 %}
-      <nav aria-label="Paginación" class="px-4 py-3 border-t border-slate-200 flex items-center justify-center gap-1 flex-wrap">
+      <nav aria-label="Paginación" class="px-4 py-3 border-t border-linea flex items-center justify-center gap-1 flex-wrap">
         {% if page > 1 %}
           <a
             hx-get="/adjudications?page={{ page - 1 }}&partial=table"
             hx-target="#table-container"
             hx-include="#filter-form input"
-            class="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-100"
+            class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper"
           >Anterior</a>
         {% else %}
           <span
             aria-disabled="true"
-            class="px-3 py-1.5 rounded-md border border-slate-200 bg-slate-50 text-sm text-slate-400 cursor-not-allowed"
+            class="px-3 py-1.5 rounded-md border border-linea bg-paper text-sm text-texto-sec cursor-not-allowed"
           >Anterior</span>
         {% endif %}
 
         {% for n in page_numbers %}
           {% if n == "…" %}
-            <span class="px-2 py-1.5 text-sm text-slate-500 select-none" aria-hidden="true">…</span>
+            <span class="px-2 py-1.5 text-sm text-texto-sec select-none" aria-hidden="true">…</span>
           {% elif n == page %}
             <span
               aria-current="page"
-              class="px-3 py-1.5 rounded-md bg-blue-700 text-sm font-semibold text-white"
+              class="px-3 py-1.5 rounded-md bg-ink text-sm font-semibold text-paper"
             >{{ n }}</span>
           {% else %}
             <a
               hx-get="/adjudications?page={{ n }}&partial=table"
               hx-target="#table-container"
               hx-include="#filter-form input"
-              class="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-100"
+              class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper"
             >{{ n }}</a>
           {% endif %}
         {% endfor %}
@@ -105,12 +105,12 @@
             hx-get="/adjudications?page={{ page + 1 }}&partial=table"
             hx-target="#table-container"
             hx-include="#filter-form input"
-            class="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-sm text-slate-700 hover:bg-slate-100"
+            class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper"
           >Siguiente</a>
         {% else %}
           <span
             aria-disabled="true"
-            class="px-3 py-1.5 rounded-md border border-slate-200 bg-slate-50 text-sm text-slate-400 cursor-not-allowed"
+            class="px-3 py-1.5 rounded-md border border-linea bg-paper text-sm text-texto-sec cursor-not-allowed"
           >Siguiente</span>
         {% endif %}
       </nav>

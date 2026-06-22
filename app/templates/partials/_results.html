@@ -12,13 +12,13 @@
    This file is a Jinja2 partial only — it is not an HTML document. #}
 
 <div class="space-y-6">
-  <div class="flex items-center justify-between text-sm text-slate-600">
+  <div class="flex items-center justify-between text-sm text-texto-sec">
     <p>
       {% if total == 0 %}
         Sin resultados
       {% else %}
-        Mostrando <span class="font-semibold text-slate-800">{{ shown }}</span>
-        de <span class="font-semibold text-slate-800">{{ total }}</span>
+        Mostrando <span class="font-semibold text-ink">{{ shown }}</span>
+        de <span class="font-semibold text-ink">{{ total }}</span>
         {% if filters.has_any() %}
           adjudicaciones que coinciden con los filtros
         {% else %}
