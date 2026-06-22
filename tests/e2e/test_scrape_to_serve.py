@@ -250,8 +250,8 @@ def test_scrape_store_query_serve_round_trip(
             "E2E-COMPANY-Limpieza",
         ):
             assert company in body, f"Expected {company!r} in response body"
-        assert 'id="chart-ranking"' in body
-        assert 'id="chart-organism-ranking"' in body
+        assert 'id="ranking-heading"' in body
+        assert 'id="organism-ranking-heading"' in body
 
         # A filtered request also works.
         filtered = client.get(

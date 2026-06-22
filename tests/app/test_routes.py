@@ -75,15 +75,17 @@ def test_index_renders_no_results_message_when_db_is_empty(
     assert "No se encontraron adjudicaciones" in body
 
 
-def test_index_renders_chart_canvases(client: TestClient, make_adjudication) -> None:
+def test_index_renders_ranking_list_headings(
+    client: TestClient, make_adjudication
+) -> None:
     make_adjudication(amount_uyu=Decimal("1000.00"), date=date(CURRENT_YEAR, 3, 1))
 
     response = client.get("/")
     body = response.text
 
-    # Both partials are rendered with their canvas elements.
-    assert 'id="chart-ranking"' in body
-    assert 'id="chart-organism-ranking"' in body
+    # Both ranking list partials are rendered with their <h2> headings.
+    assert 'id="ranking-heading"' in body
+    assert 'id="organism-ranking-heading"' in body
 
 
 def test_index_includes_distinct_organisms_in_datalist(
@@ -120,9 +122,9 @@ def test_adjudications_partial_returns_results_fragment(
     body = response.text
     assert "PARTIAL-COMPANY-A" in body
     assert "PARTIAL-COMPANY-B" in body
-    # The partial still embeds the chart canvases so the browser can
-    # re-mount Chart.js after the swap.
-    assert 'id="chart-ranking"' in body
+    # The partial still embeds the ranking list <h2> heading so the
+    # markup is identical to a cold load.
+    assert 'id="ranking-heading"' in body
 
 
 def test_adjudications_partial_renders_no_results_panel(
@@ -365,7 +367,7 @@ def test_filters_with_no_matching_results_render_no_results_message(
 # ---------------------------------------------------------------------------
 
 
-def test_ranking_chart_reflects_active_filters(
+def test_ranking_list_reflects_active_filters(
     client: TestClient, make_adjudication
 ) -> None:
     make_adjudication(
@@ -384,12 +386,13 @@ def test_ranking_chart_reflects_active_filters(
     response = client.get("/adjudications?organism=OSE")
     body = response.text
 
-    # The ranking payload is JSON-encoded into the canvas's data-chart attribute.
+    # The ranking list is filtered by the active filter set: TopCorp
+    # (matching the OSE organism filter) is rendered, SmallCo is not.
     assert "TopCorp" in body
     assert "SmallCo" not in body
 
 
-def test_organism_ranking_chart_aggregates_by_organism(
+def test_organism_ranking_list_aggregates_by_organism(
     client: TestClient, make_adjudication
 ) -> None:
     make_adjudication(
@@ -414,10 +417,9 @@ def test_organism_ranking_chart_aggregates_by_organism(
     response = client.get("/adjudications")
     body = response.text
 
-    # The chart payload aggregates by organism. The organism ranking
-    # canvas is present and its data-chart payload contains both
-    # organism names.
-    assert 'id="chart-organism-ranking"' in body
+    # The organism ranking list groups by organism and renders the
+    # aggregated totals for both organisms.
+    assert 'id="organism-ranking-heading"' in body
     assert "OSE" in body
     assert "Ministerio de Interior" in body
 
@@ -444,11 +446,10 @@ def test_ranking_excludes_null_amount_uyu_rows(
     assert "ConvertibleCo" in body
     # Non-convertible company is still listed in the table...
     assert "NonConvertibleCo" in body
-    # ...but it MUST NOT appear in the ranking chart's data payload,
-    # which is rendered into the canvas. Easiest signal: the ranking
-    # canvas exists with the convertible company in the data.
+    # ...but it MUST NOT appear in the ranking list. The convertible
+    # company shows up in the table itself, not just the ranking.
     assert "TopCorp" not in body  # sanity: not introduced
-    assert "ConvertibleCo" in body  # visible in some chart context
+    assert "ConvertibleCo" in body  # visible in some context
 
 
 # ---------------------------------------------------------------------------
@@ -691,9 +692,9 @@ def test_organism_detail_returns_200_with_widgets_for_known_organism(
     assert "Resumen" in body  # KPI section heading
     assert 'id="chart-trend"' in body
     assert 'id="chart-concentration"' in body
-    assert 'id="chart-ranking"' in body  # company ranking
-    # The organism ranking chart is intentionally absent on this page.
-    assert 'id="chart-organism-ranking"' not in body
+    assert 'id="ranking-heading"' in body  # company ranking list
+    # The organism ranking list is intentionally absent on this page.
+    assert 'id="organism-ranking-heading"' not in body
 
 
 def test_organism_detail_returns_200_with_empty_state_for_unknown_organism(
@@ -757,7 +758,7 @@ def test_organism_detail_partial_returns_body_without_chrome(
     # The body partial includes the dashboard widgets.
     assert 'id="chart-trend"' in body
     assert 'id="chart-concentration"' in body
-    assert 'id="chart-ranking"' in body
+    assert 'id="ranking-heading"' in body
     # The full page chrome is NOT re-rendered — no <header>, no nav,
     # no filter form (the form lives outside the swap target).
     assert "<header" not in body
@@ -802,8 +803,9 @@ def _make_pagination_fixtures(make_adjudication, n: int, prefix: str) -> None:
     * **Amounts** are also distinct (``i * 100``) so the
       ``ranking_by_company`` aggregate returns a predictable top-10
       (the 10 highest amounts = the 10 most recently inserted rows).
-      Without this, the ranking's 10 company names would leak into the
-      rendered body and confuse the "row X is NOT on page Y" checks.
+      Without this, the ranking list's 10 company names would leak
+      into the rendered body and confuse the "row X is NOT on page Y"
+      checks.
 
     All dates live in the current calendar year so the route's default
     year filter (injected on cold load) does not exclude any fixture.
@@ -894,7 +896,7 @@ def test_pagination_page_two_returns_rows_1_to_10(
     for i in range(1, 11):
         assert f"PG-P2-{i:03d}" in body, f"Expected PG-P2-{i:03d} on page 2"
     # Page 1 rows (positions 11-20) appear in the body via the
-    # ``ranking_by_company`` chart payload (they have the highest
+    # ``ranking_by_company`` ranking list (they have the highest
     # ``amount_uyu`` and top the ranking), so we don't assert on them
     # here — the table-level pagination is what this scenario is
     # verifying. The presence of rows 1-10 above + the redirect
