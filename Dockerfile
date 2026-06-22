@@ -5,8 +5,9 @@
 # ``docker-compose.yml`` overrides ``CMD`` for the worker.
 #
 # Stages:
-#   * builder — installs Python dependencies into a virtualenv
-#   * runtime — copies the venv + source, runs as a non-root user
+#   * builder  — installs Python dependencies into a virtualenv
+#   * tailwind — compiles ``app/static/css/style.css`` from Tailwind sources
+#   * runtime  — copies the venv + compiled CSS + source, runs as non-root
 #
 # Python 3.13 to match the project's runtime (see ``.python-version`` and
 # the scraper/type annotations in ``app/`` and ``scraper/``).
@@ -35,6 +36,33 @@ RUN python -m venv /opt/venv \
 
 
 # ---------------------------------------------------------------------------
+# tailwind
+# ---------------------------------------------------------------------------
+# Compiles the Tailwind source bundle into ``static/css/style.css`` which
+# the runtime stage copies into ``app/static/css/style.css``. We pin the
+# major Node version so the image is reproducible.
+FROM node:20-alpine AS tailwind
+
+WORKDIR /src
+
+# Install the Tailwind CLI matching the version pinned in ``package.json``.
+# ``package*.json`` covers both ``package.json`` and ``package-lock.json``
+# when the lockfile is committed; if absent the glob simply matches the
+# single file. Copying the manifest first keeps the ``npm install`` layer
+# cacheable across code changes.
+COPY package*.json ./
+RUN npm install --no-audit --no-fund
+
+# Copy Tailwind source (config + CSS) and the templates so the content
+# scanner can find every utility class in use. Without the templates,
+# Tailwind purges ALL utilities and ships an empty bundle.
+COPY tailwind.config.js ./
+COPY static/ ./static/
+COPY app/templates/ ./app/templates/
+RUN npx tailwindcss -i static/src/input.css -o app/static/css/style.css --minify
+
+
+# ---------------------------------------------------------------------------
 # runtime
 # ---------------------------------------------------------------------------
 FROM python:3.13-slim AS runtime
@@ -58,6 +86,12 @@ WORKDIR /app
 
 # Virtualenv first (changes infrequently → good layer cache).
 COPY --from=builder /opt/venv /opt/venv
+
+# Compiled Tailwind bundle — a single file that includes the custom
+# layer (corner decorations, masthead double border, dotted links,
+# reduced-motion overrides) because ``input.css`` ``@import``s
+# ``custom.css`` before emitting utilities.
+COPY --from=tailwind /src/app/static/css/style.css ./app/static/css/style.css
 
 # Application source. Owned by the unprivileged ``app`` user.
 COPY --chown=app:app app/ ./app/
