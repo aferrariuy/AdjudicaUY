@@ -596,14 +596,13 @@ def _build_organism_context(
     the page and its HTMX refresh are guaranteed to render the same
     widgets against the same snapshot.
 
-    The function does NOT call ``_inject_default_year_params`` — the
-    organism profile shows the full history for that organism on cold
-    load, not a single calendar year. The behaviour mirrors the
-    spec's "Profile page renders for known organism" scenario: the
-    user navigates to ``/organism/Ministerio del Interior`` and gets
-    the lifetime activity of that organism.
+    When no date filters are provided (cold navigation from the main
+    page which defaults to the current year), the current calendar year
+    is injected so the organism profile stays consistent with the
+    user's expectation of filtered results.
     """
 
+    _inject_default_year_params(raw_params)
     validate_date_params(raw_params)
     # Parse the user-supplied secondary filters (date / article / id) but
     # override the organism slot with the exact name decoded from the
