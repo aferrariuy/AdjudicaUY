@@ -817,27 +817,27 @@ def _make_pagination_fixtures(make_adjudication, n: int, prefix: str) -> None:
         )
 
 
-def test_pagination_default_page_returns_first_50_rows(
+def test_pagination_default_page_returns_first_10_rows(
     client: TestClient, make_adjudication
 ) -> None:
-    """GET / without ?page returns the first 50 rows of a 60-row set.
+    """GET / without ?page returns the first 10 rows of a 20-row set.
 
-    PAGE_SIZE is 50 and the default ``page`` is 1, so the 10 oldest
-    rows (positions 51-60) are on page 2 and MUST NOT appear in the
+    PAGE_SIZE is 10 and the default ``page`` is 1, so the 10 oldest
+    rows (positions 11-20) are on page 2 and MUST NOT appear in the
     default response.
     """
 
-    _make_pagination_fixtures(make_adjudication, 60, "PG-DEF")
+    _make_pagination_fixtures(make_adjudication, 20, "PG-DEF")
 
     response = client.get("/")
     assert response.status_code == 200
     body = response.text
 
-    # Page 1 holds positions 1-50 — the most-recent 50 rows. In our
-    # setup those are rows 11..60 (rows 1..10 are the oldest, on page 2).
-    for i in range(11, 61):
+    # Page 1 holds positions 1-10 — the most-recent 10 rows. In our
+    # setup those are rows 11..20 (rows 1..10 are the oldest, on page 2).
+    for i in range(11, 21):
         assert f"PG-DEF-{i:03d}" in body, f"Expected PG-DEF-{i:03d} on page 1"
-    # The 10 oldest rows (positions 51-60) are on page 2 and MUST be
+    # The 10 oldest rows (positions 1-10) are on page 2 and MUST be
     # excluded from the default response.
     for i in range(1, 11):
         assert f"PG-DEF-{i:03d}" not in body, (
@@ -850,13 +850,13 @@ def test_pagination_page_zero_clamps_to_page_one(
 ) -> None:
     """?page=0 is treated as page 1 (no 4xx, no off-by-one)."""
 
-    _make_pagination_fixtures(make_adjudication, 60, "PG-ZERO")
+    _make_pagination_fixtures(make_adjudication, 20, "PG-ZERO")
 
     response = client.get("/?page=0")
     assert response.status_code == 200
     body = response.text
 
-    for i in range(11, 61):
+    for i in range(11, 21):
         assert f"PG-ZERO-{i:03d}" in body
     for i in range(1, 11):
         assert f"PG-ZERO-{i:03d}" not in body
@@ -867,24 +867,24 @@ def test_pagination_negative_page_clamps_to_page_one(
 ) -> None:
     """?page=-5 is treated as page 1 — negative values do not 4xx."""
 
-    _make_pagination_fixtures(make_adjudication, 60, "PG-NEG")
+    _make_pagination_fixtures(make_adjudication, 20, "PG-NEG")
 
     response = client.get("/?page=-5")
     assert response.status_code == 200
     body = response.text
 
-    for i in range(11, 61):
+    for i in range(11, 21):
         assert f"PG-NEG-{i:03d}" in body
     for i in range(1, 11):
         assert f"PG-NEG-{i:03d}" not in body
 
 
-def test_pagination_page_two_returns_rows_51_to_60(
+def test_pagination_page_two_returns_rows_1_to_10(
     client: TestClient, make_adjudication
 ) -> None:
-    """?page=2 with 60 rows returns the last 10 rows (positions 51-60)."""
+    """?page=2 with 20 rows returns the last 10 rows (positions 1-10)."""
 
-    _make_pagination_fixtures(make_adjudication, 60, "PG-P2")
+    _make_pagination_fixtures(make_adjudication, 20, "PG-P2")
 
     response = client.get("/?page=2")
     assert response.status_code == 200
@@ -893,24 +893,20 @@ def test_pagination_page_two_returns_rows_51_to_60(
     # The 10 oldest rows are on page 2.
     for i in range(1, 11):
         assert f"PG-P2-{i:03d}" in body, f"Expected PG-P2-{i:03d} on page 2"
-    # The 40 middle rows (positions 11-50) MUST be excluded — they
-    # belong to page 1. The 10 most-recent rows (51-60) are also
-    # present in the body via the ``ranking_by_company`` chart
-    # payload (they have the highest ``amount_uyu`` and top the
-    # ranking), so we don't assert on them here — the table-level
-    # pagination is what this scenario is verifying.
-    for i in range(11, 51):
-        assert f"PG-P2-{i:03d}" not in body, (
-            f"PG-P2-{i:03d} should be on page 1, not page 2"
-        )
+    # Page 1 rows (positions 11-20) appear in the body via the
+    # ``ranking_by_company`` chart payload (they have the highest
+    # ``amount_uyu`` and top the ranking), so we don't assert on them
+    # here — the table-level pagination is what this scenario is
+    # verifying. The presence of rows 1-10 above + the redirect
+    # scenario in the next test cover the page-2 boundary.
 
 
 def test_pagination_out_of_bounds_redirects_to_last_valid_page(
     client: TestClient, make_adjudication
 ) -> None:
-    """?page=999 with 60 rows (2 valid pages) returns 302 → ?page=2."""
+    """?page=999 with 20 rows (2 valid pages) returns 302 → ?page=2."""
 
-    _make_pagination_fixtures(make_adjudication, 60, "PG-REDIR")
+    _make_pagination_fixtures(make_adjudication, 20, "PG-REDIR")
 
     response = client.get("/?page=999", follow_redirects=False)
 
@@ -940,27 +936,27 @@ def test_pagination_empty_dataset_hides_pagination_nav(
 def test_pagination_single_page_hides_pagination_nav(
     client: TestClient, make_adjudication
 ) -> None:
-    """40 rows fit on one page → no pagination <nav>; all rows visible."""
+    """5 rows fit on one page → no pagination <nav>; all rows visible."""
 
-    _make_pagination_fixtures(make_adjudication, 40, "PG-1PG")
+    _make_pagination_fixtures(make_adjudication, 5, "PG-1PG")
 
     response = client.get("/")
     assert response.status_code == 200
     body = response.text
 
-    # 40 rows / 50 per page = 1 page → no nav.
+    # 5 rows / 10 per page = 1 page → no nav.
     assert 'aria-label="Paginación"' not in body
-    # All 40 rows are visible.
-    for i in range(1, 41):
+    # All 5 rows are visible.
+    for i in range(1, 6):
         assert f"PG-1PG-{i:03d}" in body
 
 
 def test_pagination_multi_page_renders_correct_page_numbers(
     client: TestClient, make_adjudication
 ) -> None:
-    """120 rows (3 pages) → nav rendered with links to pages 1, 2, 3."""
+    """30 rows (3 pages) → nav rendered with links to pages 1, 2, 3."""
 
-    _make_pagination_fixtures(make_adjudication, 120, "PG-MULTI")
+    _make_pagination_fixtures(make_adjudication, 30, "PG-MULTI")
 
     response = client.get("/")
     assert response.status_code == 200

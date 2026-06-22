@@ -66,7 +66,7 @@ PARTIALS_DIR = TEMPLATES_DIR / "partials"
 # Pagination bounds. The route caps user-supplied values implicitly by
 # ignoring them; we expose fixed constants so the UI can render the same
 # numbers.
-PAGE_SIZE = 50
+PAGE_SIZE = 10
 RANKING_LIMIT = 10
 ORGANISM_SUGGEST_LIMIT = 200
 
