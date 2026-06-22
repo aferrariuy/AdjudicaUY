@@ -129,71 +129,6 @@ def _json_dumps(value: Any) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_ranking_chart_payload(
-    rows: list[tuple[str, Decimal]],
-) -> dict[str, Any]:
-    """Shape ranking rows for a Chart.js bar chart.
-
-    Returns a dict ready to be ``json.dumps``-ed into ``data-chart``:
-
-    * ``labels`` — company names, in the order returned by the service
-      (already sorted descending by total).
-    * ``datasets[0].data`` — the totals, parallel to ``labels``.
-    * ``format`` — a hint for the client-side tooltip/locale formatter.
-
-    See the ranking-visualization spec, "Amount Formatting" scenarios
-    for the ``es-UY`` locale expectation.
-    """
-
-    return {
-        "type": "bar",
-        "labels": [company for company, _total in rows],
-        "datasets": [
-            {
-                "label": "Total adjudicado (UYU)",
-                "data": [float(total) for _company, total in rows],
-            },
-        ],
-        "format": {
-            "locale": "es-UY",
-            "currency": "UYU",
-        },
-    }
-
-
-def _build_organism_ranking_payload(
-    rows: list[tuple[str, Decimal]],
-) -> dict[str, Any]:
-    """Shape organism ranking rows for a Chart.js bar chart.
-
-    Returns a dict ready to be ``json.dumps``-ed into ``data-chart``:
-
-    * ``labels`` — organism names, in the order returned by the service
-      (already sorted descending by total).
-    * ``datasets[0].data`` — the totals, parallel to ``labels``.
-    * ``format`` — a hint for the client-side tooltip/locale formatter.
-
-    See the organism-ranking-visualization spec, "Payload structure
-    matches company ranking" scenario for the ``es-UY`` locale
-    expectation.
-    """
-
-    return {
-        "type": "bar",
-        "labels": [organism for organism, _total in rows],
-        "datasets": [
-            {
-                "label": "Total adjudicado (UYU)",
-                "data": [float(total) for _organism, total in rows],
-            },
-        ],
-        "format": {
-            "locale": "es-UY",
-            "currency": "UYU",
-        },
-    }
-
-
 def _build_trend_chart_payload(
     rows: list[tuple[str, Decimal]],
 ) -> dict[str, Any]:
@@ -424,15 +359,9 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
             "page": page,
             "total_pages": total_pages,
             "page_numbers": page_numbers,
-            "ranking_payload": _build_ranking_chart_payload(ranking_rows),
-            "ranking_json": _json_dumps(_build_ranking_chart_payload(ranking_rows)),
-            "organism_ranking_payload": _build_organism_ranking_payload(organism_rows),
-            "organism_ranking_json": _json_dumps(
-                _build_organism_ranking_payload(organism_rows)
-            ),
+            "ranking_rows": ranking_rows,
+            "organism_rows": organism_rows,
             "organisms": organisms,
-            "has_ranking_data": bool(ranking_rows),
-            "has_organism_ranking_data": bool(organism_rows),
             # Citizen-dashboard payloads.
             "kpi": kpi,
             "trend_rows": trend_rows,
@@ -550,14 +479,8 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
             "page": page,
             "total_pages": total_pages,
             "page_numbers": page_numbers,
-            "ranking_payload": _build_ranking_chart_payload(ranking_rows),
-            "ranking_json": _json_dumps(_build_ranking_chart_payload(ranking_rows)),
-            "organism_ranking_payload": _build_organism_ranking_payload(organism_rows),
-            "organism_ranking_json": _json_dumps(
-                _build_organism_ranking_payload(organism_rows)
-            ),
-            "has_ranking_data": bool(ranking_rows),
-            "has_organism_ranking_data": bool(organism_rows),
+            "ranking_rows": ranking_rows,
+            "organism_rows": organism_rows,
             # Citizen-dashboard payloads.
             "kpi": kpi,
             "trend_rows": trend_rows,
@@ -645,12 +568,10 @@ def _build_organism_context(
         ),
         "has_concentration_data": concentration.ratio is not None,
         # The company ranking on the organism page reuses the same
-        # variable names as the index page's ``_ranking_chart.html``
-        # partial — the partial reads ``ranking_json`` /
-        # ``has_ranking_data`` regardless of which route rendered it.
-        "ranking_payload": _build_ranking_chart_payload(company_ranking),
-        "ranking_json": _json_dumps(_build_ranking_chart_payload(company_ranking)),
-        "has_ranking_data": bool(company_ranking),
+        # variable names as the index page's ``_ranking_list.html``
+        # partial — the partial reads ``ranking_rows`` regardless of
+        # which route rendered it.
+        "ranking_rows": company_ranking,
     }
 
 

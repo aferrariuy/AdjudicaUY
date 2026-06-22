@@ -5,7 +5,8 @@ call functions like :func:`list_adjudications` or :func:`ranking_by_company`
 with plain Python values; the service builds the SQLAlchemy query, applies
 active filters with AND logic, executes it, and returns plain data
 structures (lists of :class:`AdjudicationRow` dataclasses for listings,
-``(label, value)`` pairs for charts, etc.).
+``(label, value)`` pairs for charts, lists of :class:`RankingEntry`
+dataclasses for the top-N rankings, etc.).
 
 The query layer reads from a join of the :class:`Compra` and
 :class:`Adjudicacion` tables (web-app spec, "Query Layer Reads From
@@ -183,6 +184,33 @@ class ConcentrationResult:
     ratio: Decimal | None
     single_bidder_count: int
     multi_bidder_count: int
+
+
+@dataclass(frozen=True)
+class RankingEntry:
+    """One row in the top-N ranking by total adjudicated amount.
+
+    Used by both the company ranking (top winning companies) and the
+    organism ranking (top buyers). The HTML list partials render
+    ``name`` as the row label, ``total_amount_uyu`` as the right-hand
+    amount, and ``adjudication_count`` as a "N adjudicaciones"
+    subline.
+
+    * ``name``              — the display label (company or organism name).
+    * ``total_amount_uyu``  — sum of ``Adjudicacion.amount_uyu`` for the
+      group, in UYU. Rows with NULL ``amount_uyu`` are excluded from
+      the aggregate; the sum is coalesced so the value is never NULL
+      (empty groups don't make it past ``WHERE amount_uyu IS NOT NULL``).
+    * ``adjudication_count`` — number of adjudicated line items (NOT
+      distinct compras) the group contributed to the total. A company
+      that won three different line items on the same compra shows as
+      ``adjudication_count == 3`` — what the spec describes as
+      adjudicaciones, not distinct purchases.
+    """
+
+    name: str
+    total_amount_uyu: Decimal
+    adjudication_count: int
 
 
 # ---------------------------------------------------------------------------
@@ -424,23 +452,27 @@ def ranking_by_company(
     filters: AdjudicationFilters,
     *,
     limit: int = 10,
-) -> list[tuple[str, Decimal]]:
+) -> list[RankingEntry]:
     """Return the top companies by total adjudicated amount in UYU.
 
-    The result is a list of ``(company_name, total_amount_uyu)`` pairs,
-    sorted descending by amount. ``amount_uyu`` may be ``NULL`` in the
-    database (non-convertible currencies); those rows are excluded from
-    the ranking so they do not skew the totals.
+    Each :class:`RankingEntry` carries the company name, the SUM of
+    ``Adjudicacion.amount_uyu`` for that company, and the count of
+    adjudicated line items the company contributed. Rows with NULL
+    ``amount_uyu`` (non-convertible currencies) are excluded from
+    both the SUM and the count so they do not skew the totals.
 
     The ranking MUST reflect the same filters as the listing (see
-    ranking-visualization spec, "Chart reflects active filters"
+    ranking-visualization spec, "Ranking reflects active filters"
     scenario).
     """
 
     stmt = (
         select(
-            Adjudicacion.nombre_comercial.label("company"),
-            func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label("total"),
+            Adjudicacion.nombre_comercial.label("name"),
+            func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label(
+                "total_amount_uyu"
+            ),
+            func.count(Adjudicacion.id).label("adjudication_count"),
         )
         .join(Compra, Compra.id == Adjudicacion.compra_id)
         .where(Adjudicacion.amount_uyu.is_not(None))
@@ -449,7 +481,14 @@ def ranking_by_company(
         .limit(limit)
     )
     stmt = _apply_filters(stmt, filters)
-    return [(row.company, row.total) for row in session.execute(stmt)]
+    return [
+        RankingEntry(
+            name=row.name,
+            total_amount_uyu=row.total_amount_uyu,
+            adjudication_count=int(row.adjudication_count),
+        )
+        for row in session.execute(stmt)
+    ]
 
 
 def ranking_by_organism(
@@ -457,23 +496,27 @@ def ranking_by_organism(
     filters: AdjudicationFilters,
     *,
     limit: int = 10,
-) -> list[tuple[str, Decimal]]:
+) -> list[RankingEntry]:
     """Return the top organisms by total adjudicated amount in UYU.
 
-    The result is a list of ``(organism_name, total_amount_uyu)`` pairs,
-    sorted descending by amount. ``amount_uyu`` may be ``NULL`` in the
-    database (non-convertible currencies); those rows are excluded from
-    the ranking so they do not skew the totals.
+    Each :class:`RankingEntry` carries the organism name, the SUM of
+    ``Adjudicacion.amount_uyu`` across that organism's adjudicaciones,
+    and the count of adjudicated line items. Rows with NULL
+    ``amount_uyu`` (non-convertible currencies) are excluded from
+    both the SUM and the count so they do not skew the totals.
 
     The ranking MUST reflect the same filters as the listing (see
-    organism-ranking-visualization spec, "Chart reflects active filters"
-    scenario).
+    organism-ranking-visualization spec, "Ranking reflects active
+    filters" scenario).
     """
 
     stmt = (
         select(
-            Compra.organismo.label("organism"),
-            func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label("total"),
+            Compra.organismo.label("name"),
+            func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label(
+                "total_amount_uyu"
+            ),
+            func.count(Adjudicacion.id).label("adjudication_count"),
         )
         .join(Compra, Compra.id == Adjudicacion.compra_id)
         .where(Adjudicacion.amount_uyu.is_not(None))
@@ -482,7 +525,14 @@ def ranking_by_organism(
         .limit(limit)
     )
     stmt = _apply_filters(stmt, filters)
-    return [(row.organism, row.total) for row in session.execute(stmt)]
+    return [
+        RankingEntry(
+            name=row.name,
+            total_amount_uyu=row.total_amount_uyu,
+            adjudication_count=int(row.adjudication_count),
+        )
+        for row in session.execute(stmt)
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -803,6 +853,7 @@ __all__ = [
     "ConcentrationResult",
     "DateValidationError",
     "KpiSummary",
+    "RankingEntry",
     "concentration_ratio",
     "count_adjudications",
     "distinct_organisms",
