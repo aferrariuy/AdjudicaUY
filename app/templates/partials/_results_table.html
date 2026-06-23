@@ -1,12 +1,12 @@
-{# Adjudications results table. Shows a "no results" panel when the
-   filter set produced zero rows. The columns mirror the model's
-   display fields, except for the linked license_url and the formatted
-   amount_uyu.
+{# Adjudications results. Renders a stacked card list on mobile and a
+   comparison table on desktop. Both markups share the same ``results``
+   loop and live inside ``#table-container`` so HTMX swaps stay atomic.
 
-   The pagination control bar lives below the table inside the same
-   section so the chrome stays unified. It is rendered only when
-   ``total_pages > 1`` — empty result sets and single-page listings
-   skip the bar entirely. #}
+   The pagination bar lives at the top level of ``{% else %}`` — outside
+   both responsive toggles — so it shows on every viewport. The
+   ``hx-target`` on the pagination links keeps pointing at
+   ``#table-container`` so a single response replaces the cards, the
+   table, and the pagination bar in one swap. #}
 
 <section aria-labelledby="results-heading" class="bg-folio border border-linea overflow-hidden">
   <h2 id="results-heading" class="sr-only">Resultados</h2>
@@ -16,7 +16,67 @@
       <p class="text-texto-sec">No se encontraron adjudicaciones con los filtros aplicados.</p>
     </div>
   {% else %}
-    <table class="table-fixed divide-y divide-linea text-sm">
+    {# Mobile card list (visible below the lg breakpoint). Each card
+       surfaces the monto first (most prominent), then the linked
+       organismo (line-clamped to 3 lines), the empresa, the artículo,
+       the fecha + tipo + documento metadata, and a full-width "Ver
+       licitación ↗" CTA with a 48px touch target. The outer ``lg:hidden``
+       keeps the cards out of the desktop paint; both markups always
+       exist in the DOM so CSS owns visibility, not Jinja conditionals. #}
+    <div class="space-y-4 lg:hidden p-4">
+      {% for row in results %}
+        <article class="bg-folio border border-linea rounded-lg p-4 space-y-2">
+          <div class="text-lg font-bold text-sello tabular-nums">
+            {{ "{:,.2f}".format(row.amount or 0) }} {{ row.currency }}
+          </div>
+          <a
+            href="/organism/{{ row.organism | urlencode }}{% if request.query_params %}?{{ request.query_params }}{% endif %}"
+            class="text-sm text-sello hover:underline line-clamp-3 break-words"
+            aria-label="Filtrar por organismo {{ row.organism }}"
+          >{{ row.organism }}</a>
+          <div class="text-sm text-ink">{{ row.winning_company }}</div>
+          <div class="text-sm text-ink">{{ row.article }}</div>
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-texto-sec">
+            <span>{{ row.date.isoformat() }}</span>
+            {%- if row.license_type == "CD" %}
+              <span aria-hidden="true">·</span>
+              <span class="inline-block px-2 py-0.5 rounded font-medium bg-sello/10 text-sello">CD</span>
+            {% elif row.license_type == "LA" %}
+              <span aria-hidden="true">·</span>
+              <span class="inline-block px-2 py-0.5 rounded font-medium bg-ink/10 text-ink">LA</span>
+            {% elif row.license_type == "CE" %}
+              <span aria-hidden="true">·</span>
+              <span class="inline-block px-2 py-0.5 rounded font-medium bg-registro/10 text-registro">CE</span>
+            {% elif row.license_type %}
+              <span aria-hidden="true">·</span>
+              <span>{{ row.license_type }}</span>
+            {%- endif %}
+            {% if row.company_document %}
+              <span aria-hidden="true">·</span>
+              <span>{{ row.company_document_type or '' }} {{ row.company_document }}</span>
+            {% endif %}
+          </div>
+          {% if row.license_link %}
+            <a
+              href="{{ row.license_link }}"
+              target="_blank"
+              rel="noopener"
+              class="flex items-center justify-center w-full min-h-[48px] px-4 rounded border border-linea bg-folio text-sm text-ink hover:bg-paper"
+              aria-label="Ver licitación en sitio de Compras Estatales"
+            >Ver licitación ↗</a>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+
+    {# Desktop comparison table (visible at lg and above). Markup
+       matches the pre-change version byte-for-byte so visual
+       regressions are not introduced. The outer div drives the
+       ``hidden lg:block`` toggle because Tailwind ships no ``lg:table``
+       utility; ``overflow-x-auto`` is a safety net for narrow desktops
+       where the 8 columns still overflow. #}
+    <div class="hidden lg:block overflow-x-auto">
+      <table class="table-fixed divide-y divide-linea text-sm">
         <thead class="bg-ink text-paper">
           <tr>
             <th scope="col" class="w-[9%] px-3 py-2 text-left font-medium text-paper">Fecha</th>
@@ -69,11 +129,13 @@
           {% endfor %}
         </tbody>
       </table>
+    </div>
 
-    {# Pagination control bar. Hidden when the filtered set fits on a
-       single page (total_pages == 1) or is empty. ``hx-include`` pulls
-       in the filter form values so the new page preserves the active
-       filter set. #}
+    {# Pagination control bar. Lives outside both responsive toggles so
+       it renders on every viewport. Hidden when the filtered set fits
+       on a single page (total_pages == 1) or is empty. ``hx-include``
+       pulls in the filter form values so the new page preserves the
+       active filter set. #}
     {% if total_pages > 1 %}
       <nav aria-label="Paginación" class="px-4 py-3 border-t border-linea flex items-center justify-center gap-1 flex-wrap">
         {% if page > 1 %}
