@@ -27,12 +27,8 @@
     .htmx-swapping { opacity: 0; transition: opacity 100ms ease-out; }
     .htmx-settling { opacity: 1; transition: opacity 100ms ease-out; }
 
-    /* Loading indicator: hide text, show spinner when HTMX request is in flight. */
-    .btn-spinner { display: none; }
-    .htmx-request .btn-text { display: none; }
-    .htmx-request .btn-spinner { display: inline-block; }
-    .htmx-request.htmx-indicator { opacity: 1; }  /* keep button visible */
-
+    /* Loading indicator: spinner hidden by default, HTMX shows it during requests. */
+    .htmx-indicator { display: none; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
   </style>
