@@ -27,7 +27,8 @@
     .htmx-swapping { opacity: 0; transition: opacity 100ms ease-out; }
     .htmx-settling { opacity: 1; transition: opacity 100ms ease-out; }
 
-    /* Loading indicator: spinner hidden by default, HTMX shows it during requests. */
+    /* Loading indicator: HTMX hides .htmx-indicator via opacity:0 at
+       runtime; this display:none is a fallback for non-HTMX contexts. */
     .htmx-indicator { display: none; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
@@ -207,20 +208,25 @@
       // Global: disable submit buttons with hx-indicator while a request
       // is in flight.  Restores state on afterSettle (covers both success
       // and error — the button must be re-enabled either way).
+      // Uses direct style manipulation instead of Tailwind classes to
+      // avoid JIT purge (classes only added via JS are stripped).
       document.body.addEventListener('htmx:beforeRequest', function (evt) {
-        var indicators = document.querySelectorAll('.htmx-indicator');
-        indicators.forEach(function (el) {
-          var btn = el.closest('button') || el;
-          btn.disabled = true;
-          btn.classList.add('opacity-60', 'cursor-wait');
-        });
+        var indicator = evt.detail.elt;
+        if (!indicator) return;
+        var btn = indicator.closest('button');
+        if (!btn) return;
+        btn.disabled = true;
+        btn.style.opacity = '0.6';
+        btn.style.cursor = 'wait';
       });
-      document.body.addEventListener('htmx:afterSettle', function () {
-        document.querySelectorAll('button.htmx-indicator, button .htmx-indicator').forEach(function (el) {
-          var btn = el.closest('button') || el;
-          btn.disabled = false;
-          btn.classList.remove('opacity-60', 'cursor-wait');
-        });
+      document.body.addEventListener('htmx:afterSettle', function (evt) {
+        var indicator = evt.detail.elt;
+        if (!indicator) return;
+        var btn = indicator.closest('button');
+        if (!btn) return;
+        btn.disabled = false;
+        btn.style.opacity = '';
+        btn.style.cursor = '';
       });
 
       // HTMX 1.9 aborts swaps on 4xx/5xx by default. We use HTTP 422
