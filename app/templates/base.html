@@ -26,6 +26,15 @@
     /* Disable transitions on Tailwind utility toggles to keep HTMX swaps snappy. */
     .htmx-swapping { opacity: 0; transition: opacity 100ms ease-out; }
     .htmx-settling { opacity: 1; transition: opacity 100ms ease-out; }
+
+    /* Loading indicator: hide text, show spinner when HTMX request is in flight. */
+    .btn-spinner { display: none; }
+    .htmx-request .btn-text { display: none; }
+    .htmx-request .btn-spinner { display: inline-block; }
+    .htmx-request.htmx-indicator { opacity: 1; }  /* keep button visible */
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
   </style>
 </head>
 <body class="bg-paper text-ink min-h-screen flex flex-col font-ibm-plex">
@@ -198,6 +207,25 @@
           });
         });
       }
+
+      // Global: disable submit buttons with hx-indicator while a request
+      // is in flight.  Restores state on afterSettle (covers both success
+      // and error — the button must be re-enabled either way).
+      document.body.addEventListener('htmx:beforeRequest', function (evt) {
+        var indicators = document.querySelectorAll('.htmx-indicator');
+        indicators.forEach(function (el) {
+          var btn = el.closest('button') || el;
+          btn.disabled = true;
+          btn.classList.add('opacity-60', 'cursor-wait');
+        });
+      });
+      document.body.addEventListener('htmx:afterSettle', function () {
+        document.querySelectorAll('button.htmx-indicator, button .htmx-indicator').forEach(function (el) {
+          var btn = el.closest('button') || el;
+          btn.disabled = false;
+          btn.classList.remove('opacity-60', 'cursor-wait');
+        });
+      });
 
       // HTMX 1.9 aborts swaps on 4xx/5xx by default. We use HTTP 422
       // to signal validation errors (e.g. reversed date range) and

@@ -587,6 +587,48 @@ def test_invalid_date_format_returns_422(client: TestClient) -> None:
     assert "AAAA-MM-DD" in body
 
 
+def test_excessive_date_range_returns_422_on_index_page(
+    client: TestClient,
+) -> None:
+    """Index page returns 422 when the date range exceeds 5 years."""
+
+    response = client.get("/adjudications?date_from=2010-01-01&date_to=2020-01-01")
+
+    assert response.status_code == 422
+    body = response.text
+    # The inline error fragment is an alert role with the Spanish
+    # max-range message (spec, "Index page surfaces the maximum-range
+    # error" scenario).
+    assert 'role="alert"' in body
+    assert "5 años" in body
+
+
+def test_excessive_date_range_returns_422_on_organism_page(
+    client: TestClient, make_adjudication
+) -> None:
+    """Organism profile page returns 422 when the date range exceeds 5 years."""
+
+    make_adjudication(
+        organism="Ministerio del Interior",
+        winning_company="ACME",
+        amount_uyu=Decimal("1000.00"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get(
+        "/organism/Ministerio%20del%20Interior/partial"
+        "?date_from=2010-01-01&date_to=2020-01-01"
+    )
+
+    assert response.status_code == 422
+    body = response.text
+    # The inline error fragment is an alert role with the Spanish
+    # max-range message (spec, "Organism profile page surfaces the
+    # maximum-range error" scenario).
+    assert 'role="alert"' in body
+    assert "5 años" in body
+
+
 def test_limpiar_resets_to_current_year(client: TestClient) -> None:
     """The Limpiar control is a button that wires a JS reset to current
     year (NOT an <a href="/"> that would navigate)."""
@@ -650,6 +692,68 @@ def test_validate_date_params_rejects_reversed_range() -> None:
 
     with pytest.raises(DateValidationError, match="Desde"):
         validate_date_params({"date_from": "2025-12-01", "date_to": "2025-01-01"})
+
+
+def test_validate_date_params_accepts_under_5y() -> None:
+    """A range shorter than 5 years is accepted."""
+
+    from app.services.adjudication_service import validate_date_params
+
+    # 3-year range: well under the 5-year limit.
+    validate_date_params({"date_from": "2022-01-01", "date_to": "2024-12-31"})
+
+
+def test_validate_date_params_accepts_exactly_5y_boundary() -> None:
+    """A range of exactly 1825 days (5×365) is accepted as the boundary."""
+
+    from app.services.adjudication_service import validate_date_params
+
+    # 2020-01-01 → 2024-12-30 is exactly 1825 days (2020 is leap, so
+    # the leap day is already accounted for inside the span).
+    validate_date_params({"date_from": "2020-01-01", "date_to": "2024-12-30"})
+
+
+def test_validate_date_params_rejects_over_5y() -> None:
+    """A range of 1826 days (one day over) is rejected with the 5-year message."""
+
+    import pytest
+
+    from app.services.adjudication_service import (
+        DateValidationError,
+        validate_date_params,
+    )
+
+    # 2020-01-01 → 2024-12-31 is 1826 days — one day over the 1825-day
+    # limit. The Spanish max-range message is the contract (spec,
+    # "Spanish Error Message for Maximum Range" requirement).
+    with pytest.raises(DateValidationError, match="5 años"):
+        validate_date_params({"date_from": "2020-01-01", "date_to": "2024-12-31"})
+
+
+def test_validate_date_params_rejects_wider_range() -> None:
+    """A range much wider than 5 years (e.g. 10 years) is rejected."""
+
+    import pytest
+
+    from app.services.adjudication_service import (
+        DateValidationError,
+        validate_date_params,
+    )
+
+    # 10-year range: 2010-01-01 → 2020-01-01 is 3652 days.
+    with pytest.raises(DateValidationError, match="5 años"):
+        validate_date_params({"date_from": "2010-01-01", "date_to": "2020-01-01"})
+
+
+def test_validate_date_params_accepts_single_date() -> None:
+    """When only one date is provided, no range exists to check."""
+
+    from app.services.adjudication_service import validate_date_params
+
+    # Only date_from — the max-range check only runs when both are present.
+    validate_date_params({"date_from": "2024-01-01", "date_to": ""})
+    # Only date_to.
+    validate_date_params({"date_from": "", "date_to": "2024-12-31"})
 
 
 # ---------------------------------------------------------------------------

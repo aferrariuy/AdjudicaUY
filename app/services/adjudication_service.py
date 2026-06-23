@@ -289,6 +289,9 @@ def validate_date_params(params: dict[str, str | None]) -> None:
             raise DateValidationError(
                 "La fecha 'Desde' no puede ser posterior a la fecha 'Hasta'."
             )
+        # 3. Reject range wider than 5 years (1825 days = 5*365, leap-year safe).
+        if (dto - dfrom).days > 1825:
+            raise DateValidationError("El rango de fechas no puede superar los 5 años.")
 
 
 def filters_from_query_params(params: dict[str, str | None]) -> AdjudicationFilters:
