@@ -6,6 +6,41 @@
 
 @import "../css/custom.css";
 
+/* ---------------------------------------------------------------------
+ * Design tokens — light is the default on ``:root``; the ``.dark``
+ * class on ``<html>`` (toggled by the button in ``base.html``) swaps
+ * every token at once. Values are space-separated RGB triplets so
+ * Tailwind's ``rgb(var(--token) / <alpha-value>)`` mapping can apply
+ * opacity modifiers (``bg-sello/20``, ``text-ink/80``).
+ *
+ * Declared after the custom layer (which must come first per the CSS
+ * ``@import`` rule) but before ``@tailwind`` directives so every
+ * generated utility picks up the active token values.
+ * ------------------------------------------------------------------- */
+:root {
+  --color-ink: 27 42 74;
+  --color-paper: 241 242 236;
+  --color-folio: 255 255 255;
+  --color-sello: 178 59 46;
+  --color-registro: 47 111 98;
+  --color-linea: 215 210 194;
+  --color-texto-sec: 91 100 120;
+  --color-ranking-badge-bg: 254 243 199;
+  --color-ranking-badge-text: 146 64 14;
+}
+
+.dark {
+  --color-ink: 212 216 225;
+  --color-paper: 19 24 32;
+  --color-folio: 28 35 51;
+  --color-sello: 204 85 70;
+  --color-registro: 88 166 150;
+  --color-linea: 61 69 85;
+  --color-texto-sec: 142 152 171;
+  --color-ranking-badge-bg: 204 85 70;
+  --color-ranking-badge-text: 212 216 225;
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

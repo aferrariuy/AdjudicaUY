@@ -22,7 +22,11 @@
   position: absolute;
   width: 14px;
   height: 14px;
-  border-color: theme("colors.linea");
+  /* ``theme()`` resolves at build time and would emit a literal
+   * ``<alpha-value>`` placeholder from the Tailwind config — not valid
+   * CSS at runtime. Reference the design token directly so the brackets
+   * follow the active theme via ``:root`` / ``.dark`` swaps. */
+  border-color: rgb(var(--color-linea) / 1);
   border-style: solid;
   pointer-events: none;
 }
@@ -44,7 +48,10 @@
  * the ``linea`` token, matching the mockup's archival feel.
  * ------------------------------------------------------------------- */
 .masthead {
-  border-bottom: 3px double theme("colors.linea");
+  /* Direct ``rgb(var(...))`` so the double rule tracks the active
+   * theme (light: warm beige; dark: cool slate). ``/ 1`` pins the
+   * alpha — there's no opacity modifier for a ``border-color`` here. */
+  border-bottom: 3px double rgb(var(--color-linea) / 1);
 }
 
 /* ---------------------------------------------------------------------
