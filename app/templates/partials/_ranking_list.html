@@ -14,7 +14,7 @@
     <ol class="divide-y divide-linea">
       {% for entry in ranking_rows %}
         <li class="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
-          <span class="flex-shrink-0 w-8 h-8 rounded-full bg-amber-100 text-amber-800 font-bold text-sm flex items-center justify-center" aria-hidden="true">
+          <span class="flex-shrink-0 w-8 h-8 rounded-full bg-ranking-badge-bg text-ranking-badge-text font-bold text-sm flex items-center justify-center" aria-hidden="true">
             {{ "%02d" | format(loop.index) }}
           </span>
           <div class="flex-1 min-w-0">

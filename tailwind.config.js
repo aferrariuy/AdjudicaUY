@@ -9,20 +9,36 @@
 //   * ``linea``    — borders, hairlines, double rules
 //   * ``texto-sec``— secondary / muted text
 //
+// ``ranking-badge`` is a nested palette (bg / text) that keeps the
+// amber-on-amber treatment of the ranking numerics while still
+// following the theme switch — its two halves swap roles in dark mode.
+//
+// Each color is mapped to ``rgb(var(--color-X) / <alpha-value>)`` so
+// the token values defined in ``static/src/input.css`` resolve at
+// runtime. The ``<alpha-value>`` placeholder lets Tailwind's opacity
+// modifiers (``bg-sello/20``, ``text-ink/80``) work unchanged.
+// ``darkMode: 'class'`` enables the ``.dark`` selector — toggled from
+// the header button in ``base.html``.
+//
 // Fonts are loaded from Google Fonts in ``base.html`` and bound here so
 // utilities like ``font-plex-sans`` resolve to the right family stack.
 module.exports = {
+  darkMode: 'class',
   content: ["./app/templates/**/*.html"],
   theme: {
     extend: {
       colors: {
-        ink: "#1B2A4A",
-        paper: "#F1F2EC",
-        folio: "#FFFFFF",
-        sello: "#B23B2E",
-        registro: "#2F6F62",
-        linea: "#D7D2C2",
-        "texto-sec": "#5B6478",
+        ink: "rgb(var(--color-ink) / <alpha-value>)",
+        paper: "rgb(var(--color-paper) / <alpha-value>)",
+        folio: "rgb(var(--color-folio) / <alpha-value>)",
+        sello: "rgb(var(--color-sello) / <alpha-value>)",
+        registro: "rgb(var(--color-registro) / <alpha-value>)",
+        linea: "rgb(var(--color-linea) / <alpha-value>)",
+        "texto-sec": "rgb(var(--color-texto-sec) / <alpha-value>)",
+        "ranking-badge": {
+          bg: "rgb(var(--color-ranking-badge-bg) / <alpha-value>)",
+          text: "rgb(var(--color-ranking-badge-text) / <alpha-value>)",
+        },
       },
       fontFamily: {
         "big-shoulders": ['"Big Shoulders Display"', "serif"],

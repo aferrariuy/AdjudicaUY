@@ -15,12 +15,12 @@
     <ol class="divide-y divide-linea">
       {% for entry in organism_rows %}
         <li class="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
-          <span class="flex-shrink-0 w-8 h-8 rounded-full bg-amber-100 text-amber-800 font-bold text-sm flex items-center justify-center" aria-hidden="true">
+          <span class="flex-shrink-0 w-8 h-8 rounded-full bg-ranking-badge-bg text-ranking-badge-text font-bold text-sm flex items-center justify-center" aria-hidden="true">
             {{ "%02d" | format(loop.index) }}
           </span>
           <div class="flex-1 min-w-0">
             <a href="/organism/{{ entry.name | urlencode }}"
-               class="text-ink font-medium truncate hover:text-amber-700 transition-colors block">
+               class="text-ink font-medium truncate hover:text-sello transition-colors block">
               {{ entry.name }}
             </a>
             <p class="text-texto-sec text-xs">{{ entry.adjudication_count }} adjudicaciones</p>
