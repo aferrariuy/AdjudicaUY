@@ -106,10 +106,31 @@
         '#D4D8E1', '#CC5546', '#58A696', '#E8B84B', '#7C93EE',
         '#4DB8C8', '#D45D7A', '#7FA858', '#A973E8', '#4FABA6',
       ];
+      // Per-chart-type dark overrides. Light mode keeps server-provided
+      // colors verbatim; dark mode forces a lighter blue on line charts
+      // and a 2-segment sello/bright-blue split on doughnuts. The
+      // bright blue (#5B8DEF) is tuned for contrast against the dark
+      // folio (#131820) — the dark palette's #D4D8E1 reads as a faded
+      // gray and disappears against the gridlines.
+      var DARK_LINE_BORDER = '#5B8DEF';
+      var DARK_LINE_FILL = 'rgba(91, 141, 239, 0.15)';
+      var DARK_DOUGHNUT = ['#CC5546', '#5B8DEF'];
       function getPalette() {
         return document.documentElement.classList.contains('dark')
           ? DARK_PALETTE
           : LIGHT_PALETTE;
+      }
+
+      // Convert a 6-digit hex color (``#D4D8E1``) to an ``rgba()`` string
+      // with the given alpha. Used for line-chart fills, which need a
+      // semi-transparent version of the line color so the area under the
+      // line doesn't visually compete with the line itself.
+      function hexToRgba(hex, alpha) {
+        hex = hex.replace('#', '');
+        var r = parseInt(hex.substring(0, 2), 16);
+        var g = parseInt(hex.substring(2, 4), 16);
+        var b = parseInt(hex.substring(4, 6), 16);
+        return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
       }
 
       var FMT_CACHE = { currency: 'UYU', locale: 'es-UY' };
@@ -133,14 +154,55 @@
         try { spec = JSON.parse(canvas.dataset.chart); }
         catch (e) { console.error('Invalid data-chart payload', e, canvas); return null; }
 
+        // Dark-mode-aware chart text colors. Hoisted here so the same
+        // ``isDark`` flag drives both the dataset palette and the
+        // options block below. Undefined values fall through to
+        // Chart.js defaults in light mode — those defaults are tuned
+        // for a light surface and look correct there, so we only
+        // override when the user is on the dark folio (#131820).
+        var isDark = document.documentElement.classList.contains('dark');
+        var tickColor = isDark ? '#8E98AB' : undefined;                // texto-sec on dark
+        var gridColor = isDark ? 'rgba(61, 69, 85, 0.4)' : undefined;  // linea, 40% alpha
+        var legendColor = isDark ? '#D4D8E1' : undefined;              // ink on dark
+
         var chart = new Chart(canvas, {
           type: spec.type || 'bar',
           data: {
             labels: spec.labels || [],
             datasets: (spec.datasets || []).map(function (ds, i) {
               var palette = getPalette();
-              if (!ds.backgroundColor) ds.backgroundColor = palette[i % palette.length];
-              if (!ds.borderColor) ds.borderColor = ds.backgroundColor;
+              // Datasets in mixed charts may carry their own type; fall
+              // back to the chart-level type otherwise.
+              var datasetType = ds.type || spec.type;
+
+              if (isDark) {
+                // Force dark-mode colors per chart type. Server-provided
+                // colors are tuned for the light folio and disappear on
+                // the dark surface (#131820), so we override them
+                // entirely instead of falling back to a "missing color"
+                // placeholder.
+                if (datasetType === 'line') {
+                  // Bright blue line + semi-transparent fill underneath.
+                  ds.borderColor = DARK_LINE_BORDER;
+                  ds.backgroundColor = DARK_LINE_FILL;
+                } else if (datasetType === 'doughnut' || datasetType === 'pie') {
+                  // Sello red (1) + bright blue (2). The dark palette's
+                  // #D4D8E1 segment reads as gray on the dark folio and
+                  // loses the "sello vs ink" semantic the light chart
+                  // carries, so we hardcode the 2-segment split.
+                  ds.backgroundColor = DARK_DOUGHNUT;
+                  ds.borderColor = DARK_DOUGHNUT;
+                } else {
+                  var color = palette[i % palette.length];
+                  ds.backgroundColor = color;
+                  ds.borderColor = color;
+                }
+              } else {
+                // Light mode: keep server colors when present, else
+                // fall back to the light palette. Unchanged behavior.
+                if (!ds.backgroundColor) ds.backgroundColor = palette[i % palette.length];
+                if (!ds.borderColor) ds.borderColor = ds.backgroundColor;
+              }
               return ds;
             }),
           },
@@ -149,8 +211,13 @@
             maintainAspectRatio: false,
             animation: false,
             plugins: {
-              legend: { position: 'bottom' },
+              legend: {
+                position: 'bottom',
+                labels: { color: legendColor },
+              },
               tooltip: {
+                titleColor: legendColor,
+                bodyColor: legendColor,
                 callbacks: {
                   label: function (ctx) {
                     var label = ctx.label || ctx.dataset.label || '';
@@ -166,13 +233,20 @@
             },
             // Scales only apply to axis-based charts (bar, line).
             // Doughnut/pie charts have no axes — omit scales entirely
-            // to prevent Y-axis ticks from rendering.
+            // to prevent Y-axis ticks from rendering. Tick and grid
+            // colors come from the dark-mode palette hoisted above.
             scales: (spec.type === 'doughnut' || spec.type === 'pie') ? {} : {
+              x: {
+                ticks: { color: tickColor },
+                grid: { color: gridColor },
+              },
               y: {
                 beginAtZero: true,
                 ticks: {
+                  color: tickColor,
                   callback: function (value) { return formatUYU(value); },
                 },
+                grid: { color: gridColor },
               },
             },
           },
@@ -279,10 +353,25 @@
           icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="' + (dark ? MOON_PATH : SUN_PATH) + '"/>';
         }
 
+        // Re-mount every Chart.js instance against the new theme. The
+        // makeChart() factory reads ``getPalette()`` and the ``isDark``
+        // branch on every invocation, so a destroy + recreate cycle
+        // swaps the dataset colors without a page refresh. Must run
+        // AFTER the ``.dark`` class is toggled above so the new
+        // palette is what getPalette() returns.
+        function recreateCharts() {
+          document.querySelectorAll('canvas[data-chart]').forEach(function (c) {
+            var inst = Chart.getChart(c);
+            if (inst) inst.destroy();
+            makeChart(c);
+          });
+        }
+
         function toggle() {
           var dark = document.documentElement.classList.toggle('dark');
           try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) {}
           setLabel(dark);
+          recreateCharts();
         }
 
         // Set initial icon state from whatever the anti-FOUC script
