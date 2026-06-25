@@ -71,9 +71,7 @@ def upgrade() -> None:
         ),
         sa.UniqueConstraint("id_compra", name="uq_compra_id_compra"),
     )
-    op.create_index(
-        "ix_compra_id_compra", "compra", ["id_compra"], unique=True
-    )
+    op.create_index("ix_compra_id_compra", "compra", ["id_compra"], unique=True)
     op.create_index("ix_compra_fecha_pub_adj", "compra", ["fecha_pub_adj"])
     op.create_index("ix_compra_id_inciso", "compra", ["id_inciso"])
     op.create_index("ix_compra_id_ue", "compra", ["id_ue"])
@@ -103,12 +101,8 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
     )
-    op.create_index(
-        "ix_adjudicacion_compra_id", "adjudicacion", ["compra_id"]
-    )
-    op.create_index(
-        "ix_adjudicacion_id_articulo", "adjudicacion", ["id_articulo"]
-    )
+    op.create_index("ix_adjudicacion_compra_id", "adjudicacion", ["compra_id"])
+    op.create_index("ix_adjudicacion_id_articulo", "adjudicacion", ["id_articulo"])
 
     # ------------------------------------------------------------------
     # 3. Create ``oferente`` — the bidder table.

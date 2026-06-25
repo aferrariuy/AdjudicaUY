@@ -320,9 +320,7 @@ def _attr(element: etree._Element, name: str) -> str | None:
     return stripped or None
 
 
-def _log_unknown_attrs(
-    element: etree._Element, known: frozenset[str]
-) -> None:
+def _log_unknown_attrs(element: etree._Element, known: frozenset[str]) -> None:
     """Log at DEBUG level each attribute on ``element`` outside ``known``.
 
     The schema is forward-compatible: when the upstream XML adds a
@@ -478,9 +476,7 @@ def _extract_adjudicacion(
     )
 
 
-def _extract_oferente(
-    id_compra: str, of_el: etree._Element
-) -> XmlOferente | None:
+def _extract_oferente(id_compra: str, of_el: etree._Element) -> XmlOferente | None:
     """Extract one :class:`XmlOferente` from a ``<oferente>`` child.
 
     Oferente rows are intentionally permissive: an empty element

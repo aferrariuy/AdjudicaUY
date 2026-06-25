@@ -100,11 +100,15 @@ def main() -> None:
             logger.info("  Parsed %d records from XML", len(lookup))
 
             # 4. Get all compra rows for this date that need updating.
-            rows = session.execute(
-                select(Compra)
-                .where(Compra.fecha_pub_adj == d)
-                .where(Compra.id_inciso.is_(None))
-            ).scalars().all()
+            rows = (
+                session.execute(
+                    select(Compra)
+                    .where(Compra.fecha_pub_adj == d)
+                    .where(Compra.id_inciso.is_(None))
+                )
+                .scalars()
+                .all()
+            )
 
             updated = 0
             skipped = 0

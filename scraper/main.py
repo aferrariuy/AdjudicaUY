@@ -247,8 +247,7 @@ def _run_scrape_for_day(
     # 3. Enrich — resolve organism + build license_link per compra
     # ------------------------------------------------------------------
     enriched: list[tuple[XmlCompra, CompraEnrichment]] = [
-        (compra, enrich_xml_compra(compra, source_url=url_a))
-        for compra in xml_compras
+        (compra, enrich_xml_compra(compra, source_url=url_a)) for compra in xml_compras
     ]
 
     # ------------------------------------------------------------------

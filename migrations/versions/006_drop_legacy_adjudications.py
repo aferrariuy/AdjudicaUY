@@ -68,9 +68,6 @@ def downgrade() -> None:
     )
     op.create_index("ix_adjudications_date", "adjudications", ["date"])
     op.create_index("ix_adjudications_article", "adjudications", ["article"])
-    op.create_index(
-        "ix_adjudications_article_id", "adjudications", ["article_id"]
-    )
+    op.create_index("ix_adjudications_article_id", "adjudications", ["article_id"])
     op.create_index("ix_company", "adjudications", ["winning_company"])
     op.create_index("ix_organism", "adjudications", ["organism"])
-

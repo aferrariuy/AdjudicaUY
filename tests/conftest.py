@@ -176,19 +176,19 @@ def client(db_session: Session) -> Generator[TestClient]:
 # field names without an indirection.
 _LEGACY_FIELD_ALIASES: dict[str, tuple[str, str]] = {
     # legacy key          -> (target model, target column)
-    "winning_company":    ("adjudicacion", "nombre_comercial"),
-    "company_document":   ("adjudicacion", "nro_doc_prov"),
+    "winning_company": ("adjudicacion", "nombre_comercial"),
+    "company_document": ("adjudicacion", "nro_doc_prov"),
     "company_document_type": ("adjudicacion", "tipo_doc_prov"),
-    "article":            ("adjudicacion", "desc_articulo"),
-    "article_id":         ("adjudicacion", "id_articulo"),
-    "article_quantity":   ("adjudicacion", "cant_adj"),
-    "amount":             ("adjudicacion", "precio_tot_imp"),
-    "currency":           ("adjudicacion", "__skip_currency__"),
-    "date":               ("compra", "fecha_pub_adj"),
-    "organism":           ("compra", "organismo"),
-    "license_type":       ("compra", "id_tipocompra"),
-    "license_link":       ("compra", "__skip_license_link__"),
-    "source_url":         ("compra", "source_url"),
+    "article": ("adjudicacion", "desc_articulo"),
+    "article_id": ("adjudicacion", "id_articulo"),
+    "article_quantity": ("adjudicacion", "cant_adj"),
+    "amount": ("adjudicacion", "precio_tot_imp"),
+    "currency": ("adjudicacion", "__skip_currency__"),
+    "date": ("compra", "fecha_pub_adj"),
+    "organism": ("compra", "organismo"),
+    "license_type": ("compra", "id_tipocompra"),
+    "license_link": ("compra", "__skip_license_link__"),
+    "source_url": ("compra", "source_url"),
 }
 
 

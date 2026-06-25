@@ -60,9 +60,7 @@ class Compra(Base):
 
     # Provenance
     source_url = Column(String(512), nullable=True)
-    ingested_at = Column(
-        DateTime, nullable=False, server_default=func.now()
-    )
+    ingested_at = Column(DateTime, nullable=False, server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint("id_compra", name="uq_compra_id_compra"),

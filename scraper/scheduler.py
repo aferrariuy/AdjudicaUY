@@ -69,8 +69,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, _handle_signal)
 
     logger.info(
-        "Scraper scheduler started — scrape scheduled daily at %s UTC. "
-        "PID=%d",
+        "Scraper scheduler started — scrape scheduled daily at %s UTC. PID=%d",
         run_time,
         os.getpid(),
     )

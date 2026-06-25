@@ -310,9 +310,7 @@ def _convert_amount(
         return currency, None
 
     bcu_code, _ = CONVERSION_TABLE[id_moneda]
-    rate = bcu_client.get_tcc(
-        bcu_code, on_date, max_lookback_days=max_lookback_days
-    )
+    rate = bcu_client.get_tcc(bcu_code, on_date, max_lookback_days=max_lookback_days)
     return currency, None if rate is None else _quantize_uyu(amount * rate)
 
 

@@ -292,9 +292,7 @@ def test_adjudicacion_cascade_delete_with_parent(db_session) -> None:
     db_session.commit()
 
     remaining = (
-        db_session.query(Adjudicacion)
-        .filter(Adjudicacion.compra_id == compra.id)
-        .all()
+        db_session.query(Adjudicacion).filter(Adjudicacion.compra_id == compra.id).all()
     )
     assert remaining == []
 
@@ -345,9 +343,7 @@ def test_multiple_oferentes_per_compra(db_session) -> None:
         db_session.add(of)
     db_session.commit()
 
-    oferentes = (
-        db_session.query(Oferente).filter(Oferente.compra_id == compra.id).all()
-    )
+    oferentes = db_session.query(Oferente).filter(Oferente.compra_id == compra.id).all()
     assert len(oferentes) == 3
     assert {o.nombre_comercial for o in oferentes} == {
         "Bidder 0",
@@ -364,9 +360,7 @@ def test_compra_with_no_oferentes_ok(db_session) -> None:
     db_session.add(compra)
     db_session.commit()
 
-    oferentes = (
-        db_session.query(Oferente).filter(Oferente.compra_id == compra.id).all()
-    )
+    oferentes = db_session.query(Oferente).filter(Oferente.compra_id == compra.id).all()
     assert oferentes == []
 
 
@@ -384,9 +378,7 @@ def test_oferente_cascade_delete_with_parent(db_session) -> None:
     db_session.delete(compra)
     db_session.commit()
 
-    remaining = (
-        db_session.query(Oferente).filter(Oferente.compra_id == compra.id).all()
-    )
+    remaining = db_session.query(Oferente).filter(Oferente.compra_id == compra.id).all()
     assert remaining == []
 
 
@@ -446,8 +438,6 @@ def test_filter_by_article_id_ignores_empty_entries(
     make_adjudication(id_articulo="42851")
     make_adjudication(id_articulo="42852")
 
-    rows = list_adjudications(
-        db_session, AdjudicationFilters(article_id=" 42851 , , ")
-    )
+    rows = list_adjudications(db_session, AdjudicationFilters(article_id=" 42851 , , "))
     assert len(rows) == 1
     assert rows[0].article_id == "42851"
