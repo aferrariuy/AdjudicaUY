@@ -143,7 +143,7 @@
             hx-get="/adjudications?page={{ page - 1 }}&partial=table"
             hx-target="#table-container"
             hx-include="#filter-form input"
-            class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper"
+            class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper cursor-pointer"
           >Anterior</a>
         {% else %}
           <span
@@ -165,7 +165,7 @@
               hx-get="/adjudications?page={{ n }}&partial=table"
               hx-target="#table-container"
               hx-include="#filter-form input"
-              class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper"
+              class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper cursor-pointer"
             >{{ n }}</a>
           {% endif %}
         {% endfor %}
@@ -175,7 +175,7 @@
             hx-get="/adjudications?page={{ page + 1 }}&partial=table"
             hx-target="#table-container"
             hx-include="#filter-form input"
-            class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper"
+            class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper cursor-pointer"
           >Siguiente</a>
         {% else %}
           <span
