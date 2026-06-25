@@ -188,7 +188,7 @@ def _build_concentration_chart_payload(
 
     return {
         "type": "doughnut",
-        "labels": ["1 oferente", ">1 oferentes"],
+        "labels": ["1 oferente", "más de 1 oferente"],
         "datasets": [
             {
                 "label": "Compras por oferentes",
