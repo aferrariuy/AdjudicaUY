@@ -111,6 +111,12 @@ def create_app() -> FastAPI:
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+    @app.get("/healthz", include_in_schema=False)
+    async def healthz() -> dict[str, str]:
+        """Lightweight liveness probe for container orchestrators."""
+
+        return {"status": "ok"}
+
     app.include_router(adjudications_router)
 
     return app

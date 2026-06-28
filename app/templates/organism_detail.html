@@ -116,7 +116,7 @@
     // current calendar year).
     window.limpiarFiltrosOrganismo = function () {
       var form = document.querySelector(
-        'form[hx-get="/organism/{{ organism_name | urlencode }}/partial"]'
+        'form[hx-get="/organism/' + {{ organism_name | tojson }} + '/partial"]'
       );
       if (!form) return;
       var from = form.querySelector('input[name="date_from"]');

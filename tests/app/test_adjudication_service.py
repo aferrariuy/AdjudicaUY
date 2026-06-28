@@ -29,8 +29,10 @@ from app.services.adjudication_service import (
     AdjudicationFilters,
     ConcentrationResult,
     KpiSummary,
+    ValidationError,
     concentration_ratio,
     kpi_summary,
+    list_adjudications,
     monthly_trend,
 )
 
@@ -91,6 +93,8 @@ def add_adj(db_session: Session):
         compra: Compra,
         *,
         nombre_comercial: str | None = None,
+        desc_articulo: str = "Laptop",
+        id_articulo: str | None = None,
         amount_uyu: Decimal | None = Decimal("1000.00"),
         precio_tot_imp: Decimal = Decimal("1000.00"),
     ) -> Adjudicacion:
@@ -98,7 +102,8 @@ def add_adj(db_session: Session):
         adj = Adjudicacion(
             compra_id=compra.id,
             nombre_comercial=nombre_comercial or f"Empresa {counter['n']}",
-            desc_articulo="Laptop",
+            desc_articulo=desc_articulo,
+            id_articulo=id_articulo,
             id_moneda=0,
             precio_tot_imp=precio_tot_imp,
             amount_uyu=amount_uyu,
@@ -497,3 +502,49 @@ class TestConcentrationRatio:
         assert result.single_bidder_count == 1
         assert result.multi_bidder_count == 0
         assert result.ratio == Decimal("1")
+
+
+# ---------------------------------------------------------------------------
+# Filter hardening
+# ---------------------------------------------------------------------------
+
+
+def test_article_id_filter_capped_at_max_values(
+    db_session, make_compra, add_adj
+) -> None:
+    """An ``article_id`` list above the cap is rejected instead of building a
+    huge SQL ``IN`` clause."""
+
+    c = make_compra()
+    add_adj(c, id_articulo="1")
+    ids = ",".join(str(i) for i in range(250))
+    with pytest.raises(ValidationError, match="más de"):
+        list_adjudications(
+            db_session,
+            AdjudicationFilters(article_id=ids),
+        )
+
+
+def test_like_wildcards_are_escaped_in_text_filters(
+    db_session, make_compra, add_adj
+) -> None:
+    """``%`` and ``_`` in user input are treated as literal characters, not
+    SQL wildcards."""
+
+    c = make_compra()
+    add_adj(c, nombre_comercial="Empresa_SA", desc_articulo="Laptop%20")
+
+    # Underscore should not match any single character.
+    rows = list_adjudications(
+        db_session,
+        AdjudicationFilters(company="Empresa_SA"),
+    )
+    assert len(rows) == 1
+
+    # Percent should not match everything.
+    rows = list_adjudications(
+        db_session,
+        AdjudicationFilters(article="Laptop%20"),
+    )
+    assert len(rows) == 1
+

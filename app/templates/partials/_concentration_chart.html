@@ -3,8 +3,9 @@
    The route injects:
    * ``concentration`` — a ``ConcentrationResult`` dataclass with
      ``ratio``, ``single_bidder_count`` and ``multi_bidder_count``.
-   * ``concentration_json`` — the JSON-encoded ``data-chart`` payload
-     (only built when the ratio is not None).
+   * ``concentration_payload`` — the chart spec dict, serialized by
+     Jinja's ``|tojson`` filter for safe use inside the ``data-chart``
+     attribute (only built when the ratio is not None).
    * ``has_concentration_data`` — boolean flag the partial uses to
      swap in the empty-state message.
 
@@ -23,7 +24,7 @@
       <canvas
         class="block w-full"
         id="chart-concentration"
-        data-chart='{{ concentration_json | safe }}'
+        data-chart='{{ concentration_payload | tojson }}'
         aria-label="Porcentaje de compras con un solo oferente"
         role="img"
       ></canvas>

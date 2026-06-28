@@ -33,6 +33,7 @@ import logging
 import sys
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, cast
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -118,10 +119,11 @@ def build_license_link(id_compra: str) -> str:
 
     Deterministic — no HTTP request — so the same ``id_compra`` always
     produces the same ``license_link`` (see ``organism-lookup`` spec,
-    "License Link Construction" scenario).
+    "License Link Construction" scenario). The identifier is URL-encoded
+    so a scraped value cannot break the resulting URL path.
     """
 
-    return _LICENSE_LINK_TEMPLATE.format(id_compra=id_compra)
+    return _LICENSE_LINK_TEMPLATE.format(id_compra=quote(id_compra, safe=""))
 
 
 def enrich_xml_compra(
