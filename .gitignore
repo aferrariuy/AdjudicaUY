@@ -38,3 +38,6 @@ app/static/css/style.css
 # Local Node.js artifacts (the ``package-lock.json`` IS committed so
 # the Docker build is reproducible).
 node_modules/
+
+# OpenCode agent metadata
+.opencode/
