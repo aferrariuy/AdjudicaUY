@@ -522,23 +522,21 @@ def test_parse_xml_supports_alternative_date_formats() -> None:
 def test_fetch_xml_report_propagates_http_errors() -> None:
     """HTTP errors are NOT swallowed by the parser; the orchestrator handles them."""
 
-    class _BoomClient:
-        def get(self, url: str, **kwargs):  # noqa: ARG002
-            request = httpx.Request("GET", url)
-            response = httpx.Response(503, request=request)
-            raise httpx.HTTPStatusError("boom", request=request, response=response)
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        return httpx.Response(503, text="boom")
 
-    with pytest.raises(httpx.HTTPStatusError):
-        fetch_xml_report("https://example.test/xml", client=_BoomClient())
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as client, pytest.raises(httpx.HTTPStatusError):
+        fetch_xml_report("https://example.test/xml", client=client)
 
 
 def test_fetch_xml_report_returns_body_on_success() -> None:
-    class _OkClient:
-        def get(self, url: str, **kwargs):  # noqa: ARG002
-            request = httpx.Request("GET", url)
-            return httpx.Response(200, request=request, text=VALID_XML)
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        return httpx.Response(200, text=VALID_XML)
 
-    body = fetch_xml_report("https://example.test/xml", client=_OkClient())
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as client:
+        body = fetch_xml_report("https://example.test/xml", client=client)
     assert body == VALID_XML.encode("utf-8")
 
 
@@ -626,3 +624,90 @@ def test_all_three_dataclasses_are_importable() -> None:
 
     assert XmlAdjudicacion is not None
     assert XmlOferente is not None
+
+
+# ---------------------------------------------------------------------------
+# Security hardening
+# ---------------------------------------------------------------------------
+
+
+XXE_PAYLOAD = '''<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE reporte [
+  <!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<reporte>
+  <compra id_compra="xxe-test"
+          fecha_pub_adj="2024-01-15"
+          id_moneda_monto_adj="0"
+          id_tipocompra="CD">
+    <adjudicaciones>
+      <adjudicacion nombre_comercial="XXE"
+                    precio_tot_imp="1.00"
+                    desc_articulo="&xxe;"
+                    id_moneda="0" />
+    </adjudicaciones>
+  </compra>
+</reporte>
+'''
+
+
+def test_parse_xml_report_hardens_against_xxe() -> None:
+    """External entities must not be expanded during parsing."""
+
+    compras = list(parse_xml_report(XXE_PAYLOAD))
+    # The hardened parser either drops the external reference or rejects the
+    # whole document. The important invariant is that no file contents leak
+    # into any parsed field.
+    for compra in compras:
+        for adj in compra.adjudicaciones:
+            assert "/bin/bash" not in adj.desc_articulo
+            assert "root:" not in adj.desc_articulo
+
+
+def test_parse_xml_report_skips_malformed_id_compra() -> None:
+    """Values that do not match the expected id_compra pattern are skipped."""
+
+    payload = '''<?xml version="1.0" encoding="UTF-8"?>
+<reporte>
+  <compra id_compra="../../etc/passwd"
+          fecha_pub_adj="2024-01-15"
+          id_moneda_monto_adj="0"
+          id_tipocompra="CD">
+    <adjudicaciones>
+      <adjudicacion nombre_comercial="A"
+                    precio_tot_imp="1.00"
+                    desc_articulo="x"
+                    id_moneda="0" />
+    </adjudicaciones>
+  </compra>
+  <compra id_compra="valid-id-123"
+          fecha_pub_adj="2024-01-16"
+          id_moneda_monto_adj="0"
+          id_tipocompra="CD">
+    <adjudicaciones>
+      <adjudicacion nombre_comercial="B"
+                    precio_tot_imp="2.00"
+                    desc_articulo="y"
+                    id_moneda="0" />
+    </adjudicaciones>
+  </compra>
+</reporte>
+'''
+    compras = list(parse_xml_report(payload))
+    assert len(compras) == 1
+    assert compras[0].id_compra == "valid-id-123"
+
+
+def test_fetch_xml_report_rejects_oversized_response() -> None:
+    """A response larger than ``max_bytes`` must raise an HTTPError."""
+
+    huge_body = b"x" * 1024
+
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        return httpx.Response(200, content=huge_body)
+
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as client, pytest.raises(
+        httpx.HTTPError, match="exceeds maximum"
+    ):
+        fetch_xml_report("https://example.test/xml", client=client, max_bytes=512)
