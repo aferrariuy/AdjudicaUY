@@ -350,7 +350,7 @@
 
         function setLabel(dark) {
           btn.setAttribute('aria-label', dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
-          icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="' + (dark ? MOON_PATH : SUN_PATH) + '"/>';
+          icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="' + (dark ? SUN_PATH : MOON_PATH) + '"/>';
         }
 
         // Re-mount every Chart.js instance against the new theme. The
