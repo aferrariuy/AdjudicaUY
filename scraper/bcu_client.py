@@ -27,7 +27,13 @@ from decimal import Decimal, InvalidOperation
 import httpx
 from lxml import etree
 
+from scraper.xml_report import _SAFE_PARSER, _read_with_limit
+
 logger = logging.getLogger(__name__)
+
+# BCU SOAP responses are tiny (a few KB). Anything dramatically larger is
+# suspicious and is rejected to protect the worker from memory exhaustion.
+_MAX_SOAP_SIZE_BYTES = 16 * 1024 * 1024  # 16 MiB
 
 
 class BcuError(Exception):
@@ -108,7 +114,7 @@ def _parse_tcc(response_xml: bytes) -> Decimal | None:
     """
 
     try:
-        root = etree.fromstring(response_xml)
+        root = etree.fromstring(response_xml, parser=_SAFE_PARSER)
     except etree.XMLSyntaxError as exc:
         raise BcuError(f"Malformed BCU response: {exc}") from exc
 
@@ -125,7 +131,7 @@ def _parse_monedas_response(response_xml: bytes) -> list[BcuCurrency]:
     """Extract the currency catalogue from a ``awsbcumonedas`` response."""
 
     try:
-        root = etree.fromstring(response_xml)
+        root = etree.fromstring(response_xml, parser=_SAFE_PARSER)
     except etree.XMLSyntaxError as exc:
         raise BcuError(f"Malformed BCU monedas response: {exc}") from exc
 
@@ -269,9 +275,12 @@ class BcuClient:
                 logger.info("BCU monedas retry %d after %ds backoff", attempt, delay)
                 time.sleep(delay)
             try:
-                response = self.client.get(monedas_url, timeout=self._timeout)
-                response.raise_for_status()
-                return _parse_monedas_response(response.content)
+                with self.client.stream(
+                    "GET", monedas_url, timeout=self._timeout
+                ) as response:
+                    response.raise_for_status()
+                    body = _read_with_limit(response, _MAX_SOAP_SIZE_BYTES)
+                return _parse_monedas_response(body)
             except (httpx.HTTPError, BcuError) as exc:
                 logger.warning("BCU monedas attempt %d failed: %s", attempt + 1, exc)
                 if attempt == len(_BACKOFF_SCHEDULE):
@@ -316,16 +325,18 @@ class BcuClient:
                 )
                 time.sleep(delay)
             try:
-                response = self.client.post(
+                with self.client.stream(
+                    "POST",
                     self._base_url,
                     content=envelope,
                     headers={
                         "Content-Type": "text/xml; charset=utf-8",
                         "SOAPAction": _SOAP_ACTION,
                     },
-                )
-                response.raise_for_status()
-                return _parse_tcc(response.content)
+                ) as response:
+                    response.raise_for_status()
+                    body = _read_with_limit(response, _MAX_SOAP_SIZE_BYTES)
+                return _parse_tcc(body)
             except (httpx.HTTPError, BcuError) as exc:
                 last_exc = exc
                 logger.warning(

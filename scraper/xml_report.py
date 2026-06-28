@@ -48,6 +48,7 @@ Attributes" requirement).
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
@@ -60,6 +61,22 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 logger = logging.getLogger(__name__)
+
+# Hardened XML parser used for all external XML ingestion. Explicitly
+# disables external entity expansion, network access for DTDs, and DTD
+# loading to mitigate XXE and entity-expansion DoS attacks.
+_SAFE_PARSER: etree.XMLParser = etree.XMLParser(
+    resolve_entities=False,
+    no_network=True,
+    load_dtd=False,
+    huge_tree=False,
+    recover=False,
+)
+
+# Natural key pattern used to sanity-check ``id_compra`` before the value
+# is interpolated into URLs or stored in the database. The government
+# system uses alphanumeric identifiers up to 50 characters.
+_ID_COMPRA_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,50}$")
 
 # Date formats we expect to see in ``fecha_pub_adj``. The first match wins.
 _DATE_FORMATS: tuple[str, ...] = (
@@ -203,6 +220,11 @@ class XmlCompra:
 # HTTP fetch
 # ---------------------------------------------------------------------------
 
+# Upper bound on the XML report body. The daily report is normally a few
+# megabytes; a response orders of magnitude larger indicates a misbehaving
+# or compromised upstream and is rejected before it can OOM the worker.
+_MAX_XML_SIZE_BYTES = 64 * 1024 * 1024  # 64 MiB
+
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -212,11 +234,31 @@ _HEADERS = {
 }
 
 
+def _read_with_limit(response: httpx.Response, max_bytes: int) -> bytes:
+    """Stream ``response`` into memory, aborting if ``max_bytes`` is exceeded.
+
+    This bounds the memory consumed by a single malicious or misbehaving
+    upstream response. The caller must already have called
+    ``response.raise_for_status()`` or be inside a ``client.stream(...)``
+    context manager.
+    """
+
+    body = b""
+    for chunk in response.iter_bytes():
+        body += chunk
+        if len(body) > max_bytes:
+            raise httpx.HTTPError(
+                f"Response body exceeds maximum allowed size of {max_bytes} bytes"
+            )
+    return body
+
+
 def fetch_xml_report(
     url: str,
     *,
     client: httpx.Client | None = None,
     timeout: float = 30.0,
+    max_bytes: int = _MAX_XML_SIZE_BYTES,
 ) -> bytes:
     """Fetch the raw XML payload from ``url``.
 
@@ -229,6 +271,10 @@ def fetch_xml_report(
         short-lived client is created for the call.
     timeout:
         Per-request timeout, in seconds.
+    max_bytes:
+        Maximum acceptable response size. The default (64 MiB) is far above
+        the expected daily report size and protects the worker from memory
+        exhaustion if the upstream returns an unexpectedly large payload.
 
     Returns
     -------
@@ -244,18 +290,21 @@ def fetch_xml_report(
     Raises
     ------
     httpx.HTTPError
-        Propagated from ``httpx`` on transport or HTTP-status failures.
+        Propagated from ``httpx`` on transport or HTTP-status failures, or
+        when the response body exceeds ``max_bytes``.
     """
 
     if client is None:
-        with httpx.Client(timeout=timeout, headers=_HEADERS) as owned:
-            response = owned.get(url)
+        with (
+            httpx.Client(timeout=timeout, headers=_HEADERS) as owned,
+            owned.stream("GET", url) as response,
+        ):
             response.raise_for_status()
-            return response.content
+            return _read_with_limit(response, max_bytes)
 
-    response = client.get(url, headers=_HEADERS)
-    response.raise_for_status()
-    return response.content
+    with client.stream("GET", url, headers=_HEADERS) as response:
+        response.raise_for_status()
+        return _read_with_limit(response, max_bytes)
 
 
 # ---------------------------------------------------------------------------
@@ -362,6 +411,11 @@ def _extract_compra(compra: etree._Element) -> XmlCompra | None:
     if not id_compra:
         logger.warning("Skipping <compra> without id_compra")
         return None
+    if not _ID_COMPRA_PATTERN.match(id_compra):
+        logger.warning(
+            "Skipping <compra> with malformed id_compra=%r", id_compra
+        )
+        return None
 
     fecha_raw = _attr(compra, "fecha_pub_adj")
     parsed_date = _parse_date(fecha_raw)
@@ -392,13 +446,13 @@ def _extract_compra(compra: etree._Element) -> XmlCompra | None:
     for child in compra.iter():
         local = child.tag.rsplit("}", 1)[-1]
         if local == "adjudicacion" and child is not compra:
-            record = _extract_adjudicacion(id_compra, child)
-            if record is not None:
-                adjudicaciones.append(record)
+            adj_record = _extract_adjudicacion(id_compra, child)
+            if adj_record is not None:
+                adjudicaciones.append(adj_record)
         elif local == "oferente" and child is not compra:
-            record = _extract_oferente(id_compra, child)
-            if record is not None:
-                oferentes.append(record)
+            of_record = _extract_oferente(id_compra, child)
+            if of_record is not None:
+                oferentes.append(of_record)
 
     return XmlCompra(
         id_compra=id_compra,
@@ -534,13 +588,10 @@ def parse_xml_report(xml_text: str | bytes) -> Iterator[XmlCompra]:
     # ``encoding`` attribute.  Always pass bytes so lxml can honour the
     # declared encoding (ISO-8859-1 from the government endpoint,
     # UTF-8 in test fixtures, etc.).
-    if isinstance(xml_text, str):
-        raw = xml_text.encode("utf-8")
-    else:
-        raw = xml_text
+    raw = xml_text.encode("utf-8") if isinstance(xml_text, str) else xml_text
 
     try:
-        root = etree.fromstring(raw)
+        root = etree.fromstring(raw, parser=_SAFE_PARSER)
     except etree.XMLSyntaxError as exc:
         logger.error("XML payload is malformed: %s", exc)
         return
@@ -559,6 +610,7 @@ __all__ = [
     "XmlAdjudicacion",
     "XmlCompra",
     "XmlOferente",
+    "_SAFE_PARSER",
     "fetch_xml_report",
     "parse_xml_report",
 ]
