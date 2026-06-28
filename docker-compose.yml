@@ -18,10 +18,10 @@ services:
     container_name: adjudicauy-db-v2
     restart: unless-stopped
     networks:
-      default:
-      dokploy-network:
-        aliases:
-          - adjudicauy-db
+      # The database lives only on the internal Compose network. It is
+      # NOT attached to the external Dokploy network; that prevents any
+      # other tenant container on the shared host from reaching Postgres.
+      - default
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -52,11 +52,17 @@ services:
       SOURCE_A_BASE_URL: ${SOURCE_A_BASE_URL}
       SOURCE_B_BASE_URL: ${SOURCE_B_BASE_URL}
       BCU_API_URL: ${BCU_API_URL}
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
     healthcheck:
-      # Hit the homepage to confirm uvicorn is up and Jinja2 templates load.
-      # ``urlopen`` raises on 4xx/5xx and on connection errors, which makes
-      # the healthcheck fail loudly when the service is broken.
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)"]
+      # Lightweight /healthz endpoint — avoids rendering templates and
+      # exposing the homepage to the shared Dokploy network.
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -82,6 +88,13 @@ services:
       BCU_API_URL: ${BCU_API_URL}
       SCRAPE_HOUR: ${SCRAPE_HOUR:-2}
       SCRAPE_MINUTE: ${SCRAPE_MINUTE:-0}
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev
     # Long-running scheduler — runs the scraper once daily at the
     # configured time. Dokploy needs a running container for its
     # Scheduled Jobs feature (docker exec).

@@ -41,17 +41,15 @@ RUN python -m venv /opt/venv \
 # Compiles the Tailwind source bundle into ``static/css/style.css`` which
 # the runtime stage copies into ``app/static/css/style.css``. We pin the
 # major Node version so the image is reproducible.
-FROM node:20-alpine AS tailwind
+FROM node:22-alpine AS tailwind
 
 WORKDIR /src
 
-# Install the Tailwind CLI matching the version pinned in ``package.json``.
-# ``package*.json`` covers both ``package.json`` and ``package-lock.json``
-# when the lockfile is committed; if absent the glob simply matches the
-# single file. Copying the manifest first keeps the ``npm install`` layer
-# cacheable across code changes.
-COPY package*.json ./
-RUN npm install --no-audit --no-fund
+# Install dependencies with pnpm using the committed lockfile. Corepack
+# ships the correct pnpm version for the project, and ``--frozen-lockfile``
+# guarantees a reproducible, audited dependency tree.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
 
 # Copy Tailwind source (config + CSS) and the templates so the content
 # scanner can find every utility class in use. Without the templates,
@@ -59,7 +57,7 @@ RUN npm install --no-audit --no-fund
 COPY tailwind.config.js ./
 COPY static/ ./static/
 COPY app/templates/ ./app/templates/
-RUN npx tailwindcss -i static/src/input.css -o app/static/css/style.css --minify
+RUN pnpm exec tailwindcss -i static/src/input.css -o app/static/css/style.css --minify
 
 
 # ---------------------------------------------------------------------------

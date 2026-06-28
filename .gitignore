@@ -15,8 +15,15 @@ __pycache__/
 .venv/
 venv/
 .env
+.env.*
+!.env.example
 .env.local
 docker-compose.override.yml
+*.pem
+*.key
+secrets/
+.npmrc
+.pypirc
 
 #SDD
 sdd/

@@ -1,42 +1,41 @@
-# Local virtualenv and cache
-.venv/
-venv/
+# Git metadata
+.git/
+.gitignore
+
+# Python caches / virtualenvs
 __pycache__/
 *.py[cod]
-*$py.class
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-*.egg-info/
+.venv/
+venv/
 
-# Local env
+# Secrets / local env
 .env
-.env.local
+.env.*
+!.env.example
 
-# IDE / editor
+# Local Node artifacts
+node_modules/
+
+# Compiled Tailwind output (rebuilt inside the image)
+app/static/css/style.css
+
+# Docker artifacts
+docker-compose*.yml
+Dockerfile*
+
+# IDE / editor files
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# Tests are not needed in the production image.
-tests/
-
-# SDD artifacts and tooling.
-openspec/
-.atl/
-
-# Git metadata.
-.git/
-.gitignore
-.gitattributes
-
-# Documentation at the repo root.
-README.md
-*.md
-!app/**/*.md
-!scraper/**/*.md
+*~
 
 # Misc
-Dockerfile.bak
-docker-compose.bak
+.atl/
+openspec/
+sdd/
+headroom_memory.db
