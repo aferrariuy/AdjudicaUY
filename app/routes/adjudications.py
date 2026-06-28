@@ -17,23 +17,22 @@ and renders Jinja2 templates. No SQLAlchemy, no business logic.
 
 from __future__ import annotations
 
-import json
 import logging
 import math
 from datetime import date
-from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from markupsafe import escape
 
 from app.database import get_db
 from app.services.adjudication_service import (
     AdjudicationFilters,
     ConcentrationResult,
-    DateValidationError,
+    ValidationError,
     concentration_ratio,
     count_adjudications,
     distinct_organisms,
@@ -47,6 +46,8 @@ from app.services.adjudication_service import (
 )
 
 if TYPE_CHECKING:
+    from decimal import Decimal
+
     from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -96,32 +97,17 @@ def _inject_default_year_params(params: dict[str, str | None]) -> None:
 
 
 def _validation_error_response(message: str) -> HTMLResponse:
-    """Build a 422 response with the inline error fragment."""
+    """Build a 422 response with the inline error fragment.
+
+    The message is escaped before interpolation so that any future code
+    path that passes user input here cannot inject HTML/JS into the
+    fragment.
+    """
 
     return HTMLResponse(
-        _ERROR_FRAGMENT_TEMPLATE.format(message=message),
+        _ERROR_FRAGMENT_TEMPLATE.format(message=escape(message)),
         status_code=422,
     )
-
-
-# JSON encoder for Decimal — Chart.js expects plain numbers, not
-# ``Decimal('1.250.000')`` strings.
-class _DecimalEncoder(json.JSONEncoder):
-    def default(self, obj: Any) -> Any:  # noqa: D401 - JSON encoder hook
-        if isinstance(obj, Decimal):
-            # ``float`` loses precision for values > 2^53 (~9 quadrillion
-            # UYU) — not a concern for the chart's axis, which already
-            # formats the number in the user's locale.
-            return float(obj)
-        if isinstance(obj, date):
-            return obj.isoformat()
-        return super().default(obj)
-
-
-def _json_dumps(value: Any) -> str:
-    """Serialize ``value`` for use as a ``data-*`` attribute payload."""
-
-    return json.dumps(value, cls=_DecimalEncoder, separators=(",", ":"))
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +287,7 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
     _inject_default_year_params(params)
     try:
         validate_date_params(params)
-    except DateValidationError as exc:
+    except ValidationError as exc:
         return _validation_error_response(exc.message)
     filters = filters_from_query_params(params)
 
@@ -362,19 +348,15 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
             "ranking_rows": ranking_rows,
             "organism_rows": organism_rows,
             "organisms": organisms,
-            # Citizen-dashboard payloads.
+            # Citizen-dashboard payloads. The dicts are serialized by
+            # Jinja's ``|tojson`` filter in the templates, which escapes
+            # for safe use inside HTML attributes.
             "kpi": kpi,
             "trend_rows": trend_rows,
             "trend_payload": _build_trend_chart_payload(trend_rows),
-            "trend_json": _json_dumps(_build_trend_chart_payload(trend_rows)),
             "has_trend_data": bool(trend_rows),
             "concentration": concentration,
             "concentration_payload": concentration_payload,
-            "concentration_json": (
-                _json_dumps(concentration_payload)
-                if concentration_payload is not None
-                else ""
-            ),
             "has_concentration_data": concentration.ratio is not None,
         },
     )
@@ -395,7 +377,7 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
     _inject_default_year_params(params)
     try:
         validate_date_params(params)
-    except DateValidationError as exc:
+    except ValidationError as exc:
         return _validation_error_response(exc.message)
     filters = filters_from_query_params(params)
 
@@ -481,19 +463,15 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
             "page_numbers": page_numbers,
             "ranking_rows": ranking_rows,
             "organism_rows": organism_rows,
-            # Citizen-dashboard payloads.
+            # Citizen-dashboard payloads. The dicts are serialized by
+            # Jinja's ``|tojson`` filter in the templates, which escapes
+            # for safe use inside HTML attributes.
             "kpi": kpi,
             "trend_rows": trend_rows,
             "trend_payload": _build_trend_chart_payload(trend_rows),
-            "trend_json": _json_dumps(_build_trend_chart_payload(trend_rows)),
             "has_trend_data": bool(trend_rows),
             "concentration": concentration,
             "concentration_payload": concentration_payload,
-            "concentration_json": (
-                _json_dumps(concentration_payload)
-                if concentration_payload is not None
-                else ""
-            ),
             "has_concentration_data": concentration.ratio is not None,
         },
     )
@@ -556,16 +534,11 @@ def _build_organism_context(
         "organism_name": decoded_name,
         "kpi": kpi,
         "trend_rows": trend_rows,
+        # The dicts are serialized by Jinja's ``|tojson`` filter.
         "trend_payload": _build_trend_chart_payload(trend_rows),
-        "trend_json": _json_dumps(_build_trend_chart_payload(trend_rows)),
         "has_trend_data": bool(trend_rows),
         "concentration": concentration,
         "concentration_payload": concentration_payload,
-        "concentration_json": (
-            _json_dumps(concentration_payload)
-            if concentration_payload is not None
-            else ""
-        ),
         "has_concentration_data": concentration.ratio is not None,
         # The company ranking on the organism page reuses the same
         # variable names as the index page's ``_ranking_list.html``
@@ -602,7 +575,7 @@ def organism_detail(
         context = _build_organism_context(
             db, decoded_name=decoded_name, raw_params=raw_params
         )
-    except DateValidationError as exc:
+    except ValidationError as exc:
         return _validation_error_response(exc.message)
 
     return _render("organism_detail.html", request, context)
@@ -635,7 +608,7 @@ def organism_detail_partial(
         context = _build_organism_context(
             db, decoded_name=decoded_name, raw_params=raw_params
         )
-    except DateValidationError as exc:
+    except ValidationError as exc:
         return _validation_error_response(exc.message)
 
     logger.info(

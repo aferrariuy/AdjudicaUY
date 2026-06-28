@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from sqlalchemy import Column, and_, case, func, select
 
@@ -225,7 +226,7 @@ _LICENSE_LINK_TEMPLATE = (
 
 
 def _build_license_link(id_compra: str) -> str:
-    return _LICENSE_LINK_TEMPLATE.format(id_compra=id_compra)
+    return _LICENSE_LINK_TEMPLATE.format(id_compra=quote(id_compra, safe=""))
 
 
 def _normalize(text: str | None) -> str | None:
@@ -237,8 +238,21 @@ def _normalize(text: str | None) -> str | None:
     return stripped or None
 
 
-class DateValidationError(ValueError):
-    """Raised when ``date_from`` or ``date_to`` are present but invalid.
+# Bound the ``article_id`` filter so a malicious or accidental huge list
+# cannot produce an oversized SQL ``IN`` clause.
+_MAX_ARTICLE_IDS = 200
+_MAX_ARTICLE_ID_RAW_LENGTH = 4096
+
+
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE wildcards so user input matches literally."""
+
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+
+class ValidationError(ValueError):
+    """Raised when a user-supplied filter value is invalid.
 
     The route layer catches this and returns HTTP 422 with an HTML
     fragment suitable for HTMX swap. We use ``ValueError`` as the base
@@ -248,6 +262,11 @@ class DateValidationError(ValueError):
     def __init__(self, message: str) -> None:
         self.message = message
         super().__init__(message)
+
+
+class DateValidationError(ValidationError):
+    """Raised when ``date_from`` or ``date_to`` are present but invalid."""
+
 
 
 def validate_date_params(params: dict[str, str | None]) -> None:
@@ -365,9 +384,17 @@ def _build_predicates(filters: AdjudicationFilters) -> list[Any]:
     predicates: list[Any] = []
 
     if filters.company:
-        predicates.append(Adjudicacion.nombre_comercial.ilike(f"%{filters.company}%"))
+        predicates.append(
+            Adjudicacion.nombre_comercial.ilike(
+                f"%{_escape_like(filters.company)}%", escape="\\"
+            )
+        )
     if filters.organism:
-        predicates.append(Compra.organismo.ilike(f"%{filters.organism}%"))
+        predicates.append(
+            Compra.organismo.ilike(
+                f"%{_escape_like(filters.organism)}%", escape="\\"
+            )
+        )
     if filters.organism_exact:
         # Exact-match predicate (organism profile). Equality on
         # ``organismo`` avoids the ambiguity of ILIKE partial match
@@ -376,14 +403,26 @@ def _build_predicates(filters: AdjudicationFilters) -> list[Any]:
         # widgets" requirement.
         predicates.append(Compra.organismo == filters.organism_exact)
     if filters.article:
-        predicates.append(Adjudicacion.desc_articulo.ilike(f"%{filters.article}%"))
+        predicates.append(
+            Adjudicacion.desc_articulo.ilike(
+                f"%{_escape_like(filters.article)}%", escape="\\"
+            )
+        )
     if filters.article_id:
         # Comma-separated list of exact IDs → IN set predicate. Whitespace
         # and empty entries are dropped so trailing commas ("1234, ") do
         # not pollute the lookup. NULLs are excluded from IN by SQL
         # semantics, matching the spec.
+        if len(filters.article_id) > _MAX_ARTICLE_ID_RAW_LENGTH:
+            raise ValidationError(
+                "El filtro de IDs de artículo es demasiado largo."
+            )
         ids = [piece.strip() for piece in filters.article_id.split(",")]
         ids = [piece for piece in ids if piece]
+        if len(ids) > _MAX_ARTICLE_IDS:
+            raise ValidationError(
+                f"El filtro de IDs no puede tener más de {_MAX_ARTICLE_IDS} valores."
+            )
         if ids:
             predicates.append(Adjudicacion.id_articulo.in_(ids))
     if filters.date_from is not None:
@@ -857,6 +896,7 @@ __all__ = [
     "DateValidationError",
     "KpiSummary",
     "RankingEntry",
+    "ValidationError",
     "concentration_ratio",
     "count_adjudications",
     "distinct_organisms",

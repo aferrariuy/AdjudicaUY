@@ -4,7 +4,8 @@
    * ``trend_rows``   — list of (YYYY-MM, total_uyu) pairs in
      chronological order, with sparse months zero-filled by the
      service.
-   * ``trend_json``   — the JSON-encoded ``data-chart`` payload.
+   * ``trend_payload`` — the chart spec dict, serialized by Jinja's
+     ``|tojson`` filter for safe use inside the ``data-chart`` attribute.
    * ``has_trend_data`` — boolean flag the partial uses to swap in
      the "Sin datos disponibles" empty state.
 
@@ -22,7 +23,7 @@
       <canvas
         class="block w-full"
         id="chart-trend"
-        data-chart='{{ trend_json | safe }}'
+        data-chart='{{ trend_payload | tojson }}'
         aria-label="Total adjudicado por mes en UYU"
         role="img"
       ></canvas>
