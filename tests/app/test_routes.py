@@ -750,8 +750,7 @@ def test_full_page_organism_renders_422_with_page_chrome_on_excessive_range(
     )
 
     response = client.get(
-        "/organism/Ministerio%20del%20Interior"
-        "?date_from=2010-01-01&date_to=2020-01-01"
+        "/organism/Ministerio%20del%20Interior?date_from=2010-01-01&date_to=2020-01-01"
     )
 
     assert response.status_code == 422
@@ -784,9 +783,7 @@ def test_full_page_organism_renders_422_with_page_chrome_on_invalid_format(
         date=date(CURRENT_YEAR, 3, 1),
     )
 
-    response = client.get(
-        "/organism/Ministerio%20del%20Interior?date_from=not-a-date"
-    )
+    response = client.get("/organism/Ministerio%20del%20Interior?date_from=not-a-date")
 
     assert response.status_code == 422
     body = response.text

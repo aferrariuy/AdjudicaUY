@@ -154,6 +154,38 @@ def _validation_error_context(
     return context
 
 
+def _full_page_validation_error(
+    template_name: str,
+    request: Request,
+    message: str,
+    *,
+    raw_params: dict[str, str | None] | None = None,
+    organism_name: str | None = None,
+) -> HTMLResponse:
+    """Build a full-page 422 response: render ``template_name`` with the error.
+
+    Full-page counterpart of :func:`_validation_error_response`. The
+    HTMX partials use that helper (the page chrome is already on screen
+    and HTMX swaps the fragment into ``#results`` / ``#organism-body``);
+    the full-page routes use this one so a direct navigation to
+    ``GET /`` or ``GET /organism/{name}`` renders the page layout
+    around the error.
+    """
+
+    return HTMLResponse(
+        _render_str(
+            template_name,
+            request,
+            _validation_error_context(
+                message,
+                raw_params=raw_params,
+                organism_name=organism_name,
+            ),
+        ),
+        status_code=422,
+    )
+
+
 # ---------------------------------------------------------------------------
 # View-model builders
 # ---------------------------------------------------------------------------
@@ -343,19 +375,8 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
     try:
         validate_date_params(params)
     except ValidationError as exc:
-        # Full-page 422: render the index page chrome with the error
-        # shown inside #results. The HTMX partials (adjudications /
-        # organism_detail_partial) keep returning the bare fragment
-        # because HTMX swaps it into the existing container — the
-        # page chrome is already on screen and would be wasted
-        # bandwidth to re-render.
-        return HTMLResponse(
-            _render_str(
-                "index.html",
-                request,
-                _validation_error_context(exc.message, raw_params=params),
-            ),
-            status_code=422,
+        return _full_page_validation_error(
+            "index.html", request, exc.message, raw_params=params
         )
     filters = filters_from_query_params(params)
 
@@ -644,21 +665,12 @@ def organism_detail(
             db, decoded_name=decoded_name, raw_params=raw_params
         )
     except ValidationError as exc:
-        # Full-page 422: render the organism profile page chrome with
-        # the error shown inside #organism-body. The HTMX partial
-        # (``GET /organism/{name}/partial``) keeps returning the bare
-        # fragment because HTMX swaps it into the existing container.
-        return HTMLResponse(
-            _render_str(
-                "organism_detail.html",
-                request,
-                _validation_error_context(
-                    exc.message,
-                    raw_params=raw_params,
-                    organism_name=decoded_name,
-                ),
-            ),
-            status_code=422,
+        return _full_page_validation_error(
+            "organism_detail.html",
+            request,
+            exc.message,
+            raw_params=raw_params,
+            organism_name=decoded_name,
         )
 
     return _render("organism_detail.html", request, context)
