@@ -505,6 +505,26 @@ def test_adjudication_filters_has_any_detects_active_filter() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_index_filter_submit_button_has_htmx_indicator(client: TestClient) -> None:
+    """The Aplicar button must declare itself as the HTMX indicator source.
+
+    The spinner is nested inside the submit button, but HTMX adds
+    ``.htmx-request`` to the request-triggering element (the form), not
+    the button.  Without ``hx-indicator="this"`` the button never gets
+    ``.htmx-request`` and the spinner stays hidden.
+    """
+
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+
+    # The spinner lives inside the Aplicar button.
+    assert '>Aplicar <span class="htmx-indicator spinner"></span></button>' in body
+    # HTMX must add .htmx-request to the button itself so the descendant
+    # .htmx-indicator becomes visible.
+    assert 'hx-indicator="this"' in body
+
+
 def test_index_is_htmx_compatible(client: TestClient) -> None:
     """The page must include the htmx script tag so swaps work in the browser."""
 
