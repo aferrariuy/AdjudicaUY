@@ -1,24 +1,34 @@
-{# Ranking de empresas — top-N list, replacing the old Chart.js bar chart.
+{# Reusable ranking list — top-N list, replacing the old Chart.js bar chart.
 
-   Consumes ``ranking_rows`` (a list of :class:`app.services.adjudication_service.RankingEntry`):
-   each entry has ``name``, ``total_amount_uyu`` and ``adjudication_count``.
+   Parameters:
+   * rows              — list of RankingEntry with name, total_amount_uyu, adjudication_count
+   * heading_id        — id for the section heading (accessibility)
+   * title             — heading text
+   * link_to_organism  — when true, the name is rendered as a link to /organism/{name}
 
    The empty branch shows the same "Sin datos disponibles" copy as the
    other dashboard widgets, so the section never renders an empty <ol>
    when the active filter set has no rows. #}
 
-<section aria-labelledby="ranking-heading" class="bg-folio border border-linea p-4 sm:p-6 rounded-lg">
-  <h2 id="ranking-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Ranking de empresas</h2>
+<section aria-labelledby="{{ heading_id }}" class="bg-folio border border-linea p-4 sm:p-6 rounded-lg">
+  <h2 id="{{ heading_id }}" class="font-big-shoulders text-xl font-bold mb-4 text-ink">{{ title }}</h2>
 
-  {% if ranking_rows %}
+  {% if rows %}
     <ol class="divide-y divide-linea">
-      {% for entry in ranking_rows %}
+      {% for entry in rows %}
         <li class="flex items-center gap-4 py-3 first:pt-0 last:pb-0">
           <span class="flex-shrink-0 w-8 h-8 rounded-full bg-ranking-badge-bg text-ranking-badge-text font-bold text-sm flex items-center justify-center" aria-hidden="true">
             {{ "%02d" | format(loop.index) }}
           </span>
           <div class="flex-1 min-w-0">
-            <p class="text-ink font-medium truncate">{{ entry.name }}</p>
+            {% if link_to_organism %}
+              <a href="/organism/{{ entry.name | urlencode }}"
+                 class="text-ink font-medium truncate hover:text-sello transition-colors block">
+                {{ entry.name }}
+              </a>
+            {% else %}
+              <p class="text-ink font-medium truncate">{{ entry.name }}</p>
+            {% endif %}
             <p class="text-texto-sec text-xs">{{ entry.adjudication_count }} adjudicaciones</p>
           </div>
           <span class="flex-shrink-0 text-ink font-bold tabular-nums text-sm">

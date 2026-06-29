@@ -41,13 +41,14 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.database import get_session_factory
-from scraper.bcu_client import BcuClient
+from scraper.bcu_client import BcuClient, BcuError
 from scraper.normalizer import (
     CompraEnrichment,
     CompraRow,
+    NormalizationError,
     normalize_compra,
 )
-from scraper.organism_lookup import resolve_organism
+from scraper.organism_lookup import UNKNOWN_ORGANISM_PREFIX, resolve_organism
 from scraper.persistence import _bulk_insert
 from scraper.ucc_lookup import resolve_ucc_organism
 from scraper.xml_report import (
@@ -148,7 +149,7 @@ def enrich_xml_compra(
     """
 
     organism = resolve_organism(xml_compra.id_inciso, xml_compra.id_ue)
-    if organism.startswith("Desconocido") and xml_compra.id_ucc is not None:
+    if organism.startswith(UNKNOWN_ORGANISM_PREFIX) and xml_compra.id_ucc is not None:
         organism = resolve_ucc_organism(xml_compra.id_ucc)
     return CompraEnrichment(
         organism=organism,
@@ -259,7 +260,7 @@ def _run_scrape_for_day(
     for compra, enrichment in enriched:
         try:
             normalized.append(normalize_compra(compra, enrichment, bcu_client))
-        except Exception as exc:  # BcuError, malformed data, etc.
+        except (BcuError, NormalizationError) as exc:
             log.warning(
                 "Normalization failed for id_compra=%s on %s: %s",
                 compra.id_compra,

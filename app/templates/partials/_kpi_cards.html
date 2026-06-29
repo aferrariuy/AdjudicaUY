@@ -4,7 +4,9 @@
    total_amount, average_amount, purchase_count, company_count.
 
    * Monetary values are formatted in es-UY with the UYU currency.
-   * Counts use the same locale for the thousands separator.
+     They come from the ``uyu`` Jinja filter in ``app/formatting.py``.
+   * Counts use the same locale for the thousands separator via the
+     ``count_uy`` filter, also in ``app/formatting.py``.
    * The empty-state rule (kpi-summary spec, "Zero results show
      zero and a message") is satisfied by an extra message block
      that renders when the filtered set has no purchases. The

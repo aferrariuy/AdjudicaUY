@@ -29,101 +29,19 @@
     <p class="text-sm text-texto-sec">Perfil del organismo — actividad de adjudicaciones</p>
   </header>
 
-  <section
-    aria-labelledby="organism-filters-heading"
-    class="bg-folio border border-linea p-4 sm:p-6 mb-6"
-  >
-    <h2 id="organism-filters-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Filtros</h2>
+  {% with
+      hx_get="/organism/" ~ (organism_name | urlencode) ~ "/partial",
+      hx_target="#organism-body",
+      data_action="clear-organism-filters",
+      heading_id="organism-filters-heading",
+      show_company_filter=false,
+      show_organism_filter=false,
+      id_prefix="org-filter-"
+  %}
+    {% include "partials/_filter_form.html" %}
+  {% endwith %}
 
-    <form
-      hx-get="/organism/{{ organism_name | urlencode }}/partial"
-      hx-target="#organism-body"
-      hx-trigger="submit"
-      hx-swap="innerHTML"
-      hx-disabled-elt="find button[type='submit']"
-      class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-    >
-      <div>
-        <label for="org-filter-article" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Artículo</label>
-        <input
-          id="org-filter-article"
-          type="text"
-          name="article"
-          value="{{ filters.article or '' }}"
-          placeholder="Ej: laptop"
-          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
-        >
-      </div>
-
-      <div>
-        <label for="org-filter-article-id" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">ID de artículo</label>
-        <input
-          id="org-filter-article-id"
-          type="text"
-          name="article_id"
-          value="{{ filters.article_id or '' }}"
-          placeholder="IDs separados por coma"
-          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
-        >
-      </div>
-
-      <div>
-        <label for="org-filter-date-from" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Desde</label>
-        <input
-          id="org-filter-date-from"
-          type="date"
-          name="date_from"
-          value="{{ filters.date_from.isoformat() if filters.date_from else '' }}"
-          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
-        >
-      </div>
-
-      <div>
-        <label for="org-filter-date-to" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Hasta</label>
-        <input
-          id="org-filter-date-to"
-          type="date"
-          name="date_to"
-          value="{{ filters.date_to.isoformat() if filters.date_to else '' }}"
-          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
-        >
-      </div>
-
-      <div class="flex items-end gap-2">
-        <button
-          type="submit"
-          class="font-ibm-plex-mono text-xs uppercase tracking-wider px-4 py-2.5 bg-ink text-paper border border-ink hover:bg-sello hover:border-sello transition-colors"
-        >Aplicar <span class="htmx-indicator spinner"></span></button>
-        <button
-          type="button"
-          onclick="limpiarFiltrosOrganismo()"
-          class="font-ibm-plex-mono text-xs uppercase tracking-wider px-4 py-2.5 border border-linea text-texto-sec hover:bg-ink hover:text-paper transition-colors"
-        >Limpiar</button>
-      </div>
-    </form>
-  </section>
-
-  <div id="organism-body">
+  <div id="organism-body" aria-live="polite" aria-busy="false">
     {% include "partials/_organism_detail_content.html" %}
   </div>
-
-  <script>
-    // Reset the date inputs on the organism page and re-submit the
-    // form. The article / article_id fields keep their values so the
-    // user does not lose their narrower selection — only the date
-    // range is cleared back to "all time" (the organism profile's
-    // default scope is the full history of the organism, not the
-    // current calendar year).
-    window.limpiarFiltrosOrganismo = function () {
-      var form = document.querySelector(
-        'form[hx-get="/organism/' + {{ organism_name | tojson }} + '/partial"]'
-      );
-      if (!form) return;
-      var from = form.querySelector('input[name="date_from"]');
-      var to = form.querySelector('input[name="date_to"]');
-      if (from) from.value = '';
-      if (to) to.value = '';
-      htmx.trigger(form, 'submit');
-    };
-  </script>
 {% endblock %}

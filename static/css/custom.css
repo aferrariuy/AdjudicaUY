@@ -1,76 +1,8 @@
 /* Custom layer for the AdjudicaUY rebrand. These rules cover
    effects that Tailwind utilities cannot express cleanly:
-     * ``.ficha`` corner decorations (used on the chart cards)
-     * The masthead double-line border
-     * The dotted underline treatment on organism links
      * ``prefers-reduced-motion`` overrides for HTMX swap transitions
    Anything expressible as a Tailwind utility should stay in the
    templates — this file is intentionally small. */
-
-/* ---------------------------------------------------------------------
- * .ficha — "card" surface with corner tick marks (::before / ::after).
- * Visually reminiscent of an archival card: two small orthogonal
- * brackets in the top-left and bottom-right corners.
- * ------------------------------------------------------------------- */
-.ficha {
-  position: relative;
-}
-
-.ficha::before,
-.ficha::after {
-  content: "";
-  position: absolute;
-  width: 14px;
-  height: 14px;
-  /* ``theme()`` resolves at build time and would emit a literal
-   * ``<alpha-value>`` placeholder from the Tailwind config — not valid
-   * CSS at runtime. Reference the design token directly so the brackets
-   * follow the active theme via ``:root`` / ``.dark`` swaps. */
-  border-color: rgb(var(--color-linea) / 1);
-  border-style: solid;
-  pointer-events: none;
-}
-
-.ficha::before {
-  top: 0;
-  left: 0;
-  border-width: 1px 0 0 1px;
-}
-
-.ficha::after {
-  bottom: 0;
-  right: 0;
-  border-width: 0 1px 1px 0;
-}
-
-/* ---------------------------------------------------------------------
- * .masthead — the site header gets a 3px double rule at the bottom in
- * the ``linea`` token, matching the mockup's archival feel.
- * ------------------------------------------------------------------- */
-.masthead {
-  /* Direct ``rgb(var(...))`` so the double rule tracks the active
-   * theme (light: warm beige; dark: cool slate). ``/ 1`` pins the
-   * alpha — there's no opacity modifier for a ``border-color`` here. */
-  border-bottom: 3px double rgb(var(--color-linea) / 1);
-}
-
-/* ---------------------------------------------------------------------
- * .resultados a — links inside the results container get a dotted
- * underline. Hovering promotes the line to solid, signalling that
- * the target is interactive.
- * ------------------------------------------------------------------- */
-.resultados a {
-  text-decoration: underline;
-  text-decoration-style: dotted;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
-  transition: text-decoration-style 100ms ease-out;
-}
-
-.resultados a:hover,
-.resultados a:focus-visible {
-  text-decoration-style: solid;
-}
 
 /* ---------------------------------------------------------------------
  * HTMX swap transitions. Kept here (and out of the templates) so
@@ -91,8 +23,22 @@
   .htmx-settling {
     transition: none;
   }
+}
 
-  .resultados a {
-    transition: none;
-  }
+/* ---------------------------------------------------------------------
+ * HTMX indicator visibility. HTMX 1.9 does not ship default styles for
+ * ``.htmx-indicator``: the element must be hidden by default and shown
+ * while an ancestor carries the ``.htmx-request`` class. This keeps the
+ * spinner invisible until an HTMX request is in flight.
+ * -------------------------------------------------------------------- */
+.htmx-indicator {
+  display: none;
+}
+
+.htmx-request .htmx-indicator {
+  display: inline-block;
+}
+
+.htmx-request.htmx-indicator {
+  display: inline-block;
 }

@@ -19,15 +19,20 @@ This client wraps both endpoints with:
 from __future__ import annotations
 
 import logging
+import random
 import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from typing import TYPE_CHECKING, TypeVar
 
 import httpx
 from lxml import etree
 
 from scraper.xml_report import _SAFE_PARSER, _read_with_limit
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +58,16 @@ class BcuCurrency:
 # The first attempt is immediate; the subsequent attempts wait
 # ``1s``, then ``3s``, then ``9s`` before retrying.
 _BACKOFF_SCHEDULE: tuple[int, ...] = (1, 3, 9)
+
+# Jitter window in seconds. A random value in ``[0, _BACKOFF_JITTER)`` is
+# added to each scheduled delay so multiple workers that restart at the
+# same time do not retry in lockstep against the BCU API.
+_BACKOFF_JITTER = 1
+
+# Exceptions treated as transient by the shared retry helper.
+_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (httpx.HTTPError, BcuError)
+
+T = TypeVar("T")
 
 _SOAP_NAMESPACE = "Cotiza"
 _SOAP_ACTION = "Cotizaaction/AWSBCUCOTIZACIONES.Execute"
@@ -174,6 +189,40 @@ def _parse_monedas_response(response_xml: bytes) -> list[BcuCurrency]:
     return currencies
 
 
+def _retry_with_backoff(label: str, operation: Callable[[], T]) -> T:
+    """Execute ``operation`` with exponential backoff on transient failures.
+
+    Retries on :class:`httpx.HTTPError` and :class:`BcuError` using the
+    schedule defined in :data:`_BACKOFF_SCHEDULE` (1s, 3s, 9s) for a total
+    of four attempts. The first attempt is immediate; subsequent attempts
+    sleep for ``delay + random.uniform(0, _BACKOFF_JITTER)`` seconds before
+    retrying. When all attempts fail, the last exception is re-raised
+    wrapped in :class:`BcuError`.
+    """
+
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate((0,) + _BACKOFF_SCHEDULE):
+        if delay:
+            # Add jitter to avoid synchronization between workers.
+            jittered_delay = delay + random.uniform(0, _BACKOFF_JITTER)  # noqa: S311
+            logger.info(
+                "%s retry %d after %.2fs backoff",
+                label,
+                attempt,
+                jittered_delay,
+            )
+            time.sleep(jittered_delay)
+        try:
+            return operation()
+        except _RETRYABLE_EXCEPTIONS as exc:
+            last_exc = exc
+            logger.warning("%s attempt %d failed: %s", label, attempt + 1, exc)
+
+    # ``last_exc`` is always set here because the loop makes at least one
+    # attempt and every failed attempt assigns it.
+    raise BcuError(f"{label} failed after retries: {last_exc}") from last_exc
+
+
 class BcuClient:
     """High-level BCU SOAP client with caching and retry.
 
@@ -270,25 +319,15 @@ class BcuClient:
             # Fallback: bare host or unexpected path — use sibling path.
             monedas_url = f"{self._base_url}/awsbcumonedas"
 
-        for attempt, delay in enumerate((0,) + _BACKOFF_SCHEDULE):
-            if delay:
-                logger.info("BCU monedas retry %d after %ds backoff", attempt, delay)
-                time.sleep(delay)
-            try:
-                with self.client.stream(
-                    "GET", monedas_url, timeout=self._timeout
-                ) as response:
-                    response.raise_for_status()
-                    body = _read_with_limit(response, _MAX_SOAP_SIZE_BYTES)
-                return _parse_monedas_response(body)
-            except (httpx.HTTPError, BcuError) as exc:
-                logger.warning("BCU monedas attempt %d failed: %s", attempt + 1, exc)
-                if attempt == len(_BACKOFF_SCHEDULE):
-                    raise BcuError(
-                        f"BCU monedas endpoint failed after retries: {exc}"
-                    ) from exc
+        def _fetch() -> list[BcuCurrency]:
+            with self.client.stream(
+                "GET", monedas_url, timeout=self._timeout
+            ) as response:
+                response.raise_for_status()
+                body = _read_with_limit(response, _MAX_SOAP_SIZE_BYTES)
+            return _parse_monedas_response(body)
 
-        return []  # unreachable; loop always returns or raises
+        return _retry_with_backoff("BCU monedas", _fetch)
 
     # ------------------------------------------------------------------
     # Internals
@@ -312,44 +351,24 @@ class BcuClient:
         """POST the SOAP envelope, retrying on transient failures."""
 
         envelope = _build_cotizaciones_envelope(bcu_code, target_date)
-        last_exc: Exception | None = None
 
-        for attempt, delay in enumerate((0,) + _BACKOFF_SCHEDULE):
-            if delay:
-                logger.info(
-                    "BCU cotizaciones retry %d for code=%s date=%s after %ds backoff",
-                    attempt,
-                    bcu_code,
-                    target_date,
-                    delay,
-                )
-                time.sleep(delay)
-            try:
-                with self.client.stream(
-                    "POST",
-                    self._base_url,
-                    content=envelope,
-                    headers={
-                        "Content-Type": "text/xml; charset=utf-8",
-                        "SOAPAction": _SOAP_ACTION,
-                    },
-                ) as response:
-                    response.raise_for_status()
-                    body = _read_with_limit(response, _MAX_SOAP_SIZE_BYTES)
-                return _parse_tcc(body)
-            except (httpx.HTTPError, BcuError) as exc:
-                last_exc = exc
-                logger.warning(
-                    "BCU cotizaciones attempt %d failed for code=%s date=%s: %s",
-                    attempt + 1,
-                    bcu_code,
-                    target_date,
-                    exc,
-                )
+        def _fetch() -> Decimal | None:
+            with self.client.stream(
+                "POST",
+                self._base_url,
+                content=envelope,
+                headers={
+                    "Content-Type": "text/xml; charset=utf-8",
+                    "SOAPAction": _SOAP_ACTION,
+                },
+            ) as response:
+                response.raise_for_status()
+                body = _read_with_limit(response, _MAX_SOAP_SIZE_BYTES)
+            return _parse_tcc(body)
 
-        raise BcuError(
-            f"BCU cotizaciones endpoint failed for code={bcu_code} date={target_date} "
-            f"after retries: {last_exc}"
+        return _retry_with_backoff(
+            f"BCU cotizaciones code={bcu_code} date={target_date}",
+            _fetch,
         )
 
 

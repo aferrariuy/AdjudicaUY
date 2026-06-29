@@ -21,7 +21,11 @@ from __future__ import annotations
 
 import logging
 
-from scraper.organism_lookup import ORGANISM_MAP, resolve_organism
+from scraper.organism_lookup import (
+    ORGANISM_MAP,
+    UNKNOWN_ORGANISM_PREFIX,
+    resolve_organism,
+)
 
 # ---------------------------------------------------------------------------
 # Mapped pairs
@@ -67,6 +71,7 @@ def test_resolve_organism_returns_desconocido_fallback_for_unmapped_pair(
         result = resolve_organism(99, 99)
 
     assert result == "Desconocido (99-99)"
+    assert result.startswith(UNKNOWN_ORGANISM_PREFIX)
     # WARNING logged with both id_inciso and id_ue visible.
     warning_records = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert warning_records, "expected a WARNING log for an unmapped pair"

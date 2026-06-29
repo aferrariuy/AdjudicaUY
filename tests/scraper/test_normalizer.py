@@ -10,19 +10,24 @@ combination the spec defines.
 
 from __future__ import annotations
 
+import logging
 from datetime import date
 from decimal import Decimal
 
 import httpx
 import pytest
 
-from scraper.bcu_client import BcuClient
+import scraper.bcu_client as bcu_module
+from scraper.bcu_client import BcuClient, BcuError
 from scraper.normalizer import (
     CONVERSION_TABLE,
     NON_CONVERTIBLE_TABLE,
     PASSTHROUGH_TABLE,
     CompraEnrichment,
     ConversionMode,
+    CurrencyNotResolvedError,
+    MalformedCompraError,
+    NormalizationError,
     _resolve_mode,
     normalize_compra,
 )
@@ -403,10 +408,8 @@ def test_normalize_non_convertible_does_not_call_bcu() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_unknown_currency_returns_null_and_warns(caplog) -> None:
-    """Unmapped id_moneda → null amount_uyu + WARNING log."""
-
-    import logging
+def test_normalize_unknown_currency_raises_currency_not_resolved(caplog) -> None:
+    """Unmapped id_moneda that BCU cannot resolve raises a specific error."""
 
     compra = _build_xml_compra(
         id_moneda_monto_adj=99999,
@@ -444,13 +447,11 @@ def test_normalize_unknown_currency_returns_null_and_warns(caplog) -> None:
     client = httpx.Client(transport=transport)
     bcu = BcuClient("https://example.test/wsbcucotizaciones", client=client)
 
-    with caplog.at_level(logging.WARNING, logger="scraper.normalizer"):
-        result = normalize_compra(compra, _enrichment(), bcu)
-
-    assert result.adjudicaciones[0].amount_uyu is None
-    # The fallback display code signals "unknown" to the user.
-    assert result.adjudicaciones[0].currency == "UNK"
-    assert any("Unknown id_moneda=99999" in record.message for record in caplog.records)
+    with (
+        caplog.at_level(logging.WARNING, logger="scraper.normalizer"),
+        pytest.raises(CurrencyNotResolvedError),
+    ):
+        normalize_compra(compra, _enrichment(), bcu)
 
 
 # ---------------------------------------------------------------------------
@@ -519,3 +520,114 @@ def test_conversion_table_every_entry_has_bcu_code_and_iso() -> None:
         # The same id_moneda must not appear in any other table.
         assert id_moneda not in PASSTHROUGH_TABLE
         assert id_moneda not in NON_CONVERTIBLE_TABLE
+
+
+# ---------------------------------------------------------------------------
+# Specific normalization exceptions
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_raises_malformed_compra_for_negative_amount() -> None:
+    """A negative ``precio_tot_imp`` is a data-quality error, not a conversion."""
+
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=20,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("-100.00"),
+                desc_articulo="Laptop",
+                id_moneda=20,
+                id_articulo="42851",
+            )
+        ],
+    )
+
+    with pytest.raises(MalformedCompraError):
+        normalize_compra(compra, _enrichment(), _static_bcu_client())
+
+
+@pytest.mark.parametrize(
+    "precio_tot_imp",
+    [
+        Decimal("NaN"),
+        Decimal("Infinity"),
+        Decimal("-Infinity"),
+    ],
+)
+def test_normalize_raises_malformed_compra_for_non_finite_amount(
+    precio_tot_imp: Decimal,
+) -> None:
+    """Non-finite ``precio_tot_imp`` values are data-quality errors."""
+
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=0,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=precio_tot_imp,
+                desc_articulo="Laptop",
+                id_moneda=0,
+                id_articulo="42851",
+            )
+        ],
+    )
+
+    with pytest.raises(MalformedCompraError):
+        normalize_compra(compra, _enrichment(), _static_bcu_client())
+
+
+def test_normalize_propagates_bcu_error_from_monedas_lookup(monkeypatch) -> None:
+    """A BCU service failure while resolving an unknown currency propagates."""
+
+    monkeypatch.setattr(bcu_module.time, "sleep", lambda _seconds: None)
+
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=99999,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("100.00"),
+                desc_articulo="Laptop",
+                id_moneda=99999,
+                id_articulo="42851",
+            )
+        ],
+    )
+
+    def _always_503(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        return httpx.Response(503, text="service unavailable")
+
+    transport = httpx.MockTransport(_always_503)
+    client = httpx.Client(transport=transport)
+    bcu = BcuClient("https://example.test/wsbcucotizaciones", client=client)
+
+    with pytest.raises(BcuError):
+        normalize_compra(compra, _enrichment(), bcu)
+
+
+# ---------------------------------------------------------------------------
+# NormalizationError hierarchy
+# ---------------------------------------------------------------------------
+
+
+def test_normalization_errors_are_catchable_by_base_class() -> None:
+    """Both concrete errors inherit from ``NormalizationError``."""
+
+    assert issubclass(CurrencyNotResolvedError, NormalizationError)
+    assert issubclass(MalformedCompraError, NormalizationError)

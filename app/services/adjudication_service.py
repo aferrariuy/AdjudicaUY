@@ -250,7 +250,6 @@ def _escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-
 class ValidationError(ValueError):
     """Raised when a user-supplied filter value is invalid.
 
@@ -266,7 +265,6 @@ class ValidationError(ValueError):
 
 class DateValidationError(ValidationError):
     """Raised when ``date_from`` or ``date_to`` are present but invalid."""
-
 
 
 def validate_date_params(params: dict[str, str | None]) -> None:
@@ -391,9 +389,7 @@ def _build_predicates(filters: AdjudicationFilters) -> list[Any]:
         )
     if filters.organism:
         predicates.append(
-            Compra.organismo.ilike(
-                f"%{_escape_like(filters.organism)}%", escape="\\"
-            )
+            Compra.organismo.ilike(f"%{_escape_like(filters.organism)}%", escape="\\")
         )
     if filters.organism_exact:
         # Exact-match predicate (organism profile). Equality on
@@ -414,9 +410,7 @@ def _build_predicates(filters: AdjudicationFilters) -> list[Any]:
         # not pollute the lookup. NULLs are excluded from IN by SQL
         # semantics, matching the spec.
         if len(filters.article_id) > _MAX_ARTICLE_ID_RAW_LENGTH:
-            raise ValidationError(
-                "El filtro de IDs de artículo es demasiado largo."
-            )
+            raise ValidationError("El filtro de IDs de artículo es demasiado largo.")
         ids = [piece.strip() for piece in filters.article_id.split(",")]
         ids = [piece for piece in ids if piece]
         if len(ids) > _MAX_ARTICLE_IDS:

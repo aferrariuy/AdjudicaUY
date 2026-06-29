@@ -14,15 +14,19 @@ documented in the ``compra-normalization`` spec:
 
 from __future__ import annotations
 
+import logging
 from datetime import date
+from decimal import Decimal
 from typing import Any
 
+import httpx
 import pytest
 
-from scraper.main import enrich_xml_compra
+from scraper.bcu_client import BcuClient
+from scraper.main import _run_scrape_for_day, enrich_xml_compra
 from scraper.normalizer import CompraRow
 from scraper.persistence import _compra_dict
-from scraper.xml_report import XmlCompra
+from scraper.xml_report import XmlAdjudicacion, XmlCompra
 
 # ---------------------------------------------------------------------------
 # XmlCompra factory — minimal fields needed to drive enrich_xml_compra
@@ -272,3 +276,114 @@ def test_enrich_xml_compra_ucc_fallback_table_driven(
     enrichment = enrich_xml_compra(compra, source_url="https://example.test/xml")
 
     assert enrichment.organism == expected
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator error handling
+# ---------------------------------------------------------------------------
+
+
+def _mock_bcu_client() -> BcuClient:
+    """Return a BCU client that never needs the real network.
+
+    The orchestrator test uses id_moneda=0 (UYU passthrough), so no SOAP
+    request is ever issued.
+    """
+
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        return httpx.Response(
+            200,
+            content=b"<?xml version='1.0'?><root><datos><TCC>1.0</TCC></datos></root>",
+        )
+
+    return BcuClient(
+        "https://example.test/wsbcucotizaciones",
+        client=httpx.Client(transport=httpx.MockTransport(_handler)),
+    )
+
+
+def _xml_compra_with_amount(
+    id_compra: str,
+    precio_tot_imp: Decimal,
+) -> XmlCompra:
+    """Build a single-adjudication XmlCompra using id_moneda=0 (UYU)."""
+
+    return XmlCompra(
+        id_compra=id_compra,
+        fecha_pub_adj=date(2024, 1, 15),
+        id_tipocompra="CD",
+        id_moneda_monto_adj=0,
+        objeto=None,
+        monto_adj=None,
+        num_compra=None,
+        anio_compra=None,
+        subtipo_compra=None,
+        id_inciso=4,
+        id_ue=1,
+        id_ucc=None,
+        adjudicaciones=[
+            XmlAdjudicacion(
+                id_compra=id_compra,
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("1.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=precio_tot_imp,
+                desc_articulo="Laptop",
+                id_moneda=0,
+                id_articulo="42851",
+            )
+        ],
+        oferentes=[],
+    )
+
+
+def test_run_scrape_for_day_skips_compra_on_normalization_error(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Any,
+) -> None:
+    """A normalization failure should log a warning and continue processing."""
+
+    import scraper.main as scraper_main
+
+    bad_compra = _xml_compra_with_amount("BAD", Decimal("-100.00"))
+    good_compra = _xml_compra_with_amount("GOOD", Decimal("100.00"))
+
+    monkeypatch.setattr(
+        scraper_main,
+        "fetch_xml_report",
+        lambda *_args, **_kwargs: "",
+    )
+    monkeypatch.setattr(
+        scraper_main,
+        "parse_xml_report",
+        lambda _xml_text: [bad_compra, good_compra],
+    )
+
+    http_client = httpx.Client(
+        transport=httpx.MockTransport(lambda _r: httpx.Response(200))
+    )
+    bcu = _mock_bcu_client()
+
+    with caplog.at_level(logging.WARNING, logger="scraper.run_scrape"):
+        result = _run_scrape_for_day(
+            target_day=date(2024, 1, 15),
+            source_a_base_url="https://example.test/xml",
+            session=db_session,
+            bcu_client=bcu,
+            client=http_client,
+            start_hour=0,
+            end_hour=23,
+        )
+
+    assert len(result) == 1
+    assert result[0].id_compra == "GOOD"
+
+    warning_messages = [
+        record.message for record in caplog.records if record.levelno == logging.WARNING
+    ]
+    assert any(
+        "BAD" in msg and "Normalization failed" in msg for msg in warning_messages
+    )

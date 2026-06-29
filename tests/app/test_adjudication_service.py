@@ -547,4 +547,3 @@ def test_like_wildcards_are_escaped_in_text_filters(
         AdjudicationFilters(article="Laptop%20"),
     )
     assert len(rows) == 1
-

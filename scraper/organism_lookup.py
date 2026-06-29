@@ -21,6 +21,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Prefix used for the fallback string returned when ``(id_inciso, id_ue)``
+# is not present in :data:`ORGANISM_MAP`. Exported so callers can identify
+# the fallback without coupling to the literal Spanish text.
+UNKNOWN_ORGANISM_PREFIX = "Desconocido"
+
 # ---------------------------------------------------------------------------
 # Static mapping — official government codiguera
 # ---------------------------------------------------------------------------
@@ -678,7 +683,7 @@ def resolve_organism(id_inciso: int | None, id_ue: int | None) -> str:
     if name is not None:
         return name
 
-    fallback = f"Desconocido ({id_inciso}-{id_ue})"
+    fallback = f"{UNKNOWN_ORGANISM_PREFIX} ({id_inciso}-{id_ue})"
     logger.warning(
         "Unmapped (id_inciso, id_ue) pair: (%r, %r); using fallback %r",
         id_inciso,
@@ -688,4 +693,4 @@ def resolve_organism(id_inciso: int | None, id_ue: int | None) -> str:
     return fallback
 
 
-__all__ = ["ORGANISM_MAP", "resolve_organism"]
+__all__ = ["ORGANISM_MAP", "UNKNOWN_ORGANISM_PREFIX", "resolve_organism"]

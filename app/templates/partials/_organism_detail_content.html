@@ -21,5 +21,7 @@
   {% include "partials/_kpi_cards.html" %}
   {% include "partials/_trend_chart.html" %}
   {% include "partials/_concentration_chart.html" %}
-  {% include "partials/_ranking_list.html" %}
+  {% with rows=ranking_rows, heading_id="ranking-heading", title="Ranking de empresas", link_to_organism=false %}
+    {% include "partials/_ranking_list.html" %}
+  {% endwith %}
 </div>
