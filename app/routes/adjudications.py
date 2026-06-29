@@ -110,6 +110,50 @@ def _validation_error_response(message: str) -> HTMLResponse:
     )
 
 
+def _validation_error_context(
+    message: str,
+    *,
+    raw_params: dict[str, str | None] | None = None,
+    organism_name: str | None = None,
+) -> dict[str, Any]:
+    """Build the minimal context for a full-page 422 render.
+
+    The full-page routes (``GET /`` and ``GET /organism/{name}``) catch
+    ``ValidationError`` *before* running any DB queries, so the
+    template only needs the bare minimum to render the chrome (filter
+    form + error fragment) without raising ``UndefinedError`` on
+    ``filters`` / ``organisms`` / etc. The error is stored in
+    ``validation_error``; both ``index.html`` and
+    ``organism_detail.html`` look for that key to swap the
+    ``#results`` / ``#organism-body`` body for the alert fragment.
+
+    Parameters
+    ----------
+    message
+        Spanish error string from :class:`ValidationError`.
+    raw_params
+        Echoed back into ``filters`` so the filter form preserves the
+        user's input (``date_from``, ``date_to``, etc.) when the page
+        reloads with the error — the user can correct the date and
+        resubmit without retyping. Defaults to an empty dict.
+    organism_name
+        Required only for ``organism_detail.html`` so the ``<h1>`` and
+        ``<title>`` render the requested organism even on the error
+        path. ``index.html`` ignores it.
+    """
+
+    params = raw_params if raw_params is not None else {}
+    filters = filters_from_query_params(params)
+    context: dict[str, Any] = {
+        "filters": filters,
+        "organisms": [],
+        "validation_error": message,
+    }
+    if organism_name is not None:
+        context["organism_name"] = organism_name
+    return context
+
+
 # ---------------------------------------------------------------------------
 # View-model builders
 # ---------------------------------------------------------------------------
@@ -258,14 +302,25 @@ def _build_page_numbers(current: int, total: int) -> list[int | str]:
 # ---------------------------------------------------------------------------
 
 
+def _render_str(template_name: str, request: Request, context: dict[str, Any]) -> str:
+    """Render ``template_name`` with ``context`` to an HTML string.
+
+    Used by routes that need to set a non-default status code on the
+    response (e.g. the full-page 422 path). The default-status variant
+    :func:`_render` wraps this in an :class:`HTMLResponse`.
+    """
+
+    templates = request.app.state.templates
+    template = templates.get_template(template_name)
+    return template.render({**context, "request": request})
+
+
 def _render(
     template_name: str, request: Request, context: dict[str, Any]
 ) -> HTMLResponse:
     """Render ``template_name`` with ``context`` using the app's Jinja env."""
 
-    templates = request.app.state.templates
-    template = templates.get_template(template_name)
-    return HTMLResponse(template.render({**context, "request": request}))
+    return HTMLResponse(_render_str(template_name, request, context))
 
 
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -288,7 +343,20 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
     try:
         validate_date_params(params)
     except ValidationError as exc:
-        return _validation_error_response(exc.message)
+        # Full-page 422: render the index page chrome with the error
+        # shown inside #results. The HTMX partials (adjudications /
+        # organism_detail_partial) keep returning the bare fragment
+        # because HTMX swaps it into the existing container — the
+        # page chrome is already on screen and would be wasted
+        # bandwidth to re-render.
+        return HTMLResponse(
+            _render_str(
+                "index.html",
+                request,
+                _validation_error_context(exc.message, raw_params=params),
+            ),
+            status_code=422,
+        )
     filters = filters_from_query_params(params)
 
     # Pagination. The ``page`` param is parsed manually so missing /
@@ -576,7 +644,22 @@ def organism_detail(
             db, decoded_name=decoded_name, raw_params=raw_params
         )
     except ValidationError as exc:
-        return _validation_error_response(exc.message)
+        # Full-page 422: render the organism profile page chrome with
+        # the error shown inside #organism-body. The HTMX partial
+        # (``GET /organism/{name}/partial``) keeps returning the bare
+        # fragment because HTMX swaps it into the existing container.
+        return HTMLResponse(
+            _render_str(
+                "organism_detail.html",
+                request,
+                _validation_error_context(
+                    exc.message,
+                    raw_params=raw_params,
+                    organism_name=decoded_name,
+                ),
+            ),
+            status_code=422,
+        )
 
     return _render("organism_detail.html", request, context)
 

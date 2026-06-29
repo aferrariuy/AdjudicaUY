@@ -42,6 +42,18 @@
   {% endwith %}
 
   <div id="organism-body" aria-live="polite" aria-busy="false">
-    {% include "partials/_organism_detail_content.html" %}
+    {% if validation_error %}
+      {# Full-page 422 path: the route caught a ValidationError
+         before running any DB queries and asks the template to
+         render the error inside the #organism-body container.
+         The fragment markup matches _ERROR_FRAGMENT_TEMPLATE in
+         app/routes/adjudications.py so the HTMX partial and the
+         full page render identical alert markup. #}
+      <div class="bg-red-50 border border-red-300 rounded-lg p-4" role="alert">
+        <p class="text-red-800 text-sm">{{ validation_error }}</p>
+      </div>
+    {% else %}
+      {% include "partials/_organism_detail_content.html" %}
+    {% endif %}
   </div>
 {% endblock %}
