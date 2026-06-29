@@ -505,6 +505,26 @@ def test_adjudication_filters_has_any_detects_active_filter() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_index_filter_submit_button_has_htmx_indicator(client: TestClient) -> None:
+    """The Aplicar button must declare itself as the HTMX indicator source.
+
+    The spinner is nested inside the submit button, but HTMX adds
+    ``.htmx-request`` to the request-triggering element (the form), not
+    the button.  Without ``hx-indicator="this"`` the button never gets
+    ``.htmx-request`` and the spinner stays hidden.
+    """
+
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.text
+
+    # The spinner lives inside the Aplicar button.
+    assert '>Aplicar <span class="htmx-indicator spinner"></span></button>' in body
+    # HTMX must add .htmx-request to the button itself so the descendant
+    # .htmx-indicator becomes visible.
+    assert 'hx-indicator="this"' in body
+
+
 def test_index_is_htmx_compatible(client: TestClient) -> None:
     """The page must include the htmx script tag so swaps work in the browser."""
 
@@ -630,8 +650,8 @@ def test_excessive_date_range_returns_422_on_organism_page(
 
 
 def test_limpiar_resets_to_current_year(client: TestClient) -> None:
-    """The Limpiar control is a button that wires a JS reset to current
-    year (NOT an <a href="/"> that would navigate)."""
+    """The Limpiar control is a button that resets the form and re-triggers
+    the HTMX request (NOT an <a href="/"> that would navigate)."""
 
     response = client.get("/")
     assert response.status_code == 200
@@ -639,15 +659,42 @@ def test_limpiar_resets_to_current_year(client: TestClient) -> None:
 
     # The old <a href="/">Limpiar</a> is gone.
     assert ">Limpiar</a>" not in body
-    # The new <button onclick="limpiarFiltros()">Limpiar</button> is present.
-    assert 'onclick="limpiarFiltros()"' in body
+    # Inline onclick handlers have been replaced by a data-action attribute.
+    assert 'onclick="limpiarFiltros()"' not in body
+    assert 'data-action="clear-filters"' in body
     assert ">Limpiar</button>" in body
-    # The reset function is wired onto window so the inline onclick can
-    # call it. The implementation assigns an anonymous function expression.
-    assert "window.limpiarFiltros" in body
+    # The handler is now delegated from base.html; no global functions.
+    assert "window.limpiarFiltros" not in body
+    assert "form.reset()" in body
     assert "htmx.trigger" in body
-    # JS computes the current-year bounds at runtime, not hardcoded.
-    assert "getFullYear" in body
+
+
+def test_organism_limpiar_resets_date_range(
+    client: TestClient, make_adjudication
+) -> None:
+    """The organism profile page also uses the delegated data-action reset."""
+
+    make_adjudication(
+        organism="ORG-LIMPIAR-MIN",
+        winning_company="ORG-LIMPIAR-CO",
+        amount_uyu=Decimal("1000.00"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/organism/ORG-LIMPIAR-MIN")
+    assert response.status_code == 200
+    body = response.text
+
+    # The old <a href="/">Limpiar</a> and inline onclick handlers are gone.
+    assert ">Limpiar</a>" not in body
+    assert 'onclick="limpiarFiltrosOrganismo()"' not in body
+    assert "window.limpiarFiltrosOrganismo" not in body
+    # The delegated reset button uses a distinct data-action value.
+    assert 'data-action="clear-organism-filters"' in body
+    assert ">Limpiar</button>" in body
+    # The delegated handler lives in base.html and is shared with the index.
+    assert "form.reset()" in body
+    assert "htmx.trigger" in body
 
 
 # ---------------------------------------------------------------------------
@@ -792,10 +839,11 @@ def test_organism_detail_returns_200_with_widgets_for_known_organism(
     body = response.text
     # The organism name is rendered as the page heading.
     assert "Ministerio del Interior" in body
-    # The dashboard widgets are all present.
+    # The dashboard widgets are all present. Chart canvases no longer
+    # carry fixed IDs (they duplicate after HTMX swaps), so we assert
+    # the ``data-chart`` payloads are present instead.
     assert "Resumen" in body  # KPI section heading
-    assert 'id="chart-trend"' in body
-    assert 'id="chart-concentration"' in body
+    assert "data-chart=" in body
     assert 'id="ranking-heading"' in body  # company ranking list
     # The organism ranking list is intentionally absent on this page.
     assert 'id="organism-ranking-heading"' not in body
@@ -859,9 +907,10 @@ def test_organism_detail_partial_returns_body_without_chrome(
 
     assert response.status_code == 200
     body = response.text
-    # The body partial includes the dashboard widgets.
-    assert 'id="chart-trend"' in body
-    assert 'id="chart-concentration"' in body
+    # The body partial includes the dashboard widgets. Chart canvases
+    # no longer carry fixed IDs (they duplicate after HTMX swaps), so
+    # we assert the ``data-chart`` payloads are present instead.
+    assert "data-chart=" in body
     assert 'id="ranking-heading"' in body
     # The full page chrome is NOT re-rendered — no <header>, no nav,
     # no filter form (the form lives outside the swap target).
@@ -1080,9 +1129,9 @@ def test_pagination_multi_page_renders_correct_page_numbers(
     # The links include hx-include for the filter form values so the
     # active filter set is preserved across page changes.
     assert 'hx-include="#filter-form input"' in body
-    # On page 1, the "Anterior" control is the disabled span (not a
+    # On page 1, the "Anterior" control is a disabled button (not a
     # link); the "Siguiente" control is a link to page 2.
-    assert ">Anterior</span>" in body
+    assert ">Anterior</button>" in body
     # Siguiente is the only link with hx-get for page 2 on page 1
     # (the Siguiente button itself, plus the page-2 number link).
     # We already asserted the hx-get for page 2 above.

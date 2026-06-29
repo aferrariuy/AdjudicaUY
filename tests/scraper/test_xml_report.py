@@ -526,7 +526,10 @@ def test_fetch_xml_report_propagates_http_errors() -> None:
         return httpx.Response(503, text="boom")
 
     transport = httpx.MockTransport(_handler)
-    with httpx.Client(transport=transport) as client, pytest.raises(httpx.HTTPStatusError):
+    with (
+        httpx.Client(transport=transport) as client,
+        pytest.raises(httpx.HTTPStatusError),
+    ):
         fetch_xml_report("https://example.test/xml", client=client)
 
 
@@ -631,7 +634,7 @@ def test_all_three_dataclasses_are_importable() -> None:
 # ---------------------------------------------------------------------------
 
 
-XXE_PAYLOAD = '''<?xml version="1.0" encoding="UTF-8"?>
+XXE_PAYLOAD = """<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE reporte [
   <!ENTITY xxe SYSTEM "file:///etc/passwd">
 ]>
@@ -648,7 +651,7 @@ XXE_PAYLOAD = '''<?xml version="1.0" encoding="UTF-8"?>
     </adjudicaciones>
   </compra>
 </reporte>
-'''
+"""
 
 
 def test_parse_xml_report_hardens_against_xxe() -> None:
@@ -667,7 +670,7 @@ def test_parse_xml_report_hardens_against_xxe() -> None:
 def test_parse_xml_report_skips_malformed_id_compra() -> None:
     """Values that do not match the expected id_compra pattern are skipped."""
 
-    payload = '''<?xml version="1.0" encoding="UTF-8"?>
+    payload = """<?xml version="1.0" encoding="UTF-8"?>
 <reporte>
   <compra id_compra="../../etc/passwd"
           fecha_pub_adj="2024-01-15"
@@ -692,7 +695,7 @@ def test_parse_xml_report_skips_malformed_id_compra() -> None:
     </adjudicaciones>
   </compra>
 </reporte>
-'''
+"""
     compras = list(parse_xml_report(payload))
     assert len(compras) == 1
     assert compras[0].id_compra == "valid-id-123"
@@ -707,7 +710,8 @@ def test_fetch_xml_report_rejects_oversized_response() -> None:
         return httpx.Response(200, content=huge_body)
 
     transport = httpx.MockTransport(_handler)
-    with httpx.Client(transport=transport) as client, pytest.raises(
-        httpx.HTTPError, match="exceeds maximum"
+    with (
+        httpx.Client(transport=transport) as client,
+        pytest.raises(httpx.HTTPError, match="exceeds maximum"),
     ):
         fetch_xml_report("https://example.test/xml", client=client, max_bytes=512)

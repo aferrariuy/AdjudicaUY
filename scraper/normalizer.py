@@ -48,6 +48,18 @@ logger = logging.getLogger(__name__)
 _UYU_SCALE = Decimal("0.01")
 
 
+class NormalizationError(Exception):
+    """Base class for normalization failures."""
+
+
+class CurrencyNotResolvedError(NormalizationError):
+    """Raised when a procurement currency ID cannot be mapped or resolved."""
+
+
+class MalformedCompraError(NormalizationError):
+    """Raised when a compra or adjudication fails data-quality validation."""
+
+
 class ConversionMode(enum.Enum):
     """How a procurement currency ID is handled by the normalizer."""
 
@@ -267,11 +279,7 @@ def _try_resolve_unknown(
     the catalogue is small and rarely changes.
     """
 
-    try:
-        monedas = bcu_client.list_monedas()
-    except Exception as exc:  # BcuError, HTTPError, etc.
-        logger.warning("BCU monedas lookup failed for id_moneda=%s: %s", id_moneda, exc)
-        return None
+    monedas = bcu_client.list_monedas()
 
     for entry in monedas:
         if entry.codigo == id_moneda:
@@ -337,6 +345,19 @@ def normalize_compra(
 
     adjudicaciones: list[AdjudicacionRow] = []
     for adj in compra.adjudicaciones:
+        # Data-quality gate: negative amounts, non-finite values, or negative
+        # currency IDs are not valid procurement data and would corrupt
+        # downstream analytics.
+        if not adj.precio_tot_imp.is_finite() or adj.precio_tot_imp < 0:
+            raise MalformedCompraError(
+                f"Invalid precio_tot_imp={adj.precio_tot_imp} "
+                f"for id_compra={compra.id_compra}"
+            )
+        if adj.id_moneda < 0:
+            raise MalformedCompraError(
+                f"Negative id_moneda={adj.id_moneda} for id_compra={compra.id_compra}"
+            )
+
         # Last-resort: if id_moneda is not in any of the static
         # tables, try the BCU monedas catalogue. This branch only
         # runs for the small set of unmapped codes; the rest take
@@ -365,13 +386,10 @@ def normalize_compra(
                     None if rate is None else _quantize_uyu(adj.precio_tot_imp * rate)
                 )
             else:
-                logger.warning(
-                    "Unknown id_moneda=%s for id_compra=%s; setting amount_uyu=NULL",
-                    id_moneda,
-                    compra.id_compra,
+                raise CurrencyNotResolvedError(
+                    f"Could not resolve id_moneda={id_moneda} "
+                    f"for id_compra={compra.id_compra}"
                 )
-                currency = "UNK"
-                amount_uyu = None
         else:
             currency, amount_uyu = _convert_amount(
                 id_moneda,
@@ -439,7 +457,10 @@ __all__ = [
     "CompraEnrichment",
     "CompraRow",
     "ConversionMode",
+    "CurrencyNotResolvedError",
+    "MalformedCompraError",
     "NON_CONVERTIBLE_TABLE",
+    "NormalizationError",
     "OferenteRow",
     "PASSTHROUGH_TABLE",
     "AdjudicacionRow",

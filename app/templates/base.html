@@ -28,14 +28,16 @@
      Mono for labels/buttons, IBM Plex Sans for body copy. #}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
 
   {# HTMX 1.9 — partial page swaps, no SPA framework needed. #}
-  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+  <script src="https://unpkg.com/htmx.org@1.9.12" integrity="sha384-EfwldhYywH4qYH9vU8lMn+pd6pcH0kGpPUVJuwyHnj/5felkkIUVxf1wMAEX7rCY" crossorigin="anonymous" defer></script>
 
   {# Chart.js 4.4 — client-side rendering from the ``data-chart`` JSON
-     payloads that the partials emit on the canvas elements. #}
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js" defer></script>
+      payloads that the partials emit on the canvas elements. Served from
+      unpkg as a static file (jsdelivr warns against SRI on dynamically
+      generated URLs); hash computed against chart.umd.js (not .min.js). #}
+  <script src="https://unpkg.com/chart.js@4.4.6/dist/chart.umd.js" integrity="sha384-MH1axGwz/uQzfIcjFdjEfsM0xlf5mmWfAwwggaOh5IPFvgKFGbJ2PZ4VBbgSYBQN" crossorigin="anonymous" defer></script>
 
   <style>
     /* Disable transitions on Tailwind utility toggles to keep HTMX swaps snappy. */
@@ -44,7 +46,7 @@
 
     /* Spinner fade: HTMX controls visibility via opacity. */
     @keyframes spin { to { transform: rotate(360deg); } }
-    .spinner { display: inline-block; width: 1rem; height: 1rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
+    .spinner { width: 1rem; height: 1rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
   </style>
 </head>
 <body class="bg-paper text-ink min-h-screen flex flex-col font-ibm-plex">
@@ -135,6 +137,11 @@
 
       var FMT_CACHE = { currency: 'UYU', locale: 'es-UY' };
 
+      // Client-side number formatting mirrors the es-UY locale used by
+      // the server-side helpers in ``app/formatting.py`` (the ``uyu`` /
+      // ``count_uy`` / ``pct_uy`` Jinja filters). Full centralization of
+      // formatting is a future refactor; this function stays local to the
+      // Chart.js tooltip layer.
       function formatUYU(value) {
         return new Intl.NumberFormat(FMT_CACHE.locale, {
           style: 'currency',
@@ -152,7 +159,15 @@
 
         var spec;
         try { spec = JSON.parse(canvas.dataset.chart); }
-        catch (e) { console.error('Invalid data-chart payload', e, canvas); return null; }
+        catch (e) { return null; }
+
+        // Defensive validation: malformed payloads should not reach
+        // ``new Chart()``. The server uses Jinja's ``|tojson`` filter,
+        // but this guard also protects against manual DOM edits or
+        // cached fragments.
+        if (!spec || typeof spec !== 'object') return null;
+        if (!['bar', 'line', 'doughnut', 'pie'].includes(spec.type)) return null;
+        if (!Array.isArray(spec.labels) || !Array.isArray(spec.datasets)) return null;
 
         // Dark-mode-aware chart text colors. Hoisted here so the same
         // ``isDark`` flag drives both the dataset palette and the
@@ -328,6 +343,42 @@
         if (evt.detail && evt.detail.xhr && evt.detail.xhr.status === 422) {
           evt.detail.shouldSwap = true;
         }
+      });
+
+      // Track HTMX request busy state on live regions so screen readers
+      // announce that updated content is loading. ``htmx:beforeRequest``
+      // sets ``aria-busy="true"`` on the swap target; ``htmx:afterSwap``
+      // clears it once the new fragment has landed.
+      function setAriaBusyOnTarget(evt, busy) {
+        if (!evt || !evt.detail || !evt.detail.elt) return;
+        var target = evt.detail.elt.getAttribute('hx-target');
+        if (!target) return;
+        var el = document.querySelector(target);
+        if (el) el.setAttribute('aria-busy', busy ? 'true' : 'false');
+      }
+
+      document.body.addEventListener('htmx:beforeRequest', function (evt) {
+        setAriaBusyOnTarget(evt, true);
+      });
+
+      document.body.addEventListener('htmx:afterSwap', function (evt) {
+        setAriaBusyOnTarget(evt, false);
+      });
+
+      // Delegated click handler for filter-reset buttons. Replaces the
+      // previous inline ``onclick`` handlers and global cleanup helpers
+      // with data-attribute-driven behavior, which plays nicely with CSP
+      // and avoids global scope pollution. Using ``closest('[data-action]')``
+      // lets clicks on child elements (icons, spans, svg) still hit the
+      // button and avoids duplicating the reset logic per action.
+      document.addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-action]');
+        if (!btn) return;
+        e.preventDefault();
+        var form = btn.closest('form');
+        if (!form) return;
+        form.reset();
+        htmx.trigger(form, 'submit');
       });
 
       /* ---------------------------------------------------------------

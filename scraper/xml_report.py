@@ -412,9 +412,7 @@ def _extract_compra(compra: etree._Element) -> XmlCompra | None:
         logger.warning("Skipping <compra> without id_compra")
         return None
     if not _ID_COMPRA_PATTERN.match(id_compra):
-        logger.warning(
-            "Skipping <compra> with malformed id_compra=%r", id_compra
-        )
+        logger.warning("Skipping <compra> with malformed id_compra=%r", id_compra)
         return None
 
     fecha_raw = _attr(compra, "fecha_pub_adj")

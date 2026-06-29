@@ -1,0 +1,123 @@
+{# Reusable filter form used by the index page and the organism profile.
+
+   Parameters:
+   * form_id        — optional id attribute (e.g. "filter-form" for pagination include)
+   * hx_get         — HTMX GET endpoint ("/adjudications" or "/organism/{name}/partial")
+   * hx_target      — HTMX swap target ("#results" or "#organism-body")
+   * filters        — AdjudicationFilters instance with current values
+   * data_action    — data-action value for the Limpiar button
+   * heading_id     — id for the section heading (accessibility)
+   * show_company_filter  — bool, render the empresa field (index only)
+   * show_organism_filter — bool, render the organismo field with datalist (index only)
+   * organisms      — list of organism names for the datalist (index only)
+   * id_prefix      — prefix for input ids to keep them unique per page
+
+   The markup is intentionally identical between the two pages so the
+   delegated reset handler in base.html works the same way. #}
+
+<section aria-labelledby="{{ heading_id }}" class="bg-folio border border-linea p-4 sm:p-6 mb-6">
+  <h2 id="{{ heading_id }}" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Filtros</h2>
+
+  <form
+    {% if form_id %}id="{{ form_id }}"{% endif %}
+    hx-get="{{ hx_get }}"
+    hx-target="{{ hx_target }}"
+    hx-trigger="submit"
+    hx-swap="innerHTML"
+    hx-disabled-elt="find button[type='submit']"
+    class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+  >
+    <div>
+      <label for="{{ id_prefix | default('filter-') }}article" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Artículo</label>
+      <input
+        id="{{ id_prefix | default('filter-') }}article"
+        type="text"
+        name="article"
+        value="{{ filters.article or '' }}"
+        placeholder="Ej: laptop"
+        class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
+      >
+    </div>
+
+    <div>
+      <label for="{{ id_prefix | default('filter-') }}article-id" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">ID de artículo</label>
+      <input
+        id="{{ id_prefix | default('filter-') }}article-id"
+        type="text"
+        name="article_id"
+        value="{{ filters.article_id or '' }}"
+        placeholder="IDs separados por coma"
+        class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
+      >
+    </div>
+
+    {% if show_company_filter %}
+      <div>
+        <label for="{{ id_prefix | default('filter-') }}company" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Empresa adjudicataria</label>
+        <input
+          id="{{ id_prefix | default('filter-') }}company"
+          type="text"
+          name="company"
+          value="{{ filters.company or '' }}"
+          placeholder="Ej: Empresa SA"
+          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
+        >
+      </div>
+    {% endif %}
+
+    {% if show_organism_filter %}
+      <div>
+        <label for="{{ id_prefix | default('filter-') }}organism" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Organismo</label>
+        <input
+          id="{{ id_prefix | default('filter-') }}organism"
+          type="text"
+          name="organism"
+          value="{{ filters.organism or '' }}"
+          placeholder="Ej: Ministerio de Interior"
+          list="organism-suggestions"
+          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
+        >
+        <datalist id="organism-suggestions">
+          {% for name in organisms %}
+            <option value="{{ name }}"></option>
+          {% endfor %}
+        </datalist>
+      </div>
+    {% endif %}
+
+    <div>
+      <label for="{{ id_prefix | default('filter-') }}date-from" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Desde</label>
+      <input
+        id="{{ id_prefix | default('filter-') }}date-from"
+        type="date"
+        name="date_from"
+        value="{{ filters.date_from.isoformat() if filters.date_from else '' }}"
+        class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
+      >
+    </div>
+
+    <div>
+      <label for="{{ id_prefix | default('filter-') }}date-to" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Hasta</label>
+      <input
+        id="{{ id_prefix | default('filter-') }}date-to"
+        type="date"
+        name="date_to"
+        value="{{ filters.date_to.isoformat() if filters.date_to else '' }}"
+        class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
+      >
+    </div>
+
+    <div class="flex items-end gap-2">
+      <button
+        type="submit"
+        hx-indicator="this"
+        class="font-ibm-plex-mono text-xs uppercase tracking-wider px-4 py-2.5 bg-ink text-paper border border-ink hover:bg-sello hover:border-sello transition-colors"
+      >Aplicar <span class="htmx-indicator spinner"></span></button>
+      <button
+        type="button"
+        data-action="{{ data_action }}"
+        class="font-ibm-plex-mono text-xs uppercase tracking-wider px-4 py-2.5 border border-linea text-texto-sec hover:bg-ink hover:text-paper transition-colors"
+      >Limpiar</button>
+    </div>
+  </form>
+</section>

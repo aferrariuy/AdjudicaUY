@@ -2,6 +2,11 @@
    comparison table on desktop. Both markups share the same ``results``
    loop and live inside ``#table-container`` so HTMX swaps stay atomic.
 
+   Note on formatting: the table uses Jinja's built-in ``format`` filter
+   (e.g. ``"{:,.2f}".format(...)``) for raw amounts. The KPI cards and
+   JS ``formatUYU()`` use locale-aware helpers; full centralization of
+   number formatting is a future refactor. See ``app/formatting.py``.
+
    The pagination bar lives at the top level of ``{% else %}`` — outside
    both responsive toggles — so it shows on every viewport. The
    ``hx-target`` on the pagination links keeps pointing at
@@ -77,6 +82,7 @@
        where the 8 columns still overflow. #}
     <div class="hidden lg:block overflow-x-auto">
       <table class="table-fixed divide-y divide-linea text-sm">
+        <caption class="sr-only">Adjudicaciones del Estado uruguayo</caption>
         <thead class="bg-ink text-paper">
           <tr>
             <th scope="col" class="w-[9%] px-3 py-2 text-left font-medium text-paper">Fecha</th>
@@ -92,7 +98,7 @@
         <tbody class="divide-y divide-linea bg-folio">
           {% for row in results %}
             <tr class="hover:bg-paper even:bg-paper">
-              <td class="px-3 py-3 whitespace-nowrap text-ink">{{ row.date.isoformat() }}</td>
+              <th scope="row" class="px-3 py-3 whitespace-nowrap text-ink font-normal">{{ row.date.isoformat() }}</th>
               <td class="px-3 py-3 text-ink">
                 <a
                   href="/organism/{{ row.organism | urlencode }}{% if request.query_params %}?{{ request.query_params }}{% endif %}"
@@ -146,10 +152,12 @@
             class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper cursor-pointer"
           >Anterior</a>
         {% else %}
-          <span
+          <button
+            type="button"
+            disabled
             aria-disabled="true"
-            class="px-3 py-1.5 rounded-md border border-linea bg-paper text-sm text-texto-sec cursor-not-allowed"
-          >Anterior</span>
+            class="px-3 py-1.5 rounded-md border border-linea bg-paper text-sm text-texto-sec cursor-not-allowed opacity-50"
+          >Anterior</button>
         {% endif %}
 
         {% for n in page_numbers %}
@@ -178,10 +186,12 @@
             class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper cursor-pointer"
           >Siguiente</a>
         {% else %}
-          <span
+          <button
+            type="button"
+            disabled
             aria-disabled="true"
-            class="px-3 py-1.5 rounded-md border border-linea bg-paper text-sm text-texto-sec cursor-not-allowed"
-          >Siguiente</span>
+            class="px-3 py-1.5 rounded-md border border-linea bg-paper text-sm text-texto-sec cursor-not-allowed opacity-50"
+          >Siguiente</button>
         {% endif %}
       </nav>
     {% endif %}

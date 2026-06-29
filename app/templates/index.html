@@ -8,141 +8,20 @@
 {% block title %}Adjudicaciones — AdjudicaUY{% endblock %}
 
 {% block content %}
-  <section aria-labelledby="filters-heading" class="bg-folio border border-linea p-4 sm:p-6 mb-6">
-    <h2 id="filters-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Filtros</h2>
+  {% with
+      form_id="filter-form",
+      hx_get="/adjudications",
+      hx_target="#results",
+      data_action="clear-filters",
+      heading_id="filters-heading",
+      show_company_filter=true,
+      show_organism_filter=true,
+      organisms=organisms
+  %}
+    {% include "partials/_filter_form.html" %}
+  {% endwith %}
 
-    {# The form has no action: HTMX intercepts the submit/change events
-       and turns them into a GET against /adjudications. The id is
-       used by the pagination links (``hx-include="#filter-form input"``)
-       to preserve the active filter values when changing pages. #}
-    <form
-      id="filter-form"
-      hx-get="/adjudications"
-      hx-target="#results"
-      hx-trigger="submit"
-      hx-swap="innerHTML"
-      hx-disabled-elt="find button[type='submit']"
-      class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
-    >
-      <div>
-        <label for="filter-article" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Artículo</label>
-        <input
-          id="filter-article"
-          type="text"
-          name="article"
-          value="{{ filters.article or '' }}"
-          placeholder="Ej: laptop"
-          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
-        >
-      </div>
-
-      <div>
-        <label for="filter-article-id" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">ID de artículo</label>
-        <input
-          id="filter-article-id"
-          type="text"
-          name="article_id"
-          value="{{ filters.article_id or '' }}"
-          placeholder="IDs separados por coma"
-          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
-        >
-      </div>
-
-      <div>
-        <label for="filter-company" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Empresa adjudicataria</label>
-        <input
-          id="filter-company"
-          type="text"
-          name="company"
-          value="{{ filters.company or '' }}"
-          placeholder="Ej: Empresa SA"
-          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
-        >
-      </div>
-
-      <div>
-        <label for="filter-organism" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Organismo</label>
-        <input
-          id="filter-organism"
-          type="text"
-          name="organism"
-          value="{{ filters.organism or '' }}"
-          placeholder="Ej: Ministerio de Interior"
-          list="organism-suggestions"
-          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
-        >
-        <datalist id="organism-suggestions">
-          {% for name in organisms %}
-            <option value="{{ name }}"></option>
-          {% endfor %}
-        </datalist>
-      </div>
-
-      <div>
-        <label for="filter-date-from" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Desde</label>
-        <input
-          id="filter-date-from"
-          type="date"
-          name="date_from"
-          value="{{ filters.date_from.isoformat() if filters.date_from else '' }}"
-          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
-        >
-      </div>
-
-      <div>
-        <label for="filter-date-to" class="block text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec mb-1">Hasta</label>
-        <input
-          id="filter-date-to"
-          type="date"
-          name="date_to"
-          value="{{ filters.date_to.isoformat() if filters.date_to else '' }}"
-          class="w-full border-b-2 border-linea bg-transparent px-2 py-1.5 text-sm font-ibm-plex text-ink focus:border-ink focus:outline-none"
-        >
-      </div>
-
-      <div class="flex items-end gap-2">
-        <button
-          type="submit"
-          class="font-ibm-plex-mono text-xs uppercase tracking-wider px-4 py-2.5 bg-ink text-paper border border-ink hover:bg-sello hover:border-sello transition-colors"
-        >Aplicar <span class="htmx-indicator spinner"></span></button>
-        <button
-          type="button"
-          onclick="limpiarFiltros()"
-          class="font-ibm-plex-mono text-xs uppercase tracking-wider px-4 py-2.5 border border-linea text-texto-sec hover:bg-ink hover:text-paper transition-colors"
-        >Limpiar</button>
-      </div>
-    </form>
-  </section>
-
-  <div id="results">
+  <div id="results" aria-live="polite" aria-busy="false">
     {% include "partials/_results.html" %}
   </div>
-
-  <script>
-    // Reset the date inputs to the current calendar year and re-submit
-    // the form via HTMX. The state stays in the form (no URL params),
-    // so the user sees the same view as a cold load: current year,
-    // text filters preserved. We use a button (not an <a href="/">) so
-    // the page never navigates and the partial swap stays smooth.
-    (function () {
-      function currentYearBounds() {
-        var y = new Date().getFullYear();
-        return [y + '-01-01', y + '-12-31'];
-      }
-
-      window.limpiarFiltros = function () {
-        var form = document.querySelector('form[hx-get="/adjudications"]');
-        if (!form) return;
-        var from = form.querySelector('input[name="date_from"]');
-        var to = form.querySelector('input[name="date_to"]');
-        var bounds = currentYearBounds();
-        if (from) from.value = bounds[0];
-        if (to) to.value = bounds[1];
-        // HTMX will re-issue the GET against /adjudications with the
-        // reset date values, swap into #results, and the route will
-        // return the current-year rows.
-        htmx.trigger(form, 'submit');
-      };
-    })();
-  </script>
 {% endblock %}
