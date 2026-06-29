@@ -649,6 +649,211 @@ def test_excessive_date_range_returns_422_on_organism_page(
     assert "5 años" in body
 
 
+# ---------------------------------------------------------------------------
+# Full-page (non-HTMX) 422 rendering — bug fix
+#
+# When a user navigates directly to ``GET /`` or ``GET /organism/{name}``
+# with an invalid date range, the response must be a full HTML page
+# (extending ``base.html``) so the error is rendered with the page
+# chrome — not a bare fragment. The HTMX partials
+# (``GET /adjudications`` and ``GET /organism/{name}/partial``) keep
+# returning the bare fragment because HTMX swaps it into the existing
+# ``#results`` / ``#organism-body`` container.
+# ---------------------------------------------------------------------------
+
+
+def test_full_page_index_renders_422_with_page_chrome_on_excessive_range(
+    client: TestClient,
+) -> None:
+    """GET / with an over-5y range returns 422 *with the full page chrome*.
+
+    Regression test: previously the route returned a bare ``<div>`` alert
+    fragment, so the user saw unstyled plain text. The fix renders
+    ``index.html`` (which extends ``base.html``) so the error is
+    displayed inside the normal page layout.
+    """
+
+    response = client.get("/?date_from=2010-01-01&date_to=2020-01-01")
+
+    assert response.status_code == 422
+    body = response.text
+    # The response is a full HTML document — header, footer, the lot.
+    assert body.startswith("<!DOCTYPE html>") or body.startswith("<html")
+    assert "<html" in body
+    # The page title is the index title.
+    assert "AdjudicaUY" in body
+    # The error fragment is present (alert role + Spanish max-range
+    # message).
+    assert 'role="alert"' in body
+    assert "5 años" in body
+    # The header from base.html is rendered (the brand title).
+    assert ">AdjudicaUY<" in body
+    # The footer is rendered too — full chrome, not a fragment.
+    assert "Agencia de Compras y Contrataciones" in body
+    # The filter form is still present so the user can correct the dates.
+    assert 'name="date_from"' in body
+    assert 'name="date_to"' in body
+
+
+def test_full_page_index_renders_422_with_page_chrome_on_invalid_format(
+    client: TestClient,
+) -> None:
+    """GET / with an unparseable date returns 422 with the full page chrome."""
+
+    response = client.get("/?date_from=not-a-date")
+
+    assert response.status_code == 422
+    body = response.text
+    # Full page chrome.
+    assert "<html" in body
+    assert "AdjudicaUY" in body
+    # Error fragment with the Spanish ISO-format hint.
+    assert 'role="alert"' in body
+    assert "AAAA-MM-DD" in body
+    # The header/footer are present.
+    assert ">AdjudicaUY<" in body
+    assert "Agencia de Compras y Contrataciones" in body
+
+
+def test_full_page_index_renders_422_with_page_chrome_on_reversed_range(
+    client: TestClient,
+) -> None:
+    """GET / with date_from > date_to returns 422 with the full page chrome."""
+
+    response = client.get("/?date_from=2025-12-01&date_to=2025-01-01")
+
+    assert response.status_code == 422
+    body = response.text
+    assert "<html" in body
+    assert "AdjudicaUY" in body
+    assert 'role="alert"' in body
+    assert "Desde" in body
+    assert "Hasta" in body
+
+
+def test_full_page_organism_renders_422_with_page_chrome_on_excessive_range(
+    client: TestClient, make_adjudication
+) -> None:
+    """GET /organism/{name} with an over-5y range returns 422 with full chrome.
+
+    Same regression as the index case, but for the organism profile
+    route. The page must render ``organism_detail.html`` (extending
+    ``base.html``) with the error displayed inside the
+    ``#organism-body`` swap target.
+    """
+
+    make_adjudication(
+        organism="Ministerio del Interior",
+        winning_company="ACME",
+        amount_uyu=Decimal("1000.00"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get(
+        "/organism/Ministerio%20del%20Interior"
+        "?date_from=2010-01-01&date_to=2020-01-01"
+    )
+
+    assert response.status_code == 422
+    body = response.text
+    # Full page chrome.
+    assert body.startswith("<!DOCTYPE html>") or body.startswith("<html")
+    assert "<html" in body
+    # Page title (the organism name appears in <title> and <h1>).
+    assert "Ministerio del Interior" in body
+    assert "AdjudicaUY" in body
+    # Error fragment.
+    assert 'role="alert"' in body
+    assert "5 años" in body
+    # Header + footer present.
+    assert ">AdjudicaUY<" in body
+    assert "Agencia de Compras y Contrataciones" in body
+    # The "Volver al buscador" link is still rendered (full chrome).
+    assert "Volver al buscador" in body
+
+
+def test_full_page_organism_renders_422_with_page_chrome_on_invalid_format(
+    client: TestClient, make_adjudication
+) -> None:
+    """GET /organism/{name} with an unparseable date returns 422 with full chrome."""
+
+    make_adjudication(
+        organism="Ministerio del Interior",
+        winning_company="ACME",
+        amount_uyu=Decimal("1000.00"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get(
+        "/organism/Ministerio%20del%20Interior?date_from=not-a-date"
+    )
+
+    assert response.status_code == 422
+    body = response.text
+    assert "<html" in body
+    assert "AdjudicaUY" in body
+    assert 'role="alert"' in body
+    assert "AAAA-MM-DD" in body
+    assert ">AdjudicaUY<" in body
+    assert "Agencia de Compras y Contrataciones" in body
+
+
+def test_htmx_partial_still_returns_bare_fragment_on_excessive_range(
+    client: TestClient,
+) -> None:
+    """HTMX partials (not full pages) keep returning the bare error fragment.
+
+    This is the contract that the existing
+    ``test_excessive_date_range_returns_422_on_index_page`` already
+    covers; the new test makes it explicit that the fix for the full
+    pages does NOT change the partial-route behaviour. The response
+    body must NOT be a full HTML document.
+    """
+
+    response = client.get(
+        "/adjudications?date_from=2010-01-01&date_to=2020-01-01",
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 422
+    body = response.text
+    # The error fragment is present.
+    assert 'role="alert"' in body
+    assert "5 años" in body
+    # But it is NOT a full HTML document — no <html>, no header, no
+    # footer. HTMX swaps this string into the existing
+    # ``#results`` container.
+    assert "<html" not in body
+    assert "<header" not in body
+    assert "Agencia de Compras y Contrataciones" not in body
+
+
+def test_organism_htmx_partial_still_returns_bare_fragment_on_excessive_range(
+    client: TestClient, make_adjudication
+) -> None:
+    """Organism HTMX partial keeps the bare-fragment contract."""
+
+    make_adjudication(
+        organism="Ministerio del Interior",
+        winning_company="ACME",
+        amount_uyu=Decimal("1000.00"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get(
+        "/organism/Ministerio%20del%20Interior/partial"
+        "?date_from=2010-01-01&date_to=2020-01-01"
+    )
+
+    assert response.status_code == 422
+    body = response.text
+    assert 'role="alert"' in body
+    assert "5 años" in body
+    # Bare fragment, not a full document.
+    assert "<html" not in body
+    assert "<header" not in body
+
+
 def test_limpiar_resets_to_current_year(client: TestClient) -> None:
     """The Limpiar control is a button that resets the form and re-triggers
     the HTMX request (NOT an <a href="/"> that would navigate)."""
