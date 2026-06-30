@@ -385,6 +385,11 @@
         var dateTo = form.querySelector('input[name="date_to"]');
         if (dateFrom) dateFrom.value = year + '-01-01';
         if (dateTo) dateTo.value = year + '-12-31';
+        // After a 422 error response, hx-disabled-elt may have left the
+        // submit button disabled. Re-enable it so htmx.trigger() works.
+        form.querySelectorAll('button[type="submit"]').forEach(function (b) {
+          b.removeAttribute('disabled');
+        });
         htmx.trigger(form, 'submit');
       });
 
