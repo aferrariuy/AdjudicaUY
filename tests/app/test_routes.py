@@ -867,7 +867,10 @@ def test_limpiar_resets_to_current_year(client: TestClient) -> None:
     assert ">Limpiar</button>" in body
     # The handler is now delegated from base.html; no global functions.
     assert "window.limpiarFiltros" not in body
-    assert "form.reset()" in body
+    # The handler now clears text inputs and sets date range to the
+    # current year instead of using form.reset().
+    assert "querySelectorAll('input[type=\"text\"]')" in body
+    assert "new Date().getFullYear()" in body
     assert "htmx.trigger" in body
 
 
@@ -895,7 +898,8 @@ def test_organism_limpiar_resets_date_range(
     assert 'data-action="clear-organism-filters"' in body
     assert ">Limpiar</button>" in body
     # The delegated handler lives in base.html and is shared with the index.
-    assert "form.reset()" in body
+    assert "querySelectorAll('input[type=\"text\"]')" in body
+    assert "new Date().getFullYear()" in body
     assert "htmx.trigger" in body
 
 

@@ -377,7 +377,14 @@
         e.preventDefault();
         var form = btn.closest('form');
         if (!form) return;
-        form.reset();
+        form.querySelectorAll('input[type="text"]').forEach(function (input) {
+          input.value = '';
+        });
+        var year = new Date().getFullYear();
+        var dateFrom = form.querySelector('input[name="date_from"]');
+        var dateTo = form.querySelector('input[name="date_to"]');
+        if (dateFrom) dateFrom.value = year + '-01-01';
+        if (dateTo) dateTo.value = year + '-12-31';
         htmx.trigger(form, 'submit');
       });
 
