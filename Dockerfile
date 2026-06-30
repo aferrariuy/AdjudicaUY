@@ -48,7 +48,7 @@ WORKDIR /src
 # Install dependencies with pnpm using the committed lockfile. Corepack
 # ships the correct pnpm version for the project, and ``--frozen-lockfile``
 # guarantees a reproducible, audited dependency tree.
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile
 
 # Copy Tailwind source (config + CSS) and the templates so the content
