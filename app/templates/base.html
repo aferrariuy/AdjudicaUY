@@ -374,6 +374,8 @@
       document.addEventListener('click', function (e) {
         var btn = e.target.closest('[data-action]');
         if (!btn) return;
+        // Only handle clear-* actions; ignore any future non-clear data-action buttons
+        if (!btn.dataset.action.startsWith('clear')) return;
         e.preventDefault();
         var form = btn.closest('form');
         if (!form) return;
@@ -386,11 +388,11 @@
         if (dateFrom) dateFrom.value = year + '-01-01';
         if (dateTo) dateTo.value = year + '-12-31';
         // After a 422 error response, hx-disabled-elt may have left the
-        // submit button disabled. Re-enable it so htmx.trigger() works.
+        // submit button disabled. Re-enable it so requestSubmit() works.
         form.querySelectorAll('button[type="submit"]').forEach(function (b) {
           b.removeAttribute('disabled');
         });
-        htmx.trigger(form, 'submit');
+        form.requestSubmit();
       });
 
       /* ---------------------------------------------------------------
