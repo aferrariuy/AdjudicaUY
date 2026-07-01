@@ -100,6 +100,10 @@ tests/
 - The scraper worker is a long-running process (not a cron job). Dokploy needs it running for its Scheduled Jobs feature.
 - No CI workflows configured yet (no `.github/` directory).
 
+## Project Skills
+
+- `local-dev` — Set up and run AdjudicaUY locally with Python venv and Podman PostgreSQL. Covers venv creation, dependency install, Postgres container, migrations, and running the app/worker.
+
 ## Conventional Commits
 
 The repo uses conventional commits: `feat(scope):`, `fix(scope):`, `test(scope):`, `style:`, `chore:`. Scopes seen: `scraper`, `db`, `scripts`, `test`, `normalizer`.

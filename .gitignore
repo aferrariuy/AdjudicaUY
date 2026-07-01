@@ -1,6 +1,9 @@
 # atl
 .atl/
 
+# codegraph
+.codegraph/
+
 # openspec
 openspec/
 
@@ -17,13 +20,15 @@ venv/
 .env
 .env.*
 !.env.example
-.env.local
 docker-compose.override.yml
 *.pem
 *.key
 secrets/
+*.log
 .npmrc
 .pypirc
+.coverage
+htmlcov/
 
 #SDD
 sdd/
@@ -38,6 +43,13 @@ app/static/css/style.css
 # Local Node.js artifacts (the ``package-lock.json`` IS committed so
 # the Docker build is reproducible).
 node_modules/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
 # OpenCode agent metadata
 .opencode/
