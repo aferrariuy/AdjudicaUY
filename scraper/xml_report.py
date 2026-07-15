@@ -57,6 +57,8 @@ from typing import TYPE_CHECKING
 import httpx
 from lxml import etree
 
+from scraper.retry import retry_with_backoff
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -262,13 +264,17 @@ def fetch_xml_report(
 ) -> bytes:
     """Fetch the raw XML payload from ``url``.
 
+    Retries on :class:`httpx.HTTPError` using exponential backoff with
+    schedule (1s, 3s, 9s) for a maximum of 4 total attempts. When
+    ``client`` is ``None``, each attempt creates a short-lived client.
+
     Parameters
     ----------
     url:
         Fully-qualified URL of the report endpoint.
     client:
         Optional ``httpx.Client`` to use (mainly for tests). When ``None``, a
-        short-lived client is created for the call.
+        short-lived client is created for each attempt.
     timeout:
         Per-request timeout, in seconds.
     max_bytes:
@@ -290,21 +296,30 @@ def fetch_xml_report(
     Raises
     ------
     httpx.HTTPError
-        Propagated from ``httpx`` on transport or HTTP-status failures, or
-        when the response body exceeds ``max_bytes``.
+        Propagated from ``httpx`` on transport or HTTP-status failures
+        after all retry attempts are exhausted, or when the response
+        body exceeds ``max_bytes``.
     """
 
-    if client is None:
-        with (
-            httpx.Client(timeout=timeout, headers=_HEADERS) as owned,
-            owned.stream("GET", url) as response,
-        ):
+    def _fetch() -> bytes:
+        if client is None:
+            with (
+                httpx.Client(timeout=timeout, headers=_HEADERS) as owned,
+                owned.stream("GET", url) as response,
+            ):
+                response.raise_for_status()
+                return _read_with_limit(response, max_bytes)
+
+        with client.stream("GET", url, headers=_HEADERS) as response:
             response.raise_for_status()
             return _read_with_limit(response, max_bytes)
 
-    with client.stream("GET", url, headers=_HEADERS) as response:
-        response.raise_for_status()
-        return _read_with_limit(response, max_bytes)
+    return retry_with_backoff(
+        "XML fetch",
+        _fetch,
+        retryable=(httpx.HTTPError,),
+        backoff_schedule=(1.0, 3.0, 9.0),
+    )
 
 
 # ---------------------------------------------------------------------------

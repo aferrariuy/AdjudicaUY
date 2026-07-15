@@ -33,7 +33,6 @@ import logging
 import sys
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, cast
-from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -46,6 +45,7 @@ from scraper.normalizer import (
     CompraEnrichment,
     CompraRow,
     NormalizationError,
+    build_license_link,
     normalize_compra,
 )
 from scraper.organism_lookup import UNKNOWN_ORGANISM_PREFIX, resolve_organism
@@ -103,28 +103,6 @@ def build_source_a_url(
         f"&dia_final={d.day}&mes_final={d.month}&anio_final={d.year}"
         f"&hora_final={end_hour}"
     )
-
-
-# Deterministic template for the public detail page. The XML report
-# carries ``id_compra``; the corresponding detail page is a stable URL
-# derived from it. Replacing the RSS-provided link with this template
-# removes a network round-trip per record and keeps the link shape
-# consistent with what the government actually serves.
-_LICENSE_LINK_TEMPLATE = (
-    "https://www.comprasestatales.gub.uy/consultas/detalle/id/{id_compra}"
-)
-
-
-def build_license_link(id_compra: str) -> str:
-    """Build the public detail-page URL for ``id_compra``.
-
-    Deterministic — no HTTP request — so the same ``id_compra`` always
-    produces the same ``license_link`` (see ``organism-lookup`` spec,
-    "License Link Construction" scenario). The identifier is URL-encoded
-    so a scraped value cannot break the resulting URL path.
-    """
-
-    return _LICENSE_LINK_TEMPLATE.format(id_compra=quote(id_compra, safe=""))
 
 
 def enrich_xml_compra(

@@ -17,7 +17,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-import scraper.bcu_client as bcu_module
+import scraper.retry as retry_module
 from scraper.bcu_client import BcuClient, BcuError
 from scraper.normalizer import (
     CONVERSION_TABLE,
@@ -590,7 +590,7 @@ def test_normalize_raises_malformed_compra_for_non_finite_amount(
 def test_normalize_propagates_bcu_error_from_monedas_lookup(monkeypatch) -> None:
     """A BCU service failure while resolving an unknown currency propagates."""
 
-    monkeypatch.setattr(bcu_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(retry_module.time, "sleep", lambda _seconds: None)
 
     compra = _build_xml_compra(
         id_moneda_monto_adj=99999,

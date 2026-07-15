@@ -8,7 +8,7 @@ from decimal import Decimal
 import httpx
 import pytest
 
-import scraper.bcu_client as bcu_module
+import scraper.retry as retry_module
 from scraper.bcu_client import BcuClient, BcuError
 
 # ---------------------------------------------------------------------------
@@ -193,7 +193,7 @@ def test_get_tcc_retries_on_503_then_succeeds(monkeypatch) -> None:
 
     # Patch ``time.sleep`` so the test runs instantly — the production
     # backoff is 1s → 3s → 9s and we do not want to wait that long.
-    monkeypatch.setattr(bcu_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(retry_module.time, "sleep", lambda _seconds: None)
 
     with httpx.Client(transport=transport) as http_client:
         bcu = BcuClient("https://example.test/wsbcucotizaciones", client=http_client)
@@ -205,7 +205,7 @@ def test_get_tcc_retries_on_503_then_succeeds(monkeypatch) -> None:
 
 
 def test_get_tcc_raises_bcu_error_when_all_retries_exhausted(monkeypatch) -> None:
-    monkeypatch.setattr(bcu_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(retry_module.time, "sleep", lambda _seconds: None)
 
     transport = httpx.MockTransport(_always_503_handler())
     with httpx.Client(transport=transport) as http_client:
@@ -217,7 +217,7 @@ def test_get_tcc_raises_bcu_error_when_all_retries_exhausted(monkeypatch) -> Non
 def test_get_tcc_retries_3_times_before_giving_up(monkeypatch) -> None:
     """The retry schedule is (1s, 3s, 9s) — exactly 4 attempts in total."""
 
-    monkeypatch.setattr(bcu_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(retry_module.time, "sleep", lambda _seconds: None)
 
     call_log: list[int] = []
     transport = httpx.MockTransport(_always_503_handler(call_log=call_log))
@@ -354,7 +354,7 @@ def test_list_monedas_parses_currency_catalogue() -> None:
 def test_list_monedas_retries_on_503(monkeypatch) -> None:
     """The monedas endpoint also uses the standard retry schedule."""
 
-    monkeypatch.setattr(bcu_module.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(retry_module.time, "sleep", lambda _seconds: None)
 
     call_log: list[int] = []
     transport = httpx.MockTransport(_always_503_handler(call_log=call_log))
@@ -368,113 +368,3 @@ def test_list_monedas_retries_on_503(monkeypatch) -> None:
 
     # 1 initial attempt + 3 retries = 4 calls before giving up.
     assert len(call_log) == 4
-
-
-# ---------------------------------------------------------------------------
-# Shared retry helper
-# ---------------------------------------------------------------------------
-
-
-def test_retry_with_backoff_succeeds_on_first_attempt(monkeypatch) -> None:
-    """The helper returns the operation result when the first attempt works."""
-
-    monkeypatch.setattr(bcu_module.time, "sleep", lambda _seconds: None)
-
-    call_count = 0
-
-    def _op() -> str:
-        nonlocal call_count
-        call_count += 1
-        return "ok"
-
-    result = bcu_module._retry_with_backoff("test", _op)
-
-    assert result == "ok"
-    assert call_count == 1
-
-
-def test_retry_with_backoff_retries_then_succeeds(monkeypatch) -> None:
-    """Transient failures are retried; the helper returns the eventual result."""
-
-    monkeypatch.setattr(bcu_module.time, "sleep", lambda _seconds: None)
-
-    call_count = 0
-
-    def _op() -> str:
-        nonlocal call_count
-        call_count += 1
-        if call_count < 3:
-            raise httpx.HTTPError("transient")
-        return "ok"
-
-    result = bcu_module._retry_with_backoff("test", _op)
-
-    assert result == "ok"
-    assert call_count == 3
-
-
-def test_retry_with_backoff_raises_bcu_error_after_exhausting_attempts(
-    monkeypatch,
-) -> None:
-    """When all attempts fail, the helper raises ``BcuError`` with the last exc."""
-
-    monkeypatch.setattr(bcu_module.time, "sleep", lambda _seconds: None)
-
-    call_count = 0
-
-    def _op() -> str:
-        nonlocal call_count
-        call_count += 1
-        raise httpx.HTTPError("always fails")
-
-    with pytest.raises(BcuError, match="test failed after"):
-        bcu_module._retry_with_backoff("test", _op)
-
-    # 1 immediate attempt + 3 backoff retries = 4 total attempts.
-    assert call_count == 4
-
-
-def test_retry_with_backoff_retries_bcu_errors(monkeypatch) -> None:
-    """``BcuError`` is also treated as a retryable transient failure."""
-
-    monkeypatch.setattr(bcu_module.time, "sleep", lambda _seconds: None)
-
-    call_count = 0
-
-    def _op() -> str:
-        nonlocal call_count
-        call_count += 1
-        if call_count < 2:
-            raise BcuError("transient")
-        return "ok"
-
-    result = bcu_module._retry_with_backoff("test", _op)
-
-    assert result == "ok"
-    assert call_count == 2
-
-
-def test_retry_with_backoff_applies_jitter(monkeypatch) -> None:
-    """Each backoff delay includes a random jitter to desynchronise workers."""
-
-    monkeypatch.setattr(bcu_module.random, "uniform", lambda _a, _b: 0.5)
-
-    sleep_calls: list[float] = []
-    monkeypatch.setattr(bcu_module.time, "sleep", sleep_calls.append)
-
-    call_count = 0
-
-    def _op() -> str:
-        nonlocal call_count
-        call_count += 1
-        if call_count < 3:
-            raise httpx.HTTPError("transient")
-        return "ok"
-
-    result = bcu_module._retry_with_backoff("test", _op)
-
-    assert result == "ok"
-    assert call_count == 3
-    assert len(sleep_calls) == 2
-    # Base delays (1s, 3s) plus the fixed 0.5s jitter.
-    assert sleep_calls == [1.5, 3.5]

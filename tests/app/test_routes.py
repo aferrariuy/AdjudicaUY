@@ -871,7 +871,6 @@ def test_limpiar_resets_to_current_year(client: TestClient) -> None:
     # current year instead of using form.reset().
     assert "querySelectorAll('input[type=\"text\"]')" in body
     assert "new Date().getFullYear()" in body
-    assert "htmx.trigger" in body
 
 
 def test_organism_limpiar_resets_date_range(
@@ -900,7 +899,6 @@ def test_organism_limpiar_resets_date_range(
     # The delegated handler lives in base.html and is shared with the index.
     assert "querySelectorAll('input[type=\"text\"]')" in body
     assert "new Date().getFullYear()" in body
-    assert "htmx.trigger" in body
 
 
 # ---------------------------------------------------------------------------

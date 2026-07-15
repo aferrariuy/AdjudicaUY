@@ -19,8 +19,6 @@ This client wraps both endpoints with:
 from __future__ import annotations
 
 import logging
-import random
-import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -29,6 +27,7 @@ from typing import TYPE_CHECKING, TypeVar
 import httpx
 from lxml import etree
 
+from scraper.retry import retry_with_backoff
 from scraper.xml_report import _SAFE_PARSER, _read_with_limit
 
 if TYPE_CHECKING:
@@ -57,21 +56,21 @@ class BcuCurrency:
 # Backoff delays in seconds, applied between successive attempts.
 # The first attempt is immediate; the subsequent attempts wait
 # ``1s``, then ``3s``, then ``9s`` before retrying.
-_BACKOFF_SCHEDULE: tuple[int, ...] = (1, 3, 9)
+_BCU_BACKOFF_SCHEDULE: tuple[float, ...] = (1.0, 3.0, 9.0)
 
-# Jitter window in seconds. A random value in ``[0, _BACKOFF_JITTER)`` is
+# Jitter window in seconds. A random value in ``[0, jitter)`` is
 # added to each scheduled delay so multiple workers that restart at the
 # same time do not retry in lockstep against the BCU API.
-_BACKOFF_JITTER = 1
+_BCU_BACKOFF_JITTER = 1.0
 
 # Exceptions treated as transient by the shared retry helper.
-_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (httpx.HTTPError, BcuError)
-
-T = TypeVar("T")
+_BCU_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (httpx.HTTPError, BcuError)
 
 _SOAP_NAMESPACE = "Cotiza"
 _SOAP_ACTION = "Cotizaaction/AWSBCUCOTIZACIONES.Execute"
 _DEFAULT_TIMEOUT_SECONDS = 30.0
+
+T = TypeVar("T")
 
 
 def _build_cotizaciones_envelope(bcu_code: int, on_date: date) -> bytes:
@@ -189,38 +188,26 @@ def _parse_monedas_response(response_xml: bytes) -> list[BcuCurrency]:
     return currencies
 
 
-def _retry_with_backoff(label: str, operation: Callable[[], T]) -> T:
-    """Execute ``operation`` with exponential backoff on transient failures.
+def _bcu_retry(label: str, operation: Callable[[], T]) -> T:
+    """Execute ``operation`` with BCU-specific retry and error wrapping.
 
-    Retries on :class:`httpx.HTTPError` and :class:`BcuError` using the
-    schedule defined in :data:`_BACKOFF_SCHEDULE` (1s, 3s, 9s) for a total
-    of four attempts. The first attempt is immediate; subsequent attempts
-    sleep for ``delay + random.uniform(0, _BACKOFF_JITTER)`` seconds before
-    retrying. When all attempts fail, the last exception is re-raised
-    wrapped in :class:`BcuError`.
+    Delegates to :func:`scraper.retry.retry_with_backoff` for the
+    backoff schedule, then wraps any final exception in :class:`BcuError`
+    to preserve the existing contract for callers.
     """
 
-    last_exc: Exception | None = None
-    for attempt, delay in enumerate((0,) + _BACKOFF_SCHEDULE):
-        if delay:
-            # Add jitter to avoid synchronization between workers.
-            jittered_delay = delay + random.uniform(0, _BACKOFF_JITTER)  # noqa: S311
-            logger.info(
-                "%s retry %d after %.2fs backoff",
-                label,
-                attempt,
-                jittered_delay,
-            )
-            time.sleep(jittered_delay)
-        try:
-            return operation()
-        except _RETRYABLE_EXCEPTIONS as exc:
-            last_exc = exc
-            logger.warning("%s attempt %d failed: %s", label, attempt + 1, exc)
-
-    # ``last_exc`` is always set here because the loop makes at least one
-    # attempt and every failed attempt assigns it.
-    raise BcuError(f"{label} failed after retries: {last_exc}") from last_exc
+    try:
+        return retry_with_backoff(
+            label,
+            operation,
+            retryable=_BCU_RETRYABLE_EXCEPTIONS,
+            backoff_schedule=_BCU_BACKOFF_SCHEDULE,
+            jitter=_BCU_BACKOFF_JITTER,
+        )
+    except BcuError:
+        raise
+    except Exception as exc:
+        raise BcuError(f"{label} failed after retries: {exc}") from exc
 
 
 class BcuClient:
@@ -327,7 +314,7 @@ class BcuClient:
                 body = _read_with_limit(response, _MAX_SOAP_SIZE_BYTES)
             return _parse_monedas_response(body)
 
-        return _retry_with_backoff("BCU monedas", _fetch)
+        return _bcu_retry("BCU monedas", _fetch)
 
     # ------------------------------------------------------------------
     # Internals
@@ -366,7 +353,7 @@ class BcuClient:
                 body = _read_with_limit(response, _MAX_SOAP_SIZE_BYTES)
             return _parse_tcc(body)
 
-        return _retry_with_backoff(
+        return _bcu_retry(
             f"BCU cotizaciones code={bcu_code} date={target_date}",
             _fetch,
         )

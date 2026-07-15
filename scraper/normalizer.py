@@ -35,6 +35,7 @@ import logging
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from datetime import date
@@ -246,11 +247,12 @@ def _resolve_mode(id_moneda: int) -> ConversionMode:
     return ConversionMode.NULL  # default for unknown IDs
 
 
-def _display_currency(id_moneda: int) -> str:
+def display_currency(id_moneda: int) -> str:
     """Pick the 3-letter display code for ``id_moneda``.
 
-    Falls back to a generic placeholder when the ID is unrecognised so the
-    row still satisfies the ``String(3) NOT NULL`` constraint.
+    Falls back to ``"N/D"`` (No Disponible) when the ID is unrecognised so the
+    row still satisfies the ``String(3) NOT NULL`` constraint and the UI
+    shows a consistent Spanish placeholder.
     """
 
     if id_moneda in PASSTHROUGH_TABLE:
@@ -259,7 +261,28 @@ def _display_currency(id_moneda: int) -> str:
         return NON_CONVERTIBLE_TABLE[id_moneda]
     if id_moneda in CONVERSION_TABLE:
         return CONVERSION_TABLE[id_moneda][1]
-    return "UNK"
+    return "N/D"
+
+
+# ---------------------------------------------------------------------------
+# License link template — deterministic URL built from ``id_compra``.
+# ---------------------------------------------------------------------------
+
+_LICENSE_LINK_TEMPLATE = (
+    "https://www.comprasestatales.gub.uy/consultas/detalle/id/{id_compra}"
+)
+
+
+def build_license_link(id_compra: str) -> str:
+    """Build the public detail-page URL for ``id_compra``.
+
+    Deterministic — no HTTP request — so the same ``id_compra`` always
+    produces the same ``license_link`` (see ``organism-lookup`` spec,
+    "License Link Construction" scenario). The identifier is URL-encoded
+    so a scraped value cannot break the resulting URL path.
+    """
+
+    return _LICENSE_LINK_TEMPLATE.format(id_compra=quote(id_compra, safe=""))
 
 
 def _quantize_uyu(value: Decimal) -> Decimal:
@@ -283,7 +306,7 @@ def _try_resolve_unknown(
 
     for entry in monedas:
         if entry.codigo == id_moneda:
-            iso = entry.codigo_iso or "UNK"
+            iso = entry.codigo_iso or "N/D"
             logger.info(
                 "Resolved unknown id_moneda=%s via BCU monedas -> bcu_code=%s ISO=%s",
                 id_moneda,
@@ -310,7 +333,7 @@ def _convert_amount(
     """
 
     mode = _resolve_mode(id_moneda)
-    currency = _display_currency(id_moneda)
+    currency = display_currency(id_moneda)
 
     if mode is ConversionMode.PASSTHROUGH:
         return currency, _quantize_uyu(amount)
@@ -464,5 +487,7 @@ __all__ = [
     "OferenteRow",
     "PASSTHROUGH_TABLE",
     "AdjudicacionRow",
+    "build_license_link",
+    "display_currency",
     "normalize_compra",
 ]

@@ -42,7 +42,6 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote
 
 from sqlalchemy import Column, and_, case, func, select
 
@@ -50,9 +49,8 @@ from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
 from app.models.oferente import Oferente
 from scraper.normalizer import (
-    CONVERSION_TABLE,
-    NON_CONVERTIBLE_TABLE,
-    PASSTHROUGH_TABLE,
+    build_license_link,
+    display_currency,
 )
 
 if TYPE_CHECKING:
@@ -212,21 +210,6 @@ class RankingEntry:
     name: str
     total_amount_uyu: Decimal
     adjudication_count: int
-
-
-# ---------------------------------------------------------------------------
-# License link template — mirrors the deterministic template the
-# scraper uses when building its own link, so DB rows and freshly
-# scraped rows produce the same URL for the same ``id_compra``.
-# ---------------------------------------------------------------------------
-
-_LICENSE_LINK_TEMPLATE = (
-    "https://www.comprasestatales.gub.uy/consultas/detalle/id/{id_compra}"
-)
-
-
-def _build_license_link(id_compra: str) -> str:
-    return _LICENSE_LINK_TEMPLATE.format(id_compra=quote(id_compra, safe=""))
 
 
 def _normalize(text: str | None) -> str | None:
@@ -834,37 +817,18 @@ def _listing_query() -> Any:
     ).join(Adjudicacion, Adjudicacion.compra_id == Compra.id)
 
 
-def _display_currency(id_moneda: int | None) -> str:
-    """Resolve ``id_moneda`` to the 3-letter display code shown in the table.
-
-    The mapping mirrors :mod:`scraper.normalizer`: passthrough IDs render
-    as ``"UYU"`` (no conversion), convertible IDs render as their ISO
-    4217 code (e.g. ``"USD"``), and non-convertible IDs render as the
-    custom placeholder (e.g. ``"UIX"``). Unknown or ``None`` IDs fall
-    back to ``"N/D"`` so the template
-    never sees a blank currency and the user knows the code is missing.
-    """
-
-    if id_moneda in PASSTHROUGH_TABLE:
-        return PASSTHROUGH_TABLE[id_moneda]
-    if id_moneda in CONVERSION_TABLE:
-        return CONVERSION_TABLE[id_moneda][1]
-    if id_moneda in NON_CONVERTIBLE_TABLE:
-        return NON_CONVERTIBLE_TABLE[id_moneda]
-    return "N/D"
-
-
 def _row_to_adjudication_row(row: Any) -> AdjudicationRow:
     """Map a SQLAlchemy row to a display-shaped :class:`AdjudicationRow`.
 
     The ``currency`` field is derived at query time from
-    ``id_moneda`` (see :func:`_display_currency`); the database does
+    ``id_moneda`` (see :func:`scraper.normalizer.display_currency`); the database does
     not store the display code, and the per-line-item conversion
     tables live in :mod:`scraper.normalizer`. Unknown codes fall back
-    to ``"UYU"`` so the template never renders a blank currency.
+    to ``"N/D"`` so the template never renders a blank currency.
     """
 
-    currency = _display_currency(getattr(row, "id_moneda", None))
+    id_moneda = getattr(row, "id_moneda", None)
+    currency = display_currency(id_moneda) if id_moneda is not None else "N/D"
     organism = row.organism or ""
     license_type = row.license_type or ""
     return AdjudicationRow(
@@ -878,7 +842,7 @@ def _row_to_adjudication_row(row: Any) -> AdjudicationRow:
         license_type=license_type,
         company_document=row.company_document,
         company_document_type=row.company_document_type,
-        license_link=_build_license_link(row.id_compra),
+        license_link=build_license_link(row.id_compra),
         article_id=getattr(row, "article_id", None),
     )
 
