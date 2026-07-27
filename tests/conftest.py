@@ -144,7 +144,13 @@ def client(db_session: Session) -> Generator[TestClient]:
     The app's :func:`get_db` dependency is overridden to return the
     transactional session, so route tests see exactly the rows the test
     inserted (and nothing else).
+
+    :func:`get_session_factory` is also patched so routes that create
+    manual sessions (e.g. the CSV export streaming route) bind to the
+    same test engine.
     """
+
+    from unittest.mock import patch
 
     from app.database import get_db
     from app.main import create_app
@@ -159,7 +165,23 @@ def client(db_session: Session) -> Generator[TestClient]:
             pass
 
     app.dependency_overrides[get_db] = _override_get_db
-    with TestClient(app) as test_client:
+
+    # Patch ``get_session_factory`` so manual session creation in routes
+    # (e.g. CSV export) uses the test engine. The factory returns a
+    # session bound to the same connection as ``db_session``.
+    test_session_factory = sessionmaker(
+        bind=db_session.get_bind(),
+        autoflush=False,
+        autocommit=False,
+        future=True,
+    )
+    with (
+        patch(
+            "app.routes.adjudications.get_session_factory",
+            return_value=test_session_factory,
+        ),
+        TestClient(app) as test_client,
+    ):
         yield test_client
 
 

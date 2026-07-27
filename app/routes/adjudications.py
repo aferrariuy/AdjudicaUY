@@ -17,6 +17,8 @@ and renders Jinja2 templates. No SQLAlchemy, no business logic.
 
 from __future__ import annotations
 
+import csv
+import io
 import logging
 import math
 from datetime import date
@@ -25,11 +27,17 @@ from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import (
+    HTMLResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from markupsafe import escape
 
-from app.database import get_db
+from app.database import get_db, get_session_factory
 from app.services.adjudication_service import (
+    MAX_EXPORT_ROWS,
     AdjudicationFilters,
     ConcentrationResult,
     ValidationError,
@@ -37,6 +45,7 @@ from app.services.adjudication_service import (
     count_adjudications,
     distinct_organisms,
     filters_from_query_params,
+    iter_adjudications,
     kpi_summary,
     list_adjudications,
     monthly_trend,
@@ -562,6 +571,118 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
             "concentration": concentration,
             "concentration_payload": concentration_payload,
             "has_concentration_data": concentration.ratio is not None,
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# CSV export
+# ---------------------------------------------------------------------------
+
+# CSV column order per the spec.
+_CSV_COLUMNS = [
+    "fecha",
+    "organismo",
+    "empresa_adjudicataria",
+    "articulo",
+    "monto",
+    "moneda",
+    "monto_uyu",
+    "tipo_compra",
+    "documento_empresa",
+    "tipo_documento",
+    "id_articulo",
+]
+
+
+def _row_to_csv_fields(row: Any) -> list[str]:
+    """Map an :class:`AdjudicationRow` to the CSV column values.
+
+    Raw values only — no es-UY formatting. Dates are ISO, decimals are
+    unformatted, NULLs become empty strings.
+    """
+
+    return [
+        row.date.isoformat(),
+        row.organism or "",
+        row.winning_company or "",
+        row.article or "",
+        str(row.amount) if row.amount is not None else "",
+        row.currency or "",
+        str(row.amount_uyu) if row.amount_uyu is not None else "",
+        row.license_type or "",
+        row.company_document or "",
+        row.company_document_type or "",
+        row.article_id or "",
+    ]
+
+
+@router.get("/adjudications/export", include_in_schema=False)
+def export_adjudications(request: Request) -> Response:
+    """Stream a CSV of adjudications matching the active filters.
+
+    Uses a manual DB session (not ``Depends(get_db)``) because the
+    ``StreamingResponse`` generator runs after the route function
+    returns — the dependency-based session would be closed before
+    iteration starts. The generator owns the session lifecycle and
+    closes it in a ``finally`` block.
+    """
+
+    params = cast("dict[str, str | None]", dict(request.query_params))
+    _inject_default_year_params(params)
+    try:
+        validate_date_params(params)
+    except ValidationError as exc:
+        return Response(exc.message, status_code=422, media_type="text/plain")
+
+    filters = filters_from_query_params(params)
+
+    # Manual session — the generator closes it.
+    session = get_session_factory()()
+    try:
+        total = count_adjudications(session, filters)
+    except Exception:
+        session.close()
+        raise
+
+    if total > MAX_EXPORT_ROWS:
+        session.close()
+        return Response(
+            "La exportación supera el límite de 500.000 filas. Ajuste los filtros.",
+            status_code=400,
+            media_type="text/plain",
+        )
+
+    def _csv_generator() -> Any:
+        """Yield CSV bytes: BOM → header → data rows."""
+
+        try:
+            buf = io.StringIO()
+            writer = csv.writer(buf, lineterminator="\r\n")
+
+            # UTF-8 BOM for Excel compatibility.
+            yield "\ufeff"
+
+            # Header row.
+            writer.writerow(_CSV_COLUMNS)
+            yield buf.getvalue()
+            buf.seek(0)
+            buf.truncate(0)
+
+            # Data rows.
+            for row in iter_adjudications(session, filters):
+                writer.writerow(_row_to_csv_fields(row))
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate(0)
+        finally:
+            session.close()
+
+    return StreamingResponse(
+        _csv_generator(),
+        media_type="text/csv; charset=utf-8",
+        headers={
+            "Content-Disposition": 'attachment; filename="adjudicaciones.csv"',
         },
     )
 

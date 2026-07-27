@@ -1339,3 +1339,248 @@ def test_pagination_multi_page_renders_correct_page_numbers(
     # Siguiente is the only link with hx-get for page 2 on page 1
     # (the Siguiente button itself, plus the page-2 number link).
     # We already asserted the hx-get for page 2 above.
+
+
+# ---------------------------------------------------------------------------
+# GET /adjudications/export — CSV export
+# ---------------------------------------------------------------------------
+
+
+def test_export_returns_csv_with_correct_headers(
+    client: TestClient, make_adjudication
+) -> None:
+    """Export endpoint returns 200 with CSV content-type and BOM prefix."""
+
+    make_adjudication(
+        winning_company="EXPORT-CO",
+        organism="EXPORT-ORG",
+        article="EXPORT-ARTICLE",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/adjudications/export")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/csv; charset=utf-8"
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="adjudicaciones.csv"'
+    )
+    # UTF-8 BOM at the start.
+    assert response.content.startswith(b"\xef\xbb\xbf")
+
+
+def test_export_csv_header_row_matches_spec(
+    client: TestClient, make_adjudication
+) -> None:
+    """The first CSV row is the column header per the spec."""
+
+    make_adjudication(date=date(CURRENT_YEAR, 3, 1))
+
+    response = client.get("/adjudications/export")
+    text = response.content.decode("utf-8-sig")
+    first_line = text.split("\r\n")[0]
+
+    assert first_line == (
+        "fecha,organismo,empresa_adjudicataria,articulo,monto,moneda,"
+        "monto_uyu,tipo_compra,documento_empresa,tipo_documento,id_articulo"
+    )
+
+
+def test_export_csv_data_row_contains_raw_values(
+    client: TestClient, make_adjudication
+) -> None:
+    """CSV data rows contain raw values (ISO dates, unformatted decimals)."""
+
+    make_adjudication(
+        winning_company="RAW-EXPORT-CO",
+        organism="RAW-EXPORT-ORG",
+        article="RAW-EXPORT-ARTICLE",
+        amount=Decimal("1234567.89"),
+        amount_uyu=Decimal("1234567.89"),
+        date=date(2024, 3, 15),
+    )
+
+    response = client.get(
+        "/adjudications/export?date_from=2024-01-01&date_to=2024-12-31"
+    )
+    text = response.content.decode("utf-8-sig")
+    lines = [line for line in text.split("\r\n") if line]
+
+    assert len(lines) == 2  # header + 1 data row
+    data_line = lines[1]
+    # Date is ISO format.
+    assert "2024-03-15" in data_line
+    # Amount is raw decimal (no thousand separators).
+    assert "1234567.89" in data_line
+    # Company name is present.
+    assert "RAW-EXPORT-CO" in data_line
+
+
+def test_export_csv_uses_crlf_line_endings(
+    client: TestClient, make_adjudication
+) -> None:
+    """CSV uses \\r\\n line endings for Excel compatibility."""
+
+    make_adjudication(date=date(CURRENT_YEAR, 3, 1))
+
+    response = client.get("/adjudications/export")
+    text = response.content.decode("utf-8-sig")
+
+    # At least one \r\n present (header + data row).
+    assert "\r\n" in text
+
+
+def test_export_empty_result_returns_headers_only(
+    client: TestClient,
+) -> None:
+    """Empty result set returns a CSV with only the header row."""
+
+    response = client.get("/adjudications/export")
+
+    assert response.status_code == 200
+    text = response.content.decode("utf-8-sig")
+    lines = [line for line in text.split("\r\n") if line]
+
+    assert len(lines) == 1  # header only
+    assert "fecha" in lines[0]
+
+
+def test_export_preserves_active_filters(client: TestClient, make_adjudication) -> None:
+    """Export applies the same filters as the listing UI."""
+
+    make_adjudication(
+        organism="FILTER-EXPORT-OSE",
+        winning_company="FILTER-EXPORT-A",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    make_adjudication(
+        organism="FILTER-EXPORT-MIN",
+        winning_company="FILTER-EXPORT-B",
+        date=date(CURRENT_YEAR, 4, 1),
+    )
+
+    response = client.get("/adjudications/export?organism=OSE")
+    text = response.content.decode("utf-8-sig")
+
+    assert "FILTER-EXPORT-A" in text
+    assert "FILTER-EXPORT-B" not in text
+
+
+def test_export_row_cap_exceeded_returns_400(
+    client: TestClient, make_adjudication, monkeypatch
+) -> None:
+    """When count exceeds MAX_EXPORT_ROWS, returns 400 with Spanish message."""
+
+    import app.routes.adjudications as routes_module
+
+    # Patch the cap to 0 so any data triggers it.
+    monkeypatch.setattr(routes_module, "MAX_EXPORT_ROWS", 0)
+
+    make_adjudication(date=date(CURRENT_YEAR, 3, 1))
+
+    response = client.get("/adjudications/export")
+
+    assert response.status_code == 400
+    assert "500.000" in response.text
+
+
+def test_export_default_year_injection(client: TestClient, make_adjudication) -> None:
+    """Export with no date params defaults to current year (like listing)."""
+
+    make_adjudication(
+        winning_company="EXPORT-OLD",
+        date=date(PREV_YEAR, 6, 1),
+    )
+    make_adjudication(
+        winning_company="EXPORT-NEW",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/adjudications/export")
+    text = response.content.decode("utf-8-sig")
+
+    assert "EXPORT-NEW" in text
+    assert "EXPORT-OLD" not in text
+
+
+def test_export_invalid_date_returns_422(client: TestClient) -> None:
+    """Invalid date params return 422 with Spanish error."""
+
+    response = client.get("/adjudications/export?date_from=not-a-date")
+
+    assert response.status_code == 422
+
+
+def test_export_null_amount_uyu_renders_as_empty(
+    client: TestClient, make_adjudication
+) -> None:
+    """amount_uyu=None renders as empty string in the CSV."""
+
+    make_adjudication(
+        winning_company="NULL-UYU-EXPORT",
+        amount_uyu=None,
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/adjudications/export")
+    text = response.content.decode("utf-8-sig")
+    lines = [line for line in text.split("\r\n") if line]
+
+    # The data row should be present (not just the header).
+    assert len(lines) == 2
+    # The monto_uyu column (index 6) should be empty — two consecutive
+    # commas with nothing between them.
+    data_fields = lines[1].split(",")
+    # monto_uyu is at index 6 (0-based).
+    assert data_fields[6] == ""
+
+
+# ---------------------------------------------------------------------------
+# Export button in _results.html
+# ---------------------------------------------------------------------------
+
+
+def test_export_button_visible_when_results_exist(
+    client: TestClient, make_adjudication
+) -> None:
+    """The CSV export button is rendered when results exist."""
+
+    make_adjudication(date=date(CURRENT_YEAR, 3, 1))
+
+    response = client.get("/adjudications")
+    body = response.text
+
+    assert 'href="/adjudications/export' in body
+    assert "Exportar CSV" in body
+
+
+def test_export_button_hidden_when_no_results(
+    client: TestClient,
+) -> None:
+    """The CSV export button is NOT rendered when there are 0 results."""
+
+    response = client.get("/adjudications")
+    body = response.text
+
+    assert 'href="/adjudications/export' not in body
+
+
+def test_export_button_preserves_query_params(
+    client: TestClient, make_adjudication
+) -> None:
+    """The export button href includes the current filter query params."""
+
+    make_adjudication(
+        organism="BTN-ORG-OSE",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/adjudications?organism=OSE&date_from=2024-01-01")
+    body = response.text
+
+    # The export link includes the active filter params.
+    assert "organism=OSE" in body
+    assert "date_from=2024-01-01" in body
+    # The link is a plain <a> (not HTMX).
+    assert "hx-get" not in body.split('href="/adjudications/export')[0].split("\n")[-1]

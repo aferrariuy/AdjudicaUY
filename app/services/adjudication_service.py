@@ -54,6 +54,8 @@ from scraper.normalizer import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from sqlalchemy.orm import Session
 
 # ---------------------------------------------------------------------------
@@ -462,6 +464,35 @@ def count_adjudications(session: Session, filters: AdjudicationFilters) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Streaming export
+# ---------------------------------------------------------------------------
+
+MAX_EXPORT_ROWS: int = 500_000
+
+
+def iter_adjudications(
+    session: Session,
+    filters: AdjudicationFilters,
+    *,
+    chunk_size: int = 1000,
+) -> Iterator[AdjudicationRow]:
+    """Yield filtered adjudication rows newest-first, using ``_listing_query``.
+
+    The generator uses ``yield_per(chunk_size)`` so the DB driver fetches
+    rows in batches instead of loading the entire result set into memory.
+    The caller (the route layer) is responsible for closing the session
+    when iteration is complete.
+    """
+
+    stmt = _listing_query()
+    stmt = _apply_filters(stmt, filters)
+    stmt = stmt.order_by(Compra.fecha_pub_adj.desc(), Adjudicacion.id.desc())
+    stmt = stmt.execution_options(yield_per=chunk_size)
+    for row in session.execute(stmt):
+        yield _row_to_adjudication_row(row)
+
+
+# ---------------------------------------------------------------------------
 # Chart aggregations
 # ---------------------------------------------------------------------------
 
@@ -853,12 +884,14 @@ __all__ = [
     "ConcentrationResult",
     "DateValidationError",
     "KpiSummary",
+    "MAX_EXPORT_ROWS",
     "RankingEntry",
     "ValidationError",
     "concentration_ratio",
     "count_adjudications",
     "distinct_organisms",
     "filters_from_query_params",
+    "iter_adjudications",
     "kpi_summary",
     "list_adjudications",
     "monthly_trend",

@@ -26,6 +26,13 @@
         {% endif %}
       {% endif %}
     </p>
+    {% if total > 0 %}
+      <a href="/adjudications/export?{{ request.query_params }}"
+         class="inline-flex items-center gap-1 rounded-lg border border-primary px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
+         download>
+        Exportar CSV
+      </a>
+    {% endif %}
   </div>
 
   {% include "partials/_kpi_cards.html" %}
