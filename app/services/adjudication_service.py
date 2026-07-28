@@ -785,6 +785,25 @@ def concentration_ratio(
 # ---------------------------------------------------------------------------
 
 
+def all_organisms(session: Session) -> list[str]:
+    """Return every distinct organism name in the database, no limit.
+
+    Used by the sitemap.xml route to enumerate all publicly crawlable
+    organism pages. Unlike :func:`distinct_organisms` (which filters
+    and caps at ``limit`` for the datalist), this query returns the
+    complete unfiltered set so the sitemap stays current as new
+    organisms appear.
+    """
+
+    stmt = (
+        select(Compra.organismo)
+        .join(Adjudicacion, Adjudicacion.compra_id == Compra.id)
+        .distinct()
+        .order_by(Compra.organismo.asc())
+    )
+    return [row[0] for row in session.execute(stmt) if row[0] is not None]
+
+
 def distinct_organisms(
     session: Session,
     filters: AdjudicationFilters,
@@ -887,6 +906,7 @@ __all__ = [
     "MAX_EXPORT_ROWS",
     "RankingEntry",
     "ValidationError",
+    "all_organisms",
     "concentration_ratio",
     "count_adjudications",
     "distinct_organisms",

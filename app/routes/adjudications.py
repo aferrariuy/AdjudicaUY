@@ -24,7 +24,7 @@ import math
 from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
-from urllib.parse import unquote
+from urllib.parse import quote, unquote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import (
@@ -35,6 +35,7 @@ from fastapi.responses import (
 )
 from markupsafe import escape
 
+from app.config import get_settings
 from app.database import get_db, get_session_factory
 from app.services.adjudication_service import (
     MAX_EXPORT_ROWS,
@@ -364,6 +365,31 @@ def _render(
     return HTMLResponse(_render_str(template_name, request, context))
 
 
+def _build_seo_context(
+    *,
+    meta_title: str,
+    meta_description: str,
+    og_type: str,
+    path: str,
+) -> dict[str, Any]:
+    """Build the SEO context dict passed to every full-page template.
+
+    The dict provides page-specific values for the SEO blocks in
+    ``base.html`` (meta description, OG tags, canonical URL). The
+    ``canonical_url`` is built from ``settings.site_url`` + ``path``,
+    stripping any query parameters so the canonical is stable.
+    """
+
+    settings = get_settings()
+    canonical_url = f"{settings.site_url}{path}"
+    return {
+        "meta_title": meta_title,
+        "meta_description": meta_description,
+        "og_type": og_type,
+        "canonical_url": canonical_url,
+    }
+
+
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)
 def index(request: Request, db: Session = Depends(get_db)) -> Response:
     """Render the full index page.
@@ -435,6 +461,15 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
         "index.html",
         request,
         {
+            **_build_seo_context(
+                meta_title="AdjudicaUY",
+                meta_description=(
+                    "Buscador de adjudicaciones del Estado uruguayo. "
+                    "Filtrá por organismo, empresa, artículo y fecha."
+                ),
+                og_type="website",
+                path="/",
+            ),
             "filters": filters,
             "results": results,
             "total": total,
@@ -794,6 +829,15 @@ def organism_detail(
             organism_name=decoded_name,
         )
 
+    seo = _build_seo_context(
+        meta_title=f"{decoded_name} — AdjudicaUY",
+        meta_description=(
+            f"Adjudicaciones del organismo {decoded_name} en el Estado uruguayo."
+        ),
+        og_type="GovernmentOrganization",
+        path=f"/organism/{quote(decoded_name, safe='')}",
+    )
+    context.update(seo)
     return _render("organism_detail.html", request, context)
 
 
@@ -833,6 +877,28 @@ def organism_detail_partial(
         context["filters"],
     )
     return _render("partials/_organism_detail_content.html", request, context)
+
+
+# ---------------------------------------------------------------------------
+# About page (informational)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/about", response_class=HTMLResponse, include_in_schema=False)
+def about(request: Request) -> HTMLResponse:
+    """Render the informational about page with SEO context."""
+
+    seo = _build_seo_context(
+        meta_title="Sobre AdjudicaUY",
+        meta_description=(
+            "AdjudicaUY es una plataforma de búsqueda y visualización "
+            "de adjudicaciones del Estado uruguayo. Datos públicos, "
+            "abiertos y actualizados."
+        ),
+        og_type="website",
+        path="/about",
+    )
+    return _render("pages/about.html", request, seo)
 
 
 __all__ = ["router"]

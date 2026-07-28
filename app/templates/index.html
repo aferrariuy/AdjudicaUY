@@ -7,6 +7,25 @@
 
 {% block title %}Adjudicaciones — AdjudicaUY{% endblock %}
 
+{# ── SEO overrides for the index/search page ──────────────────────── #}
+{% block meta_description %}{{ meta_description | default('Buscador de adjudicaciones del Estado uruguayo. Filtrá por organismo, empresa, artículo y fecha.', true) }}{% endblock %}
+{% block og_title %}{{ meta_title | default('AdjudicaUY', true) }}{% endblock %}
+{% block og_description %}{{ meta_description | default('Buscador de adjudicaciones del Estado uruguayo. Filtrá por organismo, empresa, artículo y fecha.', true) }}{% endblock %}
+{% block og_type %}website{% endblock %}
+{% block og_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/', true) }}{% endblock %}
+{% block canonical_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/', true) }}{% endblock %}
+{% block json_ld %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "AdjudicaUY",
+  "url": {{ canonical_url | default('https://adjudica.digitales.gub.uy/', true) | tojson }},
+  "description": "Buscador de adjudicaciones del Estado uruguayo"
+}
+</script>
+{% endblock %}
+
 {% block content %}
   {% with
       form_id="filter-form",

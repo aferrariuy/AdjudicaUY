@@ -21,5 +21,8 @@ bandit[toml]==1.8.3
 # Dependency vulnerability scanner
 pip-audit==2.7.3
 
+# HTML parser for E2E SEO tests
+beautifulsoup4==4.15.0
+
 # Git hooks framework
 pre-commit==4.2.0

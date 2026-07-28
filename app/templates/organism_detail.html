@@ -14,6 +14,24 @@
 
 {% block title %}{{ organism_name }} — AdjudicaUY{% endblock %}
 
+{# ── SEO overrides for organism profile page ───────────────────────── #}
+{% block meta_description %}{{ meta_description | default('Adjudicaciones del organismo ' ~ organism_name ~ ' en el Estado uruguayo.', true) }}{% endblock %}
+{% block og_title %}{{ meta_title | default(organism_name ~ ' — AdjudicaUY', true) }}{% endblock %}
+{% block og_description %}{{ meta_description | default('Adjudicaciones del organismo ' ~ organism_name ~ ' en el Estado uruguayo.', true) }}{% endblock %}
+{% block og_type %}GovernmentOrganization{% endblock %}
+{% block og_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/organism/' ~ organism_name, true) }}{% endblock %}
+{% block canonical_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/organism/' ~ organism_name, true) }}{% endblock %}
+{% block json_ld %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "GovernmentOrganization",
+  "name": {{ organism_name | tojson }},
+  "url": {{ canonical_url | default('https://adjudica.digitales.gub.uy/organism/' ~ organism_name, true) | tojson }}
+}
+</script>
+{% endblock %}
+
 {% block content %}
   <div class="mb-4">
     <a

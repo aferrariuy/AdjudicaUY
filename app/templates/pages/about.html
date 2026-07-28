@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{# About page — informational content about the AdjudicaUY platform.
+
+   Extends base.html and overrides SEO blocks for page-specific meta
+   tags, OG data, and JSON-LD. The route passes seo_context vars
+   (Phase 3); the |default filters ensure the template renders safely
+   even before routes are wired. #}
+
+{% block title %}{{ meta_title | default('Sobre AdjudicaUY', true) }}{% endblock %}
+
+{# ── SEO overrides ─────────────────────────────────────────────────── #}
+{% block meta_description %}{{ meta_description | default('AdjudicaUY es una plataforma de búsqueda y visualización de adjudicaciones del Estado uruguayo. Datos públicos, abiertos y actualizados.', true) }}{% endblock %}
+{% block og_title %}{{ meta_title | default('Sobre AdjudicaUY', true) }}{% endblock %}
+{% block og_description %}{{ meta_description | default('AdjudicaUY es una plataforma de búsqueda y visualización de adjudicaciones del Estado uruguayo. Datos públicos, abiertos y actualizados.', true) }}{% endblock %}
+{% block og_type %}website{% endblock %}
+{% block og_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/about', true) }}{% endblock %}
+{% block canonical_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/about', true) }}{% endblock %}
+{% block json_ld %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "name": "AdjudicaUY",
+  "url": {{ canonical_url | default('https://adjudica.digitales.gub.uy/about', true) | tojson }},
+  "description": "Plataforma de búsqueda de adjudicaciones del Estado uruguayo"
+}
+</script>
+{% endblock %}
+
+{% block content %}
+  <article class="max-w-3xl mx-auto">
+    <header class="mb-8">
+      <h1 class="font-big-shoulders text-3xl font-bold tracking-tight text-ink">
+        Sobre AdjudicaUY
+      </h1>
+      <p class="text-sm text-texto-sec mt-2">Plataforma de búsqueda y visualización de adjudicaciones del Estado uruguayo</p>
+    </header>
+
+    <div class="prose prose-sm max-w-none text-ink space-y-6">
+      <section>
+        <h2 class="font-big-shoulders text-xl font-bold text-ink mb-3">¿Qué es AdjudicaUY?</h2>
+        <p class="text-sm leading-relaxed">
+          AdjudicaUY es una herramienta que facilita el acceso a la información pública sobre
+          adjudicaciones estatales en Uruguay. Recopila datos publicados por la Agencia de Compras
+          y Contrataciones del Estado (ACCE) y los presenta en un formato accesible, permitiendo
+          buscar, filtrar y visualizar las adjudicaciones realizadas por los organismos del Estado.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="font-big-shoulders text-xl font-bold text-ink mb-3">Fuentes de datos</h2>
+        <p class="text-sm leading-relaxed">
+          Los datos provienen de los reportes XML publicados por Compras Estatales
+          (comprasestatales.gub.uy). La conversión de montos a Pesos Uruguayos (UYU) se realiza
+          según la cotización del Banco Central del Uruguay (BCU) en la fecha de adjudicación.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="font-big-shoulders text-xl font-bold text-ink mb-3">Funcionalidades</h2>
+        <ul class="list-disc pl-5 space-y-2 text-sm">
+          <li>Búsqueda de adjudicaciones por artículo, empresa, organismo y rango de fechas.</li>
+          <li>Perfiles de organismos con indicadores clave, tendencias mensuales y concentración.</li>
+          <li>Visualización de datos con gráficos interactivos (Chart.js).</li>
+          <li>Exportación de resultados a CSV.</li>
+        </ul>
+      </section>
+
+      <section>
+        <h2 class="font-big-shoulders text-xl font-bold text-ink mb-3">Código abierto</h2>
+        <p class="text-sm leading-relaxed">
+          AdjudicaUY es un proyecto de código abierto. El código fuente está disponible públicamente
+          para auditoría, contribución y reutilización.
+        </p>
+      </section>
+    </div>
+  </article>
+{% endblock %}

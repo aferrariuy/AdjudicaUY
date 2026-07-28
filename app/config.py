@@ -89,6 +89,24 @@ class Settings(BaseSettings):
         ),
     )
 
+    # SEO / site identity
+    site_url: str = Field(
+        default="http://localhost:8000",
+        description=(
+            "Public base URL of the site, used for canonical URLs and "
+            "OG/Twitter meta tags. No trailing slash. Override via SITE_URL "
+            "env var in production."
+        ),
+    )
+
+    debug: bool = Field(
+        default=False,
+        description=(
+            "Debug mode toggle. When True, HSTS headers are suppressed "
+            "so local development is not affected."
+        ),
+    )
+
     allow_http_source_url: bool = Field(
         default=False,
         description=(

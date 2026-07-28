@@ -146,6 +146,7 @@
       <nav aria-label="Paginación" class="px-4 py-3 border-t border-linea flex items-center justify-center gap-1 flex-wrap">
         {% if page > 1 %}
           <a
+            href="/adjudications?page={{ page - 1 }}"
             hx-get="/adjudications?page={{ page - 1 }}&partial=table"
             hx-target="#table-container"
             hx-include="#filter-form input"
@@ -170,6 +171,7 @@
             >{{ n }}</span>
           {% else %}
             <a
+              href="/adjudications?page={{ n }}"
               hx-get="/adjudications?page={{ n }}&partial=table"
               hx-target="#table-container"
               hx-include="#filter-form input"
@@ -180,6 +182,7 @@
 
         {% if page < total_pages %}
           <a
+            href="/adjudications?page={{ page + 1 }}"
             hx-get="/adjudications?page={{ page + 1 }}&partial=table"
             hx-target="#table-container"
             hx-include="#filter-form input"
