@@ -21,6 +21,7 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.config import get_settings
 from app.database import get_db, get_engine
@@ -113,6 +114,11 @@ def create_app() -> FastAPI:
     # the path exists.
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    # GZip compression — compresses responses larger than 500 bytes.
+    # Must be added first so it wraps the response after other
+    # middlewares set headers.
+    app.add_middleware(GZipMiddleware, minimum_size=500)
 
     # Security headers middleware — adds X-Content-Type-Options and
     # X-Frame-Options on every response. HSTS is only added when not
