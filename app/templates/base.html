@@ -52,6 +52,11 @@
     })();
   </script>
 
+  {# Preload critical fonts — starts download immediately, before CSS
+     is parsed. Breaks the font chain that causes 3.2s render delay. #}
+  <link rel="preload" href="/static/fonts/IBMPlexSans-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/static/fonts/BigShouldersDisplay-700.woff2" as="font" type="font/woff2" crossorigin>
+
   {# Self-hosted web fonts — loaded before Tailwind so font-family
      rules resolve immediately. font-display: swap in fonts.css
      prevents FOIT (flash of invisible text). #}
@@ -65,10 +70,29 @@
      Self-hosted to eliminate external DNS lookup. #}
   <script src="/static/vendor/htmx.min.js" defer></script>
 
-  {# Chart.js 4.4 — client-side rendering from the ``data-chart`` JSON
-     payloads that the partials emit on the canvas elements.
-     Self-hosted to eliminate external DNS lookup. #}
-  <script src="/static/vendor/chart.umd.js" defer></script>
+  {# Chart.js 4.4 — lazy-loaded only when the page has chart canvases.
+     Saves 68KB on pages without charts (e.g. /about). #}
+  <script>
+    (function() {
+      function loadChartJS() {
+        if (window.Chart) return Promise.resolve();
+        return new Promise(function(resolve) {
+          var s = document.createElement('script');
+          s.src = '/static/vendor/chart.umd.js';
+          s.onload = resolve;
+          document.head.appendChild(s);
+        });
+      }
+      // Load on DOMContentLoaded if charts are present
+      document.addEventListener('DOMContentLoaded', function() {
+        if (document.querySelector('canvas[data-chart]')) {
+          loadChartJS();
+        }
+      });
+      // Expose for HTMX swaps that bring in chart canvases
+      window.__loadChartJS = loadChartJS;
+    })();
+  </script>
 
   <style>
     /* Disable transitions on Tailwind utility toggles to keep HTMX swaps snappy. */
@@ -321,10 +345,10 @@
 
       // Destroy charts BEFORE HTMX removes the old canvas from the DOM.
       // htmx:beforeCleanupElement fires for each DOM node being removed
-      // during an innerHTML swap.
+      // during an innerHTML swap. Guard with Chart check for lazy loading.
       document.body.addEventListener('htmx:beforeCleanupElement', function (evt) {
         var el = evt.target;
-        if (!el) return;
+        if (!el || !window.Chart) return;
         if (el.querySelectorAll) {
           el.querySelectorAll('canvas[data-chart]').forEach(function (c) {
             var inst = Chart.getChart(c);
@@ -341,28 +365,37 @@
       // transitions have completed.  afterSettle is safer than afterSwap
       // for layout-dependent widgets like Chart.js.
       document.body.addEventListener('htmx:afterSettle', function () {
-        requestAnimationFrame(function () {
-          document.querySelectorAll('canvas[data-chart]').forEach(function (c) {
-            makeChart(c);
+        var canvases = document.querySelectorAll('canvas[data-chart]');
+        if (!canvases.length) return;
+        // Lazy-load Chart.js if not yet loaded, then render charts
+        var loader = window.__loadChartJS || function() { return Promise.resolve(); };
+        loader().then(function() {
+          requestAnimationFrame(function () {
+            canvases.forEach(function (c) {
+              makeChart(c);
+            });
           });
         });
       });
 
       // First-load bootstrap (no HTMX swap fires for a direct GET).
-      if (document.readyState !== 'loading') {
-        requestAnimationFrame(function () {
-          document.querySelectorAll('canvas[data-chart]').forEach(function (c) {
-            makeChart(c);
-          });
-        });
-      } else {
-        document.addEventListener('DOMContentLoaded', function () {
+      function bootstrapCharts() {
+        var canvases = document.querySelectorAll('canvas[data-chart]');
+        if (!canvases.length) return;
+        var loader = window.__loadChartJS || function() { return Promise.resolve(); };
+        loader().then(function() {
           requestAnimationFrame(function () {
-            document.querySelectorAll('canvas[data-chart]').forEach(function (c) {
+            canvases.forEach(function (c) {
               makeChart(c);
             });
           });
         });
+      }
+
+      if (document.readyState !== 'loading') {
+        bootstrapCharts();
+      } else {
+        document.addEventListener('DOMContentLoaded', bootstrapCharts);
       }
 
       // HTMX 1.9 aborts swaps on 4xx/5xx by default. We use HTTP 422
@@ -456,6 +489,7 @@
         // AFTER the ``.dark`` class is toggled above so the new
         // palette is what getPalette() returns.
         function recreateCharts() {
+          if (!window.Chart) return; // Chart.js not loaded yet
           document.querySelectorAll('canvas[data-chart]').forEach(function (c) {
             var inst = Chart.getChart(c);
             if (inst) inst.destroy();
