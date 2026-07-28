@@ -530,7 +530,7 @@ def test_index_is_htmx_compatible(client: TestClient) -> None:
 
     response = client.get("/")
     assert response.status_code == 200
-    assert "htmx.org" in response.text
+    assert "htmx.min.js" in response.text
 
 
 def test_index_includes_chartjs(client: TestClient) -> None:

@@ -130,6 +130,17 @@ def create_app() -> FastAPI:
             )
         return response
 
+    # Cache-Control for static assets — aggressive caching since files
+    # are content-hashed. Only applies to /static/ prefix.
+    @app.middleware("http")
+    async def add_cache_control(request, call_next):  # noqa: ANN001, ANN202
+        response = await call_next(request)
+        if request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = (
+                "public, max-age=31536000, immutable"
+            )
+        return response
+
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:
         """Lightweight liveness probe for container orchestrators."""

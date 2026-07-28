@@ -52,23 +52,23 @@
     })();
   </script>
 
+  {# Self-hosted web fonts — loaded before Tailwind so font-family
+     rules resolve immediately. font-display: swap in fonts.css
+     prevents FOIT (flash of invisible text). #}
+  <link rel="stylesheet" href="/static/css/fonts.css">
+
   {# Compiled Tailwind output (custom theme: ink, paper, folio, sello,
      registro, linea, texto-sec). Built from static/src/input.css. #}
   <link rel="stylesheet" href="/static/css/style.css">
 
-  {# Web fonts: Big Shoulders Display for mastheads/headings, IBM Plex
-     Mono for labels/buttons, IBM Plex Sans for body copy. #}
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;700;800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" crossorigin="anonymous">
-
-  {# HTMX 1.9 — partial page swaps, no SPA framework needed. #}
-  <script src="https://cdn.jsdelivr.net/npm/htmx.org@1.9.12/dist/htmx.min.js" integrity="sha384-ujb1lZYygJmzgSwoxRggbCHcjc0rB2XoQrxeTUQyRjrOnlCoYta87iKBWq3EsdM2" crossorigin="anonymous" defer></script>
+  {# HTMX 1.9 — partial page swaps, no SPA framework needed.
+     Self-hosted to eliminate external DNS lookup. #}
+  <script src="/static/vendor/htmx.min.js" defer></script>
 
   {# Chart.js 4.4 — client-side rendering from the ``data-chart`` JSON
-      payloads that the partials emit on the canvas elements. Hash
-      computed against chart.umd.js (not .min.js). #}
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.js" integrity="sha384-MH1axGwz/uQzfIcjFdjEfsM0xlf5mmWfAwwggaOh5IPFvgKFGbJ2PZ4VBbgSYBQN" crossorigin="anonymous" defer></script>
+     payloads that the partials emit on the canvas elements.
+     Self-hosted to eliminate external DNS lookup. #}
+  <script src="/static/vendor/chart.umd.js" defer></script>
 
   <style>
     /* Disable transitions on Tailwind utility toggles to keep HTMX swaps snappy. */
