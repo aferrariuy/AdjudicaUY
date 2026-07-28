@@ -52,6 +52,7 @@ services:
       SOURCE_A_BASE_URL: ${SOURCE_A_BASE_URL}
       SOURCE_B_BASE_URL: ${SOURCE_B_BASE_URL}
       BCU_API_URL: ${BCU_API_URL}
+      SITE_URL: ${SITE_URL:-http://localhost:8000}
     read_only: true
     cap_drop:
       - ALL
@@ -86,6 +87,7 @@ services:
       SOURCE_A_BASE_URL: ${SOURCE_A_BASE_URL}
       SOURCE_B_BASE_URL: ${SOURCE_B_BASE_URL}
       BCU_API_URL: ${BCU_API_URL}
+      SITE_URL: ${SITE_URL:-http://localhost:8000}
       SCRAPE_HOUR: ${SCRAPE_HOUR:-2}
       SCRAPE_MINUTE: ${SCRAPE_MINUTE:-0}
     read_only: true
