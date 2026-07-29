@@ -53,3 +53,7 @@ node_modules/
 
 # OpenCode agent metadata
 .opencode/
+opencode.jsonc
+
+# Unlighthouse
+.unlighthouse/
