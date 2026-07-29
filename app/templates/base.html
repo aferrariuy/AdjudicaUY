@@ -54,14 +54,57 @@
   <noscript><link rel="stylesheet" href="/static/css/style.css"></noscript>
 
   {# Critical CSS — inlined to avoid render-blocking external stylesheet.
-     Covers: box-sizing reset, body font, theme custom properties,
-     and HTMX swap transitions. The full style.css loads async below. #}
+     Covers: all above-the-fold layout (body, header, footer) to prevent CLS.
+     The full style.css loads async below. #}
   <style>
-    *,*::before,*::after{box-sizing:border-box}
-    html{font-family:'IBM Plex Sans',system-ui,sans-serif;line-height:1.5;-webkit-text-size-adjust:100%}
-    body{margin:0}
+    /* Reset */
+    *,*::before,*::after{box-sizing:border-box;border:0 solid #e5e7eb}
+    html{line-height:1.5;-webkit-text-size-adjust:100%;font-family:'IBM Plex Sans',system-ui,sans-serif}
+    body{margin:0;line-height:inherit}
+
+    /* Theme custom properties */
     :root{--color-ink:27 42 74;--color-paper:241 242 236;--color-folio:255 255 255;--color-sello:178 59 46;--color-registro:47 111 98;--color-linea:215 210 194;--color-texto-sec:91 100 120;--color-ranking-badge-bg:254 243 199;--color-ranking-badge-text:146 64 14}
     .dark{--color-ink:212 216 225;--color-paper:19 24 32;--color-folio:28 35 51;--color-sello:204 85 70;--color-registro:88 166 150;--color-linea:61 69 85;--color-texto-sec:142 152 171;--color-ranking-badge-bg:204 85 70;--color-ranking-badge-text:212 216 225}
+
+    /* Layout: body */
+    .bg-paper{--tw-bg-opacity:1;background-color:rgb(var(--color-paper)/var(--tw-bg-opacity,1))}
+    .text-ink{--tw-text-opacity:1;color:rgb(var(--color-ink)/var(--tw-text-opacity,1))}
+    .min-h-screen{min-height:100vh}
+    .flex{display:flex}
+    .flex-col{flex-direction:column}
+    .font-ibm-plex{font-family:'IBM Plex Sans',system-ui,sans-serif}
+
+    /* Layout: header/footer */
+    .bg-folio{--tw-bg-opacity:1;background-color:rgb(var(--color-folio)/var(--tw-bg-opacity,1))}
+    .border-b{border-bottom-width:1px}
+    .border-t{border-top-width:1px}
+    .border-linea{--tw-border-opacity:1;border-color:rgb(var(--color-linea)/var(--tw-border-opacity,1))}
+    .mt-auto{margin-top:auto}
+
+    /* Layout: container */
+    .max-w-7xl{max-width:80rem}
+    .mx-auto{margin-left:auto;margin-right:auto}
+    .px-4{padding-left:1rem;padding-right:1rem}
+    .py-4{padding-top:1rem;padding-bottom:1rem}
+    .py-6{padding-top:1.5rem;padding-bottom:1.5rem}
+    .items-center{align-items:center}
+    .justify-between{justify-content:space-between}
+    .flex-1{flex:1 1 0%}
+
+    /* Typography */
+    .font-big-shoulders{font-family:'Big Shoulders Display',serif}
+    .text-3xl{font-size:1.875rem;line-height:2.25rem}
+    .font-bold{font-weight:700}
+    .tracking-tight{letter-spacing:-.025em}
+    .text-sm{font-size:.875rem;line-height:1.25rem}
+    .text-xs{font-size:.75rem;line-height:1rem}
+    .text-texto-sec{--tw-text-opacity:1;color:rgb(var(--color-texto-sec)/var(--tw-text-opacity,1))}
+
+    /* Responsive */
+    @media (min-width:640px){.sm\:px-6{padding-left:1.5rem;padding-right:1.5rem}}
+    @media (min-width:1024px){.lg\:px-8{padding-left:2rem;padding-right:2rem}}
+
+    /* HTMX transitions */
     .htmx-swapping{opacity:0;transition:opacity 100ms ease-out}
     .htmx-settling{opacity:1;transition:opacity 100ms ease-out}
   </style>
