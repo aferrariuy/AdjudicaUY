@@ -37,62 +37,38 @@
   <script type="application/ld+json">{{ json_ld | tojson }}</script>
   {% endif %}{% endblock %}
 
-  {# Anti-FOUC bootstrap. Runs synchronously BEFORE the stylesheet is
-     fetched/parsed, so the ``.dark`` class is present on ``<html>``
-     when the very first CSS rules are applied. The localStorage
-     access is wrapped in try/catch so private-mode browsers
-     (Safari, Firefox strict) silently fall through to the default
-     light theme instead of throwing. #}
-  <script>
-    (function() {
-      try {
-        var t = localStorage.getItem('theme');
-        if (t === 'dark') document.documentElement.classList.add('dark');
-      } catch (e) {}
-    })();
-  </script>
-
   {# Preload critical fonts — starts download immediately, before CSS
      is parsed. Breaks the font chain that causes 3.2s render delay. #}
   <link rel="preload" href="/static/fonts/IBMPlexSans-400.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/static/fonts/BigShouldersDisplay-700.woff2" as="font" type="font/woff2" crossorigin>
 
-  {# Self-hosted web fonts — loaded before Tailwind so font-family
-     rules resolve immediately. font-display: swap in fonts.css
-     prevents FOIT (flash of invisible text). #}
-  <link rel="stylesheet" href="/static/css/fonts.css">
+  {# Self-hosted web fonts — loaded asynchronously via preload + onload.
+     The onload handler swaps rel to "stylesheet" once the file is fetched.
+     <noscript> fallback ensures styles load without JS. #}
+  <link rel="preload" href="/static/css/fonts.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="/static/css/fonts.css"></noscript>
 
   {# Compiled Tailwind output (custom theme: ink, paper, folio, sello,
-     registro, linea, texto-sec). Built from static/src/input.css. #}
-  <link rel="stylesheet" href="/static/css/style.css">
+     registro, linea, texto-sec). Built from static/src/input.css.
+     Async-loaded — critical subset is inlined in <head> below. #}
+  <link rel="preload" href="/static/css/style.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript><link rel="stylesheet" href="/static/css/style.css"></noscript>
+
+  {# Critical CSS — inlined to avoid render-blocking external stylesheet.
+     Covers: box-sizing reset, body font, theme custom properties,
+     and HTMX swap transitions. The full style.css loads async below. #}
+  <style>
+    *,*::before,*::after{box-sizing:border-box}
+    html{font-family:'IBM Plex Sans',system-ui,sans-serif;line-height:1.5;-webkit-text-size-adjust:100%}
+    body{margin:0}
+    :root{--color-ink:27 42 74;--color-paper:241 242 236;--color-folio:255 255 255;--color-sello:178 59 46;--color-registro:47 111 98;--color-linea:215 210 194;--color-texto-sec:91 100 120;--color-ranking-badge-bg:254 243 199;--color-ranking-badge-text:146 64 14}
+    .dark{--color-ink:212 216 225;--color-paper:19 24 32;--color-folio:28 35 51;--color-sello:204 85 70;--color-registro:88 166 150;--color-linea:61 69 85;--color-texto-sec:142 152 171;--color-ranking-badge-bg:204 85 70;--color-ranking-badge-text:212 216 225}
+    .htmx-swapping{opacity:0;transition:opacity 100ms ease-out}
+    .htmx-settling{opacity:1;transition:opacity 100ms ease-out}
+  </style>
 
   {# HTMX 1.9 — partial page swaps, no SPA framework needed.
      Self-hosted to eliminate external DNS lookup. #}
   <script src="/static/vendor/htmx.min.js" defer></script>
-
-  {# Chart.js 4.4 — lazy-loaded only when the page has chart canvases.
-     Saves 68KB on pages without charts (e.g. /about). #}
-  <script>
-    (function() {
-      function loadChartJS() {
-        if (window.Chart) return Promise.resolve();
-        return new Promise(function(resolve) {
-          var s = document.createElement('script');
-          s.src = '/static/vendor/chart.umd.js';
-          s.onload = resolve;
-          document.head.appendChild(s);
-        });
-      }
-      // Load on DOMContentLoaded if charts are present
-      document.addEventListener('DOMContentLoaded', function() {
-        if (document.querySelector('canvas[data-chart]')) {
-          loadChartJS();
-        }
-      });
-      // Expose for HTMX swaps that bring in chart canvases
-      window.__loadChartJS = loadChartJS;
-    })();
-  </script>
 
   <style>
     /* Disable transitions on Tailwind utility toggles to keep HTMX swaps snappy. */
@@ -105,6 +81,17 @@
   </style>
 </head>
 <body class="bg-paper text-ink min-h-screen flex flex-col font-ibm-plex">
+  {# Anti-FOUC bootstrap. Runs synchronously before any content renders,
+     so the ``.dark`` class is present on ``<html>`` when CSS applies.
+     Placed in <body> (not <head>) so it doesn't block first paint. #}
+  <script>
+    (function() {
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'dark') document.documentElement.classList.add('dark');
+      } catch (e) {}
+    })();
+  </script>
   <header class="bg-folio border-b border-linea">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
       <div>
@@ -142,262 +129,10 @@
   </footer>
 
   <script>
-    // Re-attach Chart.js instances after every HTMX swap. The partials
-    // emit canvases with a ``data-chart`` JSON payload describing the
-    // chart (type, labels, datasets). The global Chart object is loaded
-    // with ``defer`` so it is available by the time this script runs.
+    // Base page scripts: HTMX error handling, accessibility, filter reset,
+    // and theme toggle. Chart.js wiring lives in the child templates'
+    // scripts block on pages that render charts (index, organism_detail).
     (function () {
-      /* ---------------------------------------------------------------
-       * Palette & formatting
-       * --------------------------------------------------------------- */
-      // Two palettes — the dark variant is tuned for contrast against
-      // the dark folio (the cards' surface). ``getPalette()`` is
-      // called on every ``makeChart()`` invocation, so a chart that
-      // is remounted after an HTMX swap automatically picks up the
-      // active theme.
-      var LIGHT_PALETTE = [
-        '#1B2A4A', '#B23B2E', '#15803d', '#a16207', '#7c3aed',
-        '#0e7490', '#be185d', '#365314', '#9333ea', '#0f766e',
-      ];
-      var DARK_PALETTE = [
-        '#D4D8E1', '#CC5546', '#58A696', '#E8B84B', '#7C93EE',
-        '#4DB8C8', '#D45D7A', '#7FA858', '#A973E8', '#4FABA6',
-      ];
-      // Per-chart-type dark overrides. Light mode keeps server-provided
-      // colors verbatim; dark mode forces a lighter blue on line charts
-      // and a 2-segment sello/bright-blue split on doughnuts. The
-      // bright blue (#5B8DEF) is tuned for contrast against the dark
-      // folio (#131820) — the dark palette's #D4D8E1 reads as a faded
-      // gray and disappears against the gridlines.
-      var DARK_LINE_BORDER = '#5B8DEF';
-      var DARK_LINE_FILL = 'rgba(91, 141, 239, 0.15)';
-      var DARK_DOUGHNUT = ['#CC5546', '#5B8DEF'];
-      function getPalette() {
-        return document.documentElement.classList.contains('dark')
-          ? DARK_PALETTE
-          : LIGHT_PALETTE;
-      }
-
-      // Convert a 6-digit hex color (``#D4D8E1``) to an ``rgba()`` string
-      // with the given alpha. Used for line-chart fills, which need a
-      // semi-transparent version of the line color so the area under the
-      // line doesn't visually compete with the line itself.
-      function hexToRgba(hex, alpha) {
-        hex = hex.replace('#', '');
-        var r = parseInt(hex.substring(0, 2), 16);
-        var g = parseInt(hex.substring(2, 4), 16);
-        var b = parseInt(hex.substring(4, 6), 16);
-        return 'rgba(' + r + ', ' + g + ', ' + b + ', ' + alpha + ')';
-      }
-
-      var FMT_CACHE = { currency: 'UYU', locale: 'es-UY' };
-
-      // Client-side number formatting mirrors the es-UY locale used by
-      // the server-side helpers in ``app/formatting.py`` (the ``uyu`` /
-      // ``count_uy`` / ``pct_uy`` Jinja filters). Full centralization of
-      // formatting is a future refactor; this function stays local to the
-      // Chart.js tooltip layer.
-      function formatUYU(value) {
-        return new Intl.NumberFormat(FMT_CACHE.locale, {
-          style: 'currency',
-          currency: FMT_CACHE.currency,
-          maximumFractionDigits: 0,
-        }).format(value || 0);
-      }
-
-      /* ---------------------------------------------------------------
-       * Chart lifecycle
-       * --------------------------------------------------------------- */
-
-      function makeChart(canvas) {
-        if (!canvas || !canvas.dataset.chart) return null;
-
-        var spec;
-        try { spec = JSON.parse(canvas.dataset.chart); }
-        catch (e) { return null; }
-
-        // Defensive validation: malformed payloads should not reach
-        // ``new Chart()``. The server uses Jinja's ``|tojson`` filter,
-        // but this guard also protects against manual DOM edits or
-        // cached fragments.
-        if (!spec || typeof spec !== 'object') return null;
-        if (!['bar', 'line', 'doughnut', 'pie'].includes(spec.type)) return null;
-        if (!Array.isArray(spec.labels) || !Array.isArray(spec.datasets)) return null;
-
-        // Dark-mode-aware chart text colors. Hoisted here so the same
-        // ``isDark`` flag drives both the dataset palette and the
-        // options block below. Undefined values fall through to
-        // Chart.js defaults in light mode — those defaults are tuned
-        // for a light surface and look correct there, so we only
-        // override when the user is on the dark folio (#131820).
-        var isDark = document.documentElement.classList.contains('dark');
-        var tickColor = isDark ? '#8E98AB' : undefined;                // texto-sec on dark
-        var gridColor = isDark ? 'rgba(61, 69, 85, 0.4)' : undefined;  // linea, 40% alpha
-        var legendColor = isDark ? '#D4D8E1' : undefined;              // ink on dark
-
-        var chart = new Chart(canvas, {
-          type: spec.type || 'bar',
-          data: {
-            labels: spec.labels || [],
-            datasets: (spec.datasets || []).map(function (ds, i) {
-              var palette = getPalette();
-              // Datasets in mixed charts may carry their own type; fall
-              // back to the chart-level type otherwise.
-              var datasetType = ds.type || spec.type;
-
-              if (isDark) {
-                // Force dark-mode colors per chart type. Server-provided
-                // colors are tuned for the light folio and disappear on
-                // the dark surface (#131820), so we override them
-                // entirely instead of falling back to a "missing color"
-                // placeholder.
-                if (datasetType === 'line') {
-                  // Bright blue line + semi-transparent fill underneath.
-                  ds.borderColor = DARK_LINE_BORDER;
-                  ds.backgroundColor = DARK_LINE_FILL;
-                } else if (datasetType === 'doughnut' || datasetType === 'pie') {
-                  // Sello red (1) + bright blue (2). The dark palette's
-                  // #D4D8E1 segment reads as gray on the dark folio and
-                  // loses the "sello vs ink" semantic the light chart
-                  // carries, so we hardcode the 2-segment split.
-                  ds.backgroundColor = DARK_DOUGHNUT;
-                  ds.borderColor = DARK_DOUGHNUT;
-                } else {
-                  var color = palette[i % palette.length];
-                  ds.backgroundColor = color;
-                  ds.borderColor = color;
-                }
-              } else {
-                // Light mode: keep server colors when present, else
-                // fall back to the light palette. Unchanged behavior.
-                if (!ds.backgroundColor) ds.backgroundColor = palette[i % palette.length];
-                if (!ds.borderColor) ds.borderColor = ds.backgroundColor;
-              }
-              return ds;
-            }),
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            animation: false,
-            plugins: {
-              legend: {
-                position: 'bottom',
-                labels: { color: legendColor },
-              },
-              tooltip: {
-                titleColor: legendColor,
-                bodyColor: legendColor,
-                callbacks: {
-                  label: function (ctx) {
-                    var label = ctx.label || ctx.dataset.label || '';
-                    // Doughnut/pie charts: show count, not currency.
-                    if (ctx.chart.config.type === 'doughnut' || ctx.chart.config.type === 'pie') {
-                      return label + ': ' + (ctx.parsed || 0).toLocaleString('es-UY');
-                    }
-                    // Bar/line charts: show currency amount.
-                    return label + ': ' + formatUYU(ctx.parsed.y || ctx.parsed);
-                  },
-                },
-              },
-            },
-            // Scales only apply to axis-based charts (bar, line).
-            // Doughnut/pie charts have no axes — omit scales entirely
-            // to prevent Y-axis ticks from rendering. Tick and grid
-            // colors come from the dark-mode palette hoisted above.
-            scales: (spec.type === 'doughnut' || spec.type === 'pie') ? {} : {
-              x: {
-                ticks: { color: tickColor },
-                grid: { color: gridColor },
-              },
-              y: {
-                beginAtZero: true,
-                ticks: {
-                  color: tickColor,
-                  callback: function (value) { return formatUYU(value); },
-                },
-                grid: { color: gridColor },
-              },
-            },
-          },
-        });
-
-        // Force the first paint with explicit dimensions taken from the
-        // (now-stable) parent, NOT from Chart.js's internal measurement.
-        // This is the key fix: chart.resize() without arguments relies on
-        // Chart.js measuring the parent internally, which may still return
-        // unstable geometry on Firefox.
-        var parent = canvas.parentElement;
-        if (parent) {
-          var rect = parent.getBoundingClientRect();
-          if (rect.width > 0 && rect.height > 0) {
-            chart.resize(Math.floor(rect.width), Math.floor(rect.height));
-          }
-        }
-        chart.update('none');
-
-        return chart;
-      }
-
-      /* ---------------------------------------------------------------
-       * HTMX event wiring
-       * --------------------------------------------------------------- */
-
-      // Destroy charts BEFORE HTMX removes the old canvas from the DOM.
-      // htmx:beforeCleanupElement fires for each DOM node being removed
-      // during an innerHTML swap. Guard with Chart check for lazy loading.
-      document.body.addEventListener('htmx:beforeCleanupElement', function (evt) {
-        var el = evt.target;
-        if (!el || !window.Chart) return;
-        if (el.querySelectorAll) {
-          el.querySelectorAll('canvas[data-chart]').forEach(function (c) {
-            var inst = Chart.getChart(c);
-            if (inst) inst.destroy();
-          });
-        }
-        if (el.matches && el.matches('canvas[data-chart]')) {
-          var inst = Chart.getChart(el);
-          if (inst) inst.destroy();
-        }
-      });
-
-      // Mount charts after HTMX has fully settled the DOM and any
-      // transitions have completed.  afterSettle is safer than afterSwap
-      // for layout-dependent widgets like Chart.js.
-      document.body.addEventListener('htmx:afterSettle', function () {
-        var canvases = document.querySelectorAll('canvas[data-chart]');
-        if (!canvases.length) return;
-        // Lazy-load Chart.js if not yet loaded, then render charts
-        var loader = window.__loadChartJS || function() { return Promise.resolve(); };
-        loader().then(function() {
-          requestAnimationFrame(function () {
-            canvases.forEach(function (c) {
-              makeChart(c);
-            });
-          });
-        });
-      });
-
-      // First-load bootstrap (no HTMX swap fires for a direct GET).
-      function bootstrapCharts() {
-        var canvases = document.querySelectorAll('canvas[data-chart]');
-        if (!canvases.length) return;
-        var loader = window.__loadChartJS || function() { return Promise.resolve(); };
-        loader().then(function() {
-          requestAnimationFrame(function () {
-            canvases.forEach(function (c) {
-              makeChart(c);
-            });
-          });
-        });
-      }
-
-      if (document.readyState !== 'loading') {
-        bootstrapCharts();
-      } else {
-        document.addEventListener('DOMContentLoaded', bootstrapCharts);
-      }
-
       // HTMX 1.9 aborts swaps on 4xx/5xx by default. We use HTTP 422
       // to signal validation errors (e.g. reversed date range) and
       // want the response body — an inline HTML fragment — to land in
@@ -482,26 +217,11 @@
           icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="' + (dark ? SUN_PATH : MOON_PATH) + '"/>';
         }
 
-        // Re-mount every Chart.js instance against the new theme. The
-        // makeChart() factory reads ``getPalette()`` and the ``isDark``
-        // branch on every invocation, so a destroy + recreate cycle
-        // swaps the dataset colors without a page refresh. Must run
-        // AFTER the ``.dark`` class is toggled above so the new
-        // palette is what getPalette() returns.
-        function recreateCharts() {
-          if (!window.Chart) return; // Chart.js not loaded yet
-          document.querySelectorAll('canvas[data-chart]').forEach(function (c) {
-            var inst = Chart.getChart(c);
-            if (inst) inst.destroy();
-            makeChart(c);
-          });
-        }
-
         function toggle() {
           var dark = document.documentElement.classList.toggle('dark');
           try { localStorage.setItem('theme', dark ? 'dark' : 'light'); } catch (e) {}
           setLabel(dark);
-          recreateCharts();
+          document.dispatchEvent(new Event('theme:changed'));
         }
 
         // Set initial icon state from whatever the anti-FOUC script
@@ -511,5 +231,7 @@
       })();
     })();
   </script>
+
+  {% block scripts %}{% endblock %}
 </body>
 </html>

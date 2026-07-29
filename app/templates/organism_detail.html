@@ -75,3 +75,125 @@
     {% endif %}
   </div>
 {% endblock %}
+
+{% block scripts %}
+<script>
+  // Chart.js wiring — only loaded on pages with chart canvases.
+  // Saves ~68KB on pages without charts (e.g. /about).
+  (function () {
+    /* Chart.js lazy loader */
+    function loadChartJS() {
+      if (window.Chart) return Promise.resolve();
+      return new Promise(function(resolve) {
+        var s = document.createElement('script');
+        s.src = '/static/vendor/chart.umd.js';
+        s.onload = resolve;
+        document.head.appendChild(s);
+      });
+    }
+    window.__loadChartJS = loadChartJS;
+
+    /* Palette & formatting */
+    var LIGHT_PALETTE = ['#1B2A4A','#B23B2E','#15803d','#a16207','#7c3aed','#0e7490','#be185d','#365314','#9333ea','#0f766e'];
+    var DARK_PALETTE = ['#D4D8E1','#CC5546','#58A696','#E8B84B','#7C93EE','#4DB8C8','#D45D7A','#7FA858','#A973E8','#4FABA6'];
+    var DARK_LINE_BORDER = '#5B8DEF';
+    var DARK_LINE_FILL = 'rgba(91, 141, 239, 0.15)';
+    var DARK_DOUGHNUT = ['#CC5546', '#5B8DEF'];
+    function getPalette() {
+      return document.documentElement.classList.contains('dark') ? DARK_PALETTE : LIGHT_PALETTE;
+    }
+    var FMT_CACHE = { currency: 'UYU', locale: 'es-UY' };
+    function formatUYU(value) {
+      return new Intl.NumberFormat(FMT_CACHE.locale, { style: 'currency', currency: FMT_CACHE.currency, maximumFractionDigits: 0 }).format(value || 0);
+    }
+
+    /* Chart factory */
+    function makeChart(canvas) {
+      if (!canvas || !canvas.dataset.chart) return null;
+      var spec;
+      try { spec = JSON.parse(canvas.dataset.chart); } catch (e) { return null; }
+      if (!spec || typeof spec !== 'object') return null;
+      if (!['bar','line','doughnut','pie'].includes(spec.type)) return null;
+      if (!Array.isArray(spec.labels) || !Array.isArray(spec.datasets)) return null;
+
+      var isDark = document.documentElement.classList.contains('dark');
+      var tickColor = isDark ? '#8E98AB' : undefined;
+      var gridColor = isDark ? 'rgba(61, 69, 85, 0.4)' : undefined;
+      var legendColor = isDark ? '#D4D8E1' : undefined;
+
+      var chart = new Chart(canvas, {
+        type: spec.type || 'bar',
+        data: {
+          labels: spec.labels || [],
+          datasets: (spec.datasets || []).map(function (ds, i) {
+            var palette = getPalette();
+            var datasetType = ds.type || spec.type;
+            if (isDark) {
+              if (datasetType === 'line') { ds.borderColor = DARK_LINE_BORDER; ds.backgroundColor = DARK_LINE_FILL; }
+              else if (datasetType === 'doughnut' || datasetType === 'pie') { ds.backgroundColor = DARK_DOUGHNUT; ds.borderColor = DARK_DOUGHNUT; }
+              else { var color = palette[i % palette.length]; ds.backgroundColor = color; ds.borderColor = color; }
+            } else {
+              if (!ds.backgroundColor) ds.backgroundColor = palette[i % palette.length];
+              if (!ds.borderColor) ds.borderColor = ds.backgroundColor;
+            }
+            return ds;
+          }),
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, animation: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { color: legendColor } },
+            tooltip: {
+              titleColor: legendColor, bodyColor: legendColor,
+              callbacks: { label: function (ctx) {
+                var label = ctx.label || ctx.dataset.label || '';
+                if (ctx.chart.config.type === 'doughnut' || ctx.chart.config.type === 'pie') return label + ': ' + (ctx.parsed || 0).toLocaleString('es-UY');
+                return label + ': ' + formatUYU(ctx.parsed.y || ctx.parsed);
+              }},
+            },
+          },
+          scales: (spec.type === 'doughnut' || spec.type === 'pie') ? {} : {
+            x: { ticks: { color: tickColor }, grid: { color: gridColor } },
+            y: { beginAtZero: true, ticks: { color: tickColor, callback: function (v) { return formatUYU(v); } }, grid: { color: gridColor } },
+          },
+        },
+      });
+      var parent = canvas.parentElement;
+      if (parent) { var rect = parent.getBoundingClientRect(); if (rect.width > 0 && rect.height > 0) chart.resize(Math.floor(rect.width), Math.floor(rect.height)); }
+      chart.update('none');
+      return chart;
+    }
+
+    /* HTMX chart lifecycle */
+    document.body.addEventListener('htmx:beforeCleanupElement', function (evt) {
+      var el = evt.target;
+      if (!el || !window.Chart) return;
+      if (el.querySelectorAll) el.querySelectorAll('canvas[data-chart]').forEach(function (c) { var inst = Chart.getChart(c); if (inst) inst.destroy(); });
+      if (el.matches && el.matches('canvas[data-chart]')) { var inst = Chart.getChart(el); if (inst) inst.destroy(); }
+    });
+
+    document.body.addEventListener('htmx:afterSettle', function () {
+      var canvases = document.querySelectorAll('canvas[data-chart]');
+      if (!canvases.length) return;
+      loadChartJS().then(function() { requestAnimationFrame(function () { canvases.forEach(function (c) { makeChart(c); }); }); });
+    });
+
+    function bootstrapCharts() {
+      var canvases = document.querySelectorAll('canvas[data-chart]');
+      if (!canvases.length) return;
+      loadChartJS().then(function() { requestAnimationFrame(function () { canvases.forEach(function (c) { makeChart(c); }); }); });
+    }
+    if (document.readyState !== 'loading') bootstrapCharts();
+    else document.addEventListener('DOMContentLoaded', bootstrapCharts);
+
+    /* Theme change → recreate charts with new palette */
+    function recreateCharts() {
+      if (!window.Chart) return;
+      document.querySelectorAll('canvas[data-chart]').forEach(function (c) {
+        var inst = Chart.getChart(c); if (inst) inst.destroy(); makeChart(c);
+      });
+    }
+    document.addEventListener('theme:changed', recreateCharts);
+  })();
+</script>
+{% endblock %}
