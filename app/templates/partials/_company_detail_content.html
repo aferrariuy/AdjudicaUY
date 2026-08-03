@@ -39,7 +39,16 @@
   {% endwith %}
 
   <section aria-labelledby="company-history-heading">
-    <h2 id="company-history-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Historial de adjudicaciones</h2>
+    <div class="flex items-center justify-between gap-4 mb-4">
+      <h2 id="company-history-heading" class="font-big-shoulders text-xl font-bold text-ink">Historial de adjudicaciones</h2>
+      {% if total > 0 %}
+        <a
+          href="/company/{{ company_type | urlencode }}/{{ company_number | urlencode }}/export?{{ request.query_params }}"
+          class="inline-flex items-center gap-1 rounded-lg border border-primary px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
+          download
+        >Exportar CSV</a>
+      {% endif %}
+    </div>
     <div id="table-container" aria-live="polite" aria-busy="false">
       {% with company_profile=true, listing_base_url="/company/" ~ (company_type | urlencode) ~ "/" ~ (company_number | urlencode), filter_form_id="company-filter-form" %}
         {% include "partials/_results_table.html" %}
