@@ -34,6 +34,10 @@
     {% include "partials/_ranking_list.html" %}
   {% endwith %}
 
+  {% with rows=top_article_rows, heading_id="company-top-articles-heading", title="Principales artículos", link_to_organism=false %}
+    {% include "partials/_ranking_list.html" %}
+  {% endwith %}
+
   <section aria-labelledby="company-history-heading">
     <h2 id="company-history-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Historial de adjudicaciones</h2>
     <div id="table-container" aria-live="polite" aria-busy="false">

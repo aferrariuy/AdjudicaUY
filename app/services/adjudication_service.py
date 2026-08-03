@@ -227,6 +227,16 @@ class RankingEntry:
     adjudication_count: int
 
 
+@dataclass(frozen=True)
+class ArticleRanking:
+    """One row in the top articles ranking for a filtered profile."""
+
+    name: str
+    article_id: str | None
+    total_amount_uyu: Decimal
+    adjudication_count: int
+
+
 def _normalize(text: str | None) -> str | None:
     """Strip and collapse a user-typed string, returning ``None`` if empty."""
 
@@ -489,6 +499,7 @@ def count_adjudications(session: Session, filters: AdjudicationFilters) -> int:
 # ---------------------------------------------------------------------------
 
 MAX_EXPORT_ROWS: int = 500_000
+MAX_TOP_ARTICLES: int = 20
 
 
 def iter_adjudications(
@@ -600,6 +611,43 @@ def ranking_by_organism(
         RankingEntry(
             name=row.name,
             total_amount_uyu=row.total_amount_uyu,
+            adjudication_count=int(row.adjudication_count),
+        )
+        for row in session.execute(stmt)
+    ]
+
+
+def top_articles(
+    session: Session,
+    filters: AdjudicationFilters,
+    *,
+    limit: int = MAX_TOP_ARTICLES,
+) -> list[ArticleRanking]:
+    """Return top articles grouped by ID when available, otherwise description."""
+
+    article_key = func.coalesce(Adjudicacion.id_articulo, Adjudicacion.desc_articulo)
+    effective_limit = min(max(limit, 0), MAX_TOP_ARTICLES)
+    stmt = (
+        select(
+            func.min(Adjudicacion.desc_articulo).label("name"),
+            func.min(Adjudicacion.id_articulo).label("article_id"),
+            func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label(
+                "total_amount_uyu"
+            ),
+            func.count(Adjudicacion.id).label("adjudication_count"),
+        )
+        .join(Compra, Compra.id == Adjudicacion.compra_id)
+        .where(Adjudicacion.amount_uyu.is_not(None))
+        .group_by(article_key)
+        .order_by(func.sum(Adjudicacion.amount_uyu).desc())
+        .limit(effective_limit)
+    )
+    stmt = _apply_filters(stmt, filters)
+    return [
+        ArticleRanking(
+            name=row.name,
+            article_id=row.article_id,
+            total_amount_uyu=Decimal(row.total_amount_uyu or 0),
             adjudication_count=int(row.adjudication_count),
         )
         for row in session.execute(stmt)
@@ -981,11 +1029,13 @@ def _row_to_adjudication_row(row: Any) -> AdjudicationRow:
 __all__ = [
     "AdjudicationFilters",
     "AdjudicationRow",
+    "ArticleRanking",
     "CompanyProfileSummary",
     "ConcentrationResult",
     "DateValidationError",
     "KpiSummary",
     "MAX_EXPORT_ROWS",
+    "MAX_TOP_ARTICLES",
     "RankingEntry",
     "ValidationError",
     "all_organisms",
@@ -1001,5 +1051,6 @@ __all__ = [
     "monthly_trend",
     "ranking_by_company",
     "ranking_by_organism",
+    "top_articles",
     "validate_date_params",
 ]

@@ -57,6 +57,7 @@ from app.services.adjudication_service import (
     monthly_trend,
     ranking_by_company,
     ranking_by_organism,
+    top_articles,
     validate_date_params,
 )
 
@@ -961,6 +962,11 @@ def _build_company_context(
         if not decoded_type or not decoded_number
         else ranking_by_organism(db, filters, limit=RANKING_LIMIT)
     )
+    top_article_rows = (
+        []
+        if not decoded_type or not decoded_number
+        else top_articles(db, filters, limit=RANKING_LIMIT)
+    )
 
     return {
         "filters": filters,
@@ -976,6 +982,7 @@ def _build_company_context(
         "total_pages": total_pages,
         "page_numbers": _build_page_numbers(page, total_pages),
         "ranking_rows": ranking_rows,
+        "top_article_rows": top_article_rows,
         "organisms": (
             []
             if not decoded_type or not decoded_number
