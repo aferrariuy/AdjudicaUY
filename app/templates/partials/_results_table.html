@@ -13,7 +13,11 @@
    ``#table-container`` so a single response replaces the cards, the
    table, and the pagination bar in one swap. #}
 
-<section aria-labelledby="results-heading" class="bg-folio border border-linea overflow-hidden">
+ {% set pagination_base = listing_base_url | default('/adjudications', true) %}
+ {% set pagination_partial = pagination_base ~ '/partial' if company_profile | default(false, true) else pagination_base %}
+ {% set pagination_form = filter_form_id | default('filter-form', true) %}
+
+ <section aria-labelledby="results-heading" class="bg-folio border border-linea overflow-hidden">
   <h2 id="results-heading" class="sr-only">Resultados</h2>
 
   {% if not results %}
@@ -146,10 +150,10 @@
       <nav aria-label="Paginación" class="px-4 py-3 border-t border-linea flex items-center justify-center gap-1 flex-wrap">
         {% if page > 1 %}
           <a
-            href="/adjudications?page={{ page - 1 }}"
-            hx-get="/adjudications?page={{ page - 1 }}&partial=table"
-            hx-target="#table-container"
-            hx-include="#filter-form input"
+             href="{{ pagination_base }}?page={{ page - 1 }}"
+             hx-get="{{ pagination_partial }}?page={{ page - 1 }}&partial=table"
+             hx-target="#table-container"
+             hx-include="#{{ pagination_form }} input"
             class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper cursor-pointer"
           >Anterior</a>
         {% else %}
@@ -171,10 +175,10 @@
             >{{ n }}</span>
           {% else %}
             <a
-              href="/adjudications?page={{ n }}"
-              hx-get="/adjudications?page={{ n }}&partial=table"
-              hx-target="#table-container"
-              hx-include="#filter-form input"
+               href="{{ pagination_base }}?page={{ n }}"
+               hx-get="{{ pagination_partial }}?page={{ n }}&partial=table"
+               hx-target="#table-container"
+               hx-include="#{{ pagination_form }} input"
               class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper cursor-pointer"
             >{{ n }}</a>
           {% endif %}
@@ -182,10 +186,10 @@
 
         {% if page < total_pages %}
           <a
-            href="/adjudications?page={{ page + 1 }}"
-            hx-get="/adjudications?page={{ page + 1 }}&partial=table"
-            hx-target="#table-container"
-            hx-include="#filter-form input"
+             href="{{ pagination_base }}?page={{ page + 1 }}"
+             hx-get="{{ pagination_partial }}?page={{ page + 1 }}&partial=table"
+             hx-target="#table-container"
+             hx-include="#{{ pagination_form }} input"
             class="px-3 py-1.5 rounded-md border border-linea bg-folio text-sm text-ink hover:bg-paper cursor-pointer"
           >Siguiente</a>
         {% else %}
