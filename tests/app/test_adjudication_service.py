@@ -27,13 +27,17 @@ from app.models.compra import Compra
 from app.models.oferente import Oferente
 from app.services.adjudication_service import (
     AdjudicationFilters,
+    CompanyProfileSummary,
     ConcentrationResult,
     KpiSummary,
     ValidationError,
+    company_summary,
     concentration_ratio,
     kpi_summary,
     list_adjudications,
+    lookup_company_identity,
     monthly_trend,
+    ranking_by_organism,
 )
 
 if TYPE_CHECKING:
@@ -93,6 +97,8 @@ def add_adj(db_session: Session):
         compra: Compra,
         *,
         nombre_comercial: str | None = None,
+        tipo_doc_prov: str | None = "RUT",
+        nro_doc_prov: str | None = None,
         desc_articulo: str = "Laptop",
         id_articulo: str | None = None,
         amount_uyu: Decimal | None = Decimal("1000.00"),
@@ -102,6 +108,8 @@ def add_adj(db_session: Session):
         adj = Adjudicacion(
             compra_id=compra.id,
             nombre_comercial=nombre_comercial or f"Empresa {counter['n']}",
+            tipo_doc_prov=tipo_doc_prov,
+            nro_doc_prov=nro_doc_prov or f"2100000000{counter['n']:02d}",
             desc_articulo=desc_articulo,
             id_articulo=id_articulo,
             id_moneda=0,
@@ -547,3 +555,133 @@ def test_like_wildcards_are_escaped_in_text_filters(
         AdjudicationFilters(article="Laptop%20"),
     )
     assert len(rows) == 1
+
+
+# ---------------------------------------------------------------------------
+# Company document identity and profile aggregates
+# ---------------------------------------------------------------------------
+
+
+def test_company_doc_exact_requires_both_document_columns(
+    db_session, make_compra, add_adj
+) -> None:
+    first = make_compra()
+    second = make_compra()
+    third = make_compra()
+    add_adj(first, nombre_comercial="Exact", tipo_doc_prov="RUT", nro_doc_prov="0123")
+    add_adj(second, nombre_comercial="Other type", tipo_doc_prov="CI", nro_doc_prov="0123")
+    add_adj(third, nombre_comercial="Other number", tipo_doc_prov="RUT", nro_doc_prov="123")
+
+    rows = list_adjudications(
+        db_session,
+        AdjudicationFilters(company_doc_exact=("RUT", "0123")),
+    )
+
+    assert [row.winning_company for row in rows] == ["Exact"]
+
+
+def test_name_filter_still_includes_rows_without_document_identity(
+    db_session, make_compra, add_adj
+) -> None:
+    compra = make_compra()
+    add_adj(
+        compra,
+        nombre_comercial="Name-only company",
+        tipo_doc_prov=None,
+        nro_doc_prov=None,
+    )
+
+    assert len(list_adjudications(db_session, AdjudicationFilters(company="Name-only"))) == 1
+    assert list_adjudications(
+        db_session,
+        AdjudicationFilters(company_doc_exact=("RUT", "missing")),
+    ) == []
+
+
+def test_lookup_company_identity_uses_latest_date_then_id(
+    db_session, make_compra, add_adj
+) -> None:
+    older = make_compra(fecha_pub_adj=date(2024, 1, 1))
+    newer = make_compra(fecha_pub_adj=date(2024, 2, 1))
+    tied = make_compra(fecha_pub_adj=date(2024, 2, 1))
+    add_adj(older, nombre_comercial="Old", nro_doc_prov="42")
+    add_adj(newer, nombre_comercial="New by date", nro_doc_prov="42")
+    add_adj(tied, nombre_comercial="New by id", nro_doc_prov="42")
+
+    assert lookup_company_identity(db_session, "RUT", "42") == "New by id"
+    assert lookup_company_identity(db_session, "RUT", "missing") is None
+
+
+def test_company_summary_counts_distinct_purchases_and_excludes_null_amounts(
+    db_session, make_compra, add_adj
+) -> None:
+    company_purchase = make_compra(organismo="OSE", fecha_pub_adj=date(2024, 3, 1))
+    company_purchase_two = make_compra(
+        organismo="ASSE", fecha_pub_adj=date(2024, 4, 1)
+    )
+    other_purchase = make_compra(organismo="OSE", fecha_pub_adj=date(2024, 5, 1))
+    for amount, article, compra in (
+        (100, "Laptop", company_purchase),
+        (50, "Monitor", company_purchase),
+    ):
+        add_adj(
+            compra,
+            nombre_comercial="ACME",
+            nro_doc_prov="42",
+            desc_articulo=article,
+            amount_uyu=Decimal(amount),
+        )
+    add_adj(
+        company_purchase_two,
+        nombre_comercial="ACME",
+        nro_doc_prov="42",
+        amount_uyu=None,
+    )
+    add_adj(
+        other_purchase,
+        nombre_comercial="Other",
+        nro_doc_prov="99",
+        amount_uyu=Decimal("150"),
+    )
+
+    result = company_summary(
+        db_session,
+        AdjudicationFilters(
+            company_doc_exact=("RUT", "42"),
+            date_from=date(2024, 1, 1),
+            date_to=date(2024, 12, 31),
+        ),
+    )
+
+    assert isinstance(result, CompanyProfileSummary)
+    assert result.total_amount == Decimal("150.00")
+    assert result.purchase_count == 2
+    assert result.organism_count == 2
+    assert result.share_of_total == Decimal("0.5")
+
+
+def test_company_widgets_and_listing_are_scoped_by_document(
+    db_session, make_compra, add_adj, add_oferente
+) -> None:
+    company_compra = make_compra(organismo="OSE", fecha_pub_adj=date(2024, 1, 1))
+    other_compra = make_compra(organismo="ASSE", fecha_pub_adj=date(2024, 1, 1))
+    add_adj(
+        company_compra,
+        nombre_comercial="ACME",
+        nro_doc_prov="42",
+        amount_uyu=Decimal("100"),
+    )
+    add_adj(
+        other_compra,
+        nombre_comercial="Other",
+        nro_doc_prov="99",
+        amount_uyu=Decimal("900"),
+    )
+    add_oferente(company_compra)
+    add_oferente(other_compra)
+    filters = AdjudicationFilters(company_doc_exact=("RUT", "42"))
+
+    assert monthly_trend(db_session, filters) == [("2024-01", Decimal("100.00"))]
+    assert [entry.name for entry in ranking_by_organism(db_session, filters)] == ["OSE"]
+    assert concentration_ratio(db_session, filters).single_bidder_count == 1
+    assert len(list_adjudications(db_session, filters)) == 1

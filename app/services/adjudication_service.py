@@ -75,6 +75,7 @@ class AdjudicationFilters:
     """
 
     company: str | None = None
+    company_doc_exact: tuple[str, str] | None = None
     organism: str | None = None
     organism_exact: str | None = None
     article: str | None = None
@@ -89,6 +90,7 @@ class AdjudicationFilters:
             getattr(self, field) not in (None, "")
             for field in (
                 "company",
+                "company_doc_exact",
                 "organism",
                 "organism_exact",
                 "article",
@@ -161,6 +163,17 @@ class KpiSummary:
     average_amount: Decimal
     purchase_count: int
     company_count: int
+
+
+@dataclass(frozen=True)
+class CompanyProfileSummary:
+    """Company-profile KPIs for one exact provider-document identity."""
+
+    display_name: str | None
+    total_amount: Decimal
+    purchase_count: int
+    organism_count: int
+    share_of_total: Decimal
 
 
 @dataclass(frozen=True)
@@ -371,6 +384,14 @@ def _build_predicates(filters: AdjudicationFilters) -> list[Any]:
             Adjudicacion.nombre_comercial.ilike(
                 f"%{_escape_like(filters.company)}%", escape="\\"
             )
+        )
+    if filters.company_doc_exact is not None:
+        company_type, company_number = filters.company_doc_exact
+        predicates.extend(
+            [
+                Adjudicacion.tipo_doc_prov == company_type,
+                Adjudicacion.nro_doc_prov == company_number,
+            ]
         )
     if filters.organism:
         predicates.append(
@@ -583,6 +604,68 @@ def ranking_by_organism(
         )
         for row in session.execute(stmt)
     ]
+
+
+def lookup_company_identity(
+    session: Session, company_type: str, company_number: str
+) -> str | None:
+    """Return the latest commercial name for an exact document pair."""
+
+    stmt = (
+        select(Adjudicacion.nombre_comercial)
+        .join(Compra, Compra.id == Adjudicacion.compra_id)
+        .where(
+            Adjudicacion.tipo_doc_prov == company_type,
+            Adjudicacion.nro_doc_prov == company_number,
+        )
+        .order_by(Compra.fecha_pub_adj.desc(), Adjudicacion.id.desc())
+        .limit(1)
+    )
+    return session.execute(stmt).scalar_one_or_none()
+
+
+def company_summary(
+    session: Session, filters: AdjudicationFilters
+) -> CompanyProfileSummary:
+    """Return exact-document KPIs and share of the filtered market total."""
+
+    total_expr = func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label(
+        "total_amount"
+    )
+    purchase_expr = func.count(func.distinct(Compra.id)).label("purchase_count")
+    organism_expr = func.count(func.distinct(Compra.organismo)).label("organism_count")
+    company_stmt = (
+        select(total_expr, purchase_expr, organism_expr)
+        .join(Compra, Compra.id == Adjudicacion.compra_id)
+    )
+    company_stmt = _apply_filters(company_stmt, filters)
+    company_row = session.execute(company_stmt).one()
+    total = Decimal(company_row.total_amount or 0)
+
+    market_filters = AdjudicationFilters(
+        company=filters.company,
+        organism=filters.organism,
+        organism_exact=filters.organism_exact,
+        article=filters.article,
+        article_id=filters.article_id,
+        date_from=filters.date_from,
+        date_to=filters.date_to,
+    )
+    market_stmt = (
+        select(func.coalesce(func.sum(Adjudicacion.amount_uyu), 0))
+        .join(Compra, Compra.id == Adjudicacion.compra_id)
+    )
+    market_stmt = _apply_filters(market_stmt, market_filters)
+    market_total = Decimal(session.execute(market_stmt).scalar_one() or 0)
+    share = total / market_total if market_total > 0 else Decimal(0)
+
+    return CompanyProfileSummary(
+        display_name=None,
+        total_amount=total,
+        purchase_count=int(company_row.purchase_count or 0),
+        organism_count=int(company_row.organism_count or 0),
+        share_of_total=share,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -900,6 +983,7 @@ def _row_to_adjudication_row(row: Any) -> AdjudicationRow:
 __all__ = [
     "AdjudicationFilters",
     "AdjudicationRow",
+    "CompanyProfileSummary",
     "ConcentrationResult",
     "DateValidationError",
     "KpiSummary",
@@ -908,12 +992,14 @@ __all__ = [
     "ValidationError",
     "all_organisms",
     "concentration_ratio",
+    "company_summary",
     "count_adjudications",
     "distinct_organisms",
     "filters_from_query_params",
     "iter_adjudications",
     "kpi_summary",
     "list_adjudications",
+    "lookup_company_identity",
     "monthly_trend",
     "ranking_by_company",
     "ranking_by_organism",
