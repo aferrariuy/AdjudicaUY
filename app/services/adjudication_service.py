@@ -634,9 +634,8 @@ def company_summary(
     )
     purchase_expr = func.count(func.distinct(Compra.id)).label("purchase_count")
     organism_expr = func.count(func.distinct(Compra.organismo)).label("organism_count")
-    company_stmt = (
-        select(total_expr, purchase_expr, organism_expr)
-        .join(Compra, Compra.id == Adjudicacion.compra_id)
+    company_stmt = select(total_expr, purchase_expr, organism_expr).join(
+        Compra, Compra.id == Adjudicacion.compra_id
     )
     company_stmt = _apply_filters(company_stmt, filters)
     company_row = session.execute(company_stmt).one()
@@ -651,9 +650,8 @@ def company_summary(
         date_from=filters.date_from,
         date_to=filters.date_to,
     )
-    market_stmt = (
-        select(func.coalesce(func.sum(Adjudicacion.amount_uyu), 0))
-        .join(Compra, Compra.id == Adjudicacion.compra_id)
+    market_stmt = select(func.coalesce(func.sum(Adjudicacion.amount_uyu), 0)).join(
+        Compra, Compra.id == Adjudicacion.compra_id
     )
     market_stmt = _apply_filters(market_stmt, market_filters)
     market_total = Decimal(session.execute(market_stmt).scalar_one() or 0)

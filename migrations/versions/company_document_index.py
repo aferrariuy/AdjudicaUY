@@ -24,9 +24,7 @@ def upgrade() -> None:
             "ix_adjudicacion_company_document",
             "adjudicacion",
             ["tipo_doc_prov", "nro_doc_prov"],
-            postgresql_where=(
-                "tipo_doc_prov IS NOT NULL AND nro_doc_prov IS NOT NULL"
-            ),
+            postgresql_where=("tipo_doc_prov IS NOT NULL AND nro_doc_prov IS NOT NULL"),
         )
     else:
         # SQLite's test path receives a portable composite index. The

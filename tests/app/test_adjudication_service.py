@@ -569,8 +569,12 @@ def test_company_doc_exact_requires_both_document_columns(
     second = make_compra()
     third = make_compra()
     add_adj(first, nombre_comercial="Exact", tipo_doc_prov="RUT", nro_doc_prov="0123")
-    add_adj(second, nombre_comercial="Other type", tipo_doc_prov="CI", nro_doc_prov="0123")
-    add_adj(third, nombre_comercial="Other number", tipo_doc_prov="RUT", nro_doc_prov="123")
+    add_adj(
+        second, nombre_comercial="Other type", tipo_doc_prov="CI", nro_doc_prov="0123"
+    )
+    add_adj(
+        third, nombre_comercial="Other number", tipo_doc_prov="RUT", nro_doc_prov="123"
+    )
 
     rows = list_adjudications(
         db_session,
@@ -591,11 +595,17 @@ def test_name_filter_still_includes_rows_without_document_identity(
         nro_doc_prov=None,
     )
 
-    assert len(list_adjudications(db_session, AdjudicationFilters(company="Name-only"))) == 1
-    assert list_adjudications(
-        db_session,
-        AdjudicationFilters(company_doc_exact=("RUT", "missing")),
-    ) == []
+    assert (
+        len(list_adjudications(db_session, AdjudicationFilters(company="Name-only")))
+        == 1
+    )
+    assert (
+        list_adjudications(
+            db_session,
+            AdjudicationFilters(company_doc_exact=("RUT", "missing")),
+        )
+        == []
+    )
 
 
 def test_lookup_company_identity_uses_latest_date_then_id(
@@ -616,9 +626,7 @@ def test_company_summary_counts_distinct_purchases_and_excludes_null_amounts(
     db_session, make_compra, add_adj
 ) -> None:
     company_purchase = make_compra(organismo="OSE", fecha_pub_adj=date(2024, 3, 1))
-    company_purchase_two = make_compra(
-        organismo="ASSE", fecha_pub_adj=date(2024, 4, 1)
-    )
+    company_purchase_two = make_compra(organismo="ASSE", fecha_pub_adj=date(2024, 4, 1))
     other_purchase = make_compra(organismo="OSE", fecha_pub_adj=date(2024, 5, 1))
     for amount, article, compra in (
         (100, "Laptop", company_purchase),

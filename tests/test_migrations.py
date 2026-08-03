@@ -36,7 +36,9 @@ def test_company_document_index_migration_is_sqlite_compatible() -> None:
         finally:
             company_document_index.op = original
 
-        index_names = {index["name"] for index in inspect(connection).get_indexes("adjudicacion")}
+        index_names = {
+            index["name"] for index in inspect(connection).get_indexes("adjudicacion")
+        }
         assert "ix_adjudicacion_company_document" in index_names
 
         context = MigrationContext.configure(connection)
@@ -48,5 +50,7 @@ def test_company_document_index_migration_is_sqlite_compatible() -> None:
         finally:
             company_document_index.op = original
 
-        index_names = {index["name"] for index in inspect(connection).get_indexes("adjudicacion")}
+        index_names = {
+            index["name"] for index in inspect(connection).get_indexes("adjudicacion")
+        }
         assert "ix_adjudicacion_company_document" not in index_names
