@@ -877,6 +877,31 @@ def test_company_profile_full_page_renders_identity_kpis_and_history(
     assert "No se encontró actividad" not in response.text
 
 
+def test_company_profile_full_page_contains_seo_and_corporation_json_ld(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="SEO Company",
+        company_document_type="RUT",
+        company_document="42",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/company/RUT/42")
+
+    assert response.status_code == 200
+    assert '<meta name="description"' in response.text
+    assert 'property="og:type" content="Corporation"' in response.text
+    assert 'property="og:url"' in response.text
+    assert '<link rel="canonical"' in response.text
+    assert 'type="application/ld+json"' in response.text
+    assert '"@type": "Corporation"' in response.text
+    assert '"name": "SEO Company"' in response.text
+    assert '"propertyID": "RUT"' in response.text
+    assert '"value": "42"' in response.text
+    assert "/company/RUT/42" in response.text
+
+
 def test_company_profile_partial_contains_body_without_page_chrome(
     client: TestClient, make_adjudication
 ) -> None:
@@ -1046,6 +1071,18 @@ def test_unknown_company_profile_returns_200_empty_state(client: TestClient) -> 
     assert response.status_code == 200
     assert "No se encontró actividad registrada" in response.text
     assert 'role="status"' in response.text
+
+
+def test_unknown_company_profile_emits_identity_json_ld(
+    client: TestClient,
+) -> None:
+    response = client.get("/company/RUT/999999999999")
+
+    assert response.status_code == 200
+    assert '"@type": "Corporation"' in response.text
+    assert '"name": "RUT 999999999999"' in response.text
+    assert '"propertyID": "RUT"' in response.text
+    assert '"value": "999999999999"' in response.text
 
 
 def test_company_profile_decodes_both_path_segments(

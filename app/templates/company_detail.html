@@ -9,6 +9,21 @@
 {% block og_type %}Corporation{% endblock %}
 {% block og_url %}{{ canonical_url | default('/company/' ~ company_type ~ '/' ~ company_number, true) }}{% endblock %}
 {% block canonical_url %}{{ canonical_url | default('/company/' ~ company_type ~ '/' ~ company_number, true) }}{% endblock %}
+{% block json_ld %}
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Corporation",
+  "name": {{ profile_label | tojson }},
+  "identifier": {
+    "@type": "PropertyValue",
+    "propertyID": {{ company_type | tojson }},
+    "value": {{ company_number | tojson }}
+  },
+  "url": {{ canonical_url | default('/company/' ~ company_type ~ '/' ~ company_number, true) | tojson }}
+}
+</script>
+{% endblock %}
 
 {% block content %}
   <div class="mb-4">
