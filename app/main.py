@@ -27,7 +27,7 @@ from app.config import get_settings
 from app.database import get_db, get_engine
 from app.formatting import format_count, format_percent, format_uyu
 from app.routes.adjudications import router as adjudications_router
-from app.services.adjudication_service import all_organisms
+from app.services.adjudication_service import all_companies, all_organisms
 
 logger = logging.getLogger(__name__)
 
@@ -142,9 +142,7 @@ def create_app() -> FastAPI:
     async def add_cache_control(request, call_next):  # noqa: ANN001, ANN202
         response = await call_next(request)
         if request.url.path.startswith("/static/"):
-            response.headers["Cache-Control"] = (
-                "public, max-age=31536000, immutable"
-            )
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
 
     @app.get("/healthz", include_in_schema=False)
@@ -161,26 +159,25 @@ def create_app() -> FastAPI:
     async def robots_txt() -> Response:
         """Serve a robots.txt allowing all crawlers and referencing the sitemap."""
 
-        body = (
-            "User-agent: *\n"
-            "Allow: /\n"
-            f"Sitemap: {settings.site_url}/sitemap.xml\n"
-        )
+        body = f"User-agent: *\nAllow: /\nSitemap: {settings.site_url}/sitemap.xml\n"
         return Response(content=body, media_type="text/plain")
 
     @app.get("/sitemap.xml", include_in_schema=False)
     async def sitemap_xml(db=Depends(get_db)) -> Response:  # noqa: ANN001
-        """Serve a sitemap.xml listing index + all organism pages."""
+        """Serve a sitemap.xml listing index, organisms, and companies."""
 
         organisms = all_organisms(db)
+        companies = all_companies(db)
         urls = [f"{settings.site_url}/"]
         for name in organisms:
             encoded = quote(name, safe="")
             urls.append(f"{settings.site_url}/organism/{encoded}")
+        for company_type, company_number in companies:
+            encoded_type = quote(company_type, safe="")
+            encoded_number = quote(company_number, safe="")
+            urls.append(f"{settings.site_url}/company/{encoded_type}/{encoded_number}")
 
-        url_entries = "\n".join(
-            f"  <url><loc>{url}</loc></url>" for url in urls
-        )
+        url_entries = "\n".join(f"  <url><loc>{url}</loc></url>" for url in urls)
         body = (
             '<?xml version="1.0" encoding="UTF-8"?>\n'
             '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'

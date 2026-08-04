@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from sqlalchemy import Column, and_, case, func, select
 
@@ -128,6 +129,17 @@ class AdjudicationRow:
     company_document_type: str | None
     license_link: str
     article_id: str | None = None
+
+    @property
+    def company_profile_url(self) -> str | None:
+        """Return the encoded company profile URL when identity is complete."""
+
+        if not self.company_document_type or not self.company_document:
+            return None
+        return (
+            f"/company/{quote(self.company_document_type, safe='')}/"
+            f"{quote(self.company_document, safe='')}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -931,6 +943,30 @@ def all_organisms(session: Session) -> list[str]:
         .order_by(Compra.organismo.asc())
     )
     return [row[0] for row in session.execute(stmt) if row[0] is not None]
+
+
+def all_companies(session: Session) -> list[tuple[str, str]]:
+    """Return every distinct non-empty provider document identity.
+
+    The sitemap uses this unfiltered discovery query to enumerate company
+    profile pages. Rows without both document segments remain available to
+    ordinary name-based listings, but cannot identify a crawlable profile.
+    """
+
+    company_type = Adjudicacion.tipo_doc_prov
+    company_number = Adjudicacion.nro_doc_prov
+    stmt = (
+        select(company_type, company_number)
+        .where(
+            company_type.is_not(None),
+            company_number.is_not(None),
+            func.trim(company_type) != "",
+            func.trim(company_number) != "",
+        )
+        .distinct()
+        .order_by(company_type.asc(), company_number.asc())
+    )
+    return [(row[0], row[1]) for row in session.execute(stmt)]
 
 
 def distinct_organisms(

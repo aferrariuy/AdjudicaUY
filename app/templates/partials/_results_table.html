@@ -43,7 +43,13 @@
             class="text-sm text-sello hover:underline line-clamp-3 break-words"
             aria-label="Filtrar por organismo {{ row.organism }}"
           >{{ row.organism }}</a>
-          <div class="text-sm text-ink">{{ row.winning_company }}</div>
+           <div class="text-sm text-ink">
+             {% if row.company_profile_url %}
+               <a href="{{ row.company_profile_url }}" class="text-sello hover:underline">{{ row.winning_company }}</a>
+             {% else %}
+               {{ row.winning_company }}
+             {% endif %}
+           </div>
           <div class="text-sm text-ink">{{ row.article }}</div>
           <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-texto-sec">
             <span>{{ row.date.isoformat() }}</span>
@@ -109,7 +115,13 @@
                   class="text-sello hover:underline"
                 >{{ row.organism }}</a>
               </td>
-              <td class="px-3 py-3 text-ink">{{ row.winning_company }}</td>
+               <td class="px-3 py-3 text-ink">
+                 {% if row.company_profile_url %}
+                   <a href="{{ row.company_profile_url }}" class="text-sello hover:underline">{{ row.winning_company }}</a>
+                 {% else %}
+                   {{ row.winning_company }}
+                 {% endif %}
+               </td>
               <td class="px-3 py-3 text-ink">{{ row.article }}</td>
               <td class="px-3 py-3 text-right tabular-nums whitespace-nowrap">
                 {{ "{:,.2f}".format(row.amount or 0) }} {{ row.currency }}
