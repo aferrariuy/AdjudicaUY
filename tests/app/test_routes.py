@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 from bs4 import BeautifulSoup
 
@@ -36,7 +36,7 @@ PREV_YEAR = CURRENT_YEAR - 1
 def _chart_payload(body: str, chart_type: str) -> dict:
     soup = BeautifulSoup(body, "html.parser")
     for canvas in soup.find_all("canvas"):
-        payload = json.loads(canvas["data-chart"])
+        payload = cast("dict[str, Any]", json.loads(str(canvas["data-chart"])))
         if payload.get("type") == chart_type:
             return payload
     raise AssertionError(f"Missing {chart_type} chart")
@@ -142,7 +142,7 @@ def test_index_ranking_links_cover_identity_fallback_and_organism_precedence(
     assert companies is not None and organisms is not None
     assert companies.find("a", href="/company/RUT/42") is not None
     assert companies.find("a", href="/company/RUT%2FX%20%26/00%201%2F2%3F") is not None
-    assert companies.find(string="RANKING-NO-DOC-CO").parent.name == "p"
+    assert companies.find(string="RANKING-NO-DOC-CO").parent.name == "p"  # type: ignore[union-attr]
     assert "RANKING &lt;CO&gt; &amp;" in str(companies)
     assert organisms.find("a", href="/organism/ORGANISM-RANKING-LINK") is not None
 
