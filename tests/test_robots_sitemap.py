@@ -104,6 +104,32 @@ def test_sitemap_xml_reflects_live_organisms(
     assert "BPS" in response.text
 
 
+def test_sitemap_xml_contains_distinct_encoded_company_urls(
+    client: Any, make_adjudication: Any
+) -> None:
+    """Company sitemap entries encode both document path segments."""
+
+    make_adjudication(
+        company_document_type="RUT/X &",
+        company_document="00 1/2?",
+    )
+    make_adjudication(
+        company_document_type="RUT/X &",
+        company_document="00 1/2?",
+    )
+    make_adjudication(
+        company_document_type=None,
+        company_document=None,
+    )
+
+    response = client.get("/sitemap.xml")
+
+    assert response.status_code == 200
+    encoded_url = "/company/RUT%2FX%20%26/00%201%2F2%3F"
+    assert encoded_url in response.text
+    assert response.text.count(encoded_url) == 1
+
+
 def test_sitemap_xml_is_valid_xml(client: Any) -> None:
     """/sitemap.xml body is well-formed XML."""
 

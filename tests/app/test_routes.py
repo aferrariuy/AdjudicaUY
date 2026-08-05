@@ -1442,6 +1442,64 @@ def test_results_table_organism_link_uses_organism_route(
     assert ">Ministerio del Interior</a>" in body
 
 
+def test_results_table_company_link_uses_encoded_company_route(
+    client: TestClient, make_adjudication
+) -> None:
+    """Index company cells link to both encoded document identity segments."""
+
+    make_adjudication(
+        organism="Ministerio del Interior",
+        winning_company="LINKED-CO",
+        company_document_type="RUT/X &",
+        company_document="00 1/2?",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert 'href="/company/RUT%2FX%20%26/00%201%2F2%3F"' in response.text
+    assert ">LINKED-CO</a>" in response.text
+
+
+def test_company_profile_results_table_company_link_uses_company_route(
+    client: TestClient, make_adjudication
+) -> None:
+    """Company profile result tables use the same company profile link."""
+
+    make_adjudication(
+        winning_company="PROFILE-LINKED-CO",
+        company_document_type="RUT",
+        company_document="42",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/company/RUT/42")
+
+    assert response.status_code == 200
+    assert 'href="/company/RUT/42"' in response.text
+    assert ">PROFILE-LINKED-CO</a>" in response.text
+
+
+def test_results_table_keeps_company_without_documents_as_plain_text(
+    client: TestClient, make_adjudication
+) -> None:
+    """Rows without a complete document identity are not profile links."""
+
+    make_adjudication(
+        winning_company="UNLINKED-CO",
+        company_document_type=None,
+        company_document=None,
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "UNLINKED-CO" in response.text
+    assert "/company/" not in response.text
+
+
 # ---------------------------------------------------------------------------
 # Pagination
 # ---------------------------------------------------------------------------
