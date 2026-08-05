@@ -24,13 +24,13 @@
       <canvas
         class="block w-full"
         data-chart='{{ concentration_payload | tojson }}'
-        aria-label="Porcentaje de compras con un solo oferente"
+        aria-label="{{ 'Porcentaje de compras con un solo oferente' if company_variant else 'Porcentaje de compras con un solo oferente' }}"
         role="img"
       ></canvas>
     </div>
     <p class="mt-3 text-sm text-texto-sec">
       <span class="font-semibold text-ink">{{ concentration.single_bidder_count | count_uy }}</span>
-      compra(s) con un solo oferente sobre
+      {{ 'compra(s) con un solo oferente sobre' if company_variant else 'compra(s) con un solo oferente sobre' }}
       <span class="font-semibold text-ink">{{ (concentration.single_bidder_count + concentration.multi_bidder_count) | count_uy }}</span>
       ({{ concentration.ratio | pct_uy }})
     </p>

@@ -41,11 +41,11 @@
   <div id="table-container" aria-live="polite" aria-busy="false">
     {% include "partials/_results_table.html" %}
   </div>
-  {% with rows=ranking_rows, heading_id="ranking-heading", title="Ranking de empresas", link_to_organism=false %}
+  {% with rows=ranking_rows, heading_id="ranking-heading", title="Ranking de empresas", link_to_organism=false, link_to_company=link_to_company %}
     {% include "partials/_ranking_list.html" %}
   {% endwith %}
 
-  {% with rows=organism_rows, heading_id="organism-ranking-heading", title="Ranking de organismos", link_to_organism=true %}
+  {% with rows=organism_rows, heading_id="organism-ranking-heading", title="Ranking de organismos", link_to_organism=true, link_to_company=false %}
     {% include "partials/_ranking_list.html" %}
   {% endwith %}
 </div>

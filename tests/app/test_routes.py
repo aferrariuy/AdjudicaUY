@@ -7,15 +7,20 @@ contract, using the in-memory SQLite engine from ``conftest.py``.
 
 from __future__ import annotations
 
+import json
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from bs4 import BeautifulSoup
+
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
+from app.routes.adjudications import _build_concentration_chart_payload
 from app.services.adjudication_service import (
     AdjudicationFilters,
+    ConcentrationResult,
     filters_from_query_params,
 )
 
@@ -26,6 +31,25 @@ from app.services.adjudication_service import (
 CURRENT_YEAR = date.today().year
 NEXT_YEAR = CURRENT_YEAR + 1
 PREV_YEAR = CURRENT_YEAR - 1
+
+
+def _chart_payload(body: str, chart_type: str) -> dict:
+    soup = BeautifulSoup(body, "html.parser")
+    for canvas in soup.find_all("canvas"):
+        payload = json.loads(canvas["data-chart"])
+        if payload.get("type") == chart_type:
+            return payload
+    raise AssertionError(f"Missing {chart_type} chart")
+
+
+def test_concentration_payload_uses_company_competition_labels() -> None:
+    payload = _build_concentration_chart_payload(
+        ConcentrationResult(Decimal("0.4"), 2, 3), competition_labels=True
+    )
+
+    assert payload["labels"] == ["sin competencia", "con competencia"]
+    assert payload["datasets"][0]["data"] == [2, 3]
+
 
 # ---------------------------------------------------------------------------
 # GET / — full HTML page
@@ -86,6 +110,59 @@ def test_index_renders_ranking_list_headings(
     # Both ranking list partials are rendered with their <h2> headings.
     assert 'id="ranking-heading"' in body
     assert 'id="organism-ranking-heading"' in body
+
+
+def test_index_ranking_links_cover_identity_fallback_and_organism_precedence(
+    client: TestClient, make_adjudication
+) -> None:
+    for name, doc_type, doc_number in (
+        ("RANKING-LINK-CO", "RUT", "42"),
+        ("RANKING-NO-DOC-CO", None, None),
+        ("RANKING-ENCODED-CO", "RUT/X &", "00 1/2?"),
+        ("RANKING <CO> &", "RUT", "55"),
+    ):
+        make_adjudication(
+            winning_company=name,
+            company_document_type=doc_type,
+            company_document=doc_number,
+            date=date(CURRENT_YEAR, 3, 1),
+        )
+    make_adjudication(
+        organism="ORGANISM-RANKING-LINK",
+        winning_company="ORGANISM-RANKING-CO",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    soup = BeautifulSoup(client.get("/").text, "html.parser")
+    companies = soup.find("section", attrs={"aria-labelledby": "ranking-heading"})
+    organisms = soup.find(
+        "section", attrs={"aria-labelledby": "organism-ranking-heading"}
+    )
+
+    assert companies is not None and organisms is not None
+    assert companies.find("a", href="/company/RUT/42") is not None
+    assert companies.find("a", href="/company/RUT%2FX%20%26/00%201%2F2%3F") is not None
+    assert companies.find(string="RANKING-NO-DOC-CO").parent.name == "p"
+    assert "RANKING &lt;CO&gt; &amp;" in str(companies)
+    assert organisms.find("a", href="/organism/ORGANISM-RANKING-LINK") is not None
+
+
+def test_organism_company_ranking_links_to_company_profile(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        organism="RANKING-ORG",
+        winning_company="ORGANISM-RANKING-LINK-CO",
+        company_document_type="RUT",
+        company_document="84",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    soup = BeautifulSoup(client.get("/organism/RANKING-ORG").text, "html.parser")
+    ranking = soup.find("section", attrs={"aria-labelledby": "ranking-heading"})
+
+    assert ranking is not None
+    assert ranking.find("a", href="/company/RUT/84") is not None
 
 
 def test_index_includes_distinct_organisms_in_datalist(
@@ -875,6 +952,51 @@ def test_company_profile_full_page_renders_identity_kpis_and_history(
     assert "Organismos" in response.text
     assert "Participación del total" in response.text
     assert "No se encontró actividad" not in response.text
+
+
+def test_concentration_labels_are_company_specific(
+    client: TestClient, make_adjudication, db_session
+) -> None:
+    from app.models.oferente import Oferente
+
+    company = make_adjudication(
+        winning_company="COMPANY-LABELS",
+        company_document_type="RUT",
+        company_document="42",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    index = make_adjudication(date=date(CURRENT_YEAR, 3, 2))
+    organism = make_adjudication(
+        organism="LABELS-ORGANISM", date=date(CURRENT_YEAR, 3, 3)
+    )
+    for adjudication, name in (
+        (company, "COMPANY-BIDDER"),
+        (index, "INDEX-BIDDER"),
+        (organism, "ORG-BIDDER"),
+    ):
+        db_session.add(
+            Oferente(compra_id=adjudication.compra_id, nombre_comercial=name)
+        )
+    db_session.commit()
+
+    company_response = client.get("/company/RUT/42")
+    index_response = client.get("/")
+    organism_response = client.get("/organism/LABELS-ORGANISM")
+
+    assert _chart_payload(company_response.text, "doughnut")["labels"] == [
+        "sin competencia",
+        "con competencia",
+    ]
+    for response in (index_response, organism_response):
+        assert _chart_payload(response.text, "doughnut")["labels"] == [
+            "1 oferente",
+            "más de 1 oferente",
+        ]
+    assert (
+        'aria-label="Porcentaje de compras con un solo oferente"'
+        in company_response.text
+    )
+    assert "compra(s) con un solo oferente sobre" in company_response.text
 
 
 def test_company_profile_full_page_contains_seo_and_corporation_json_ld(

@@ -5,6 +5,7 @@
    * heading_id        — id for the section heading (accessibility)
    * title             — heading text
    * link_to_organism  — when true, the name is rendered as a link to /organism/{name}
+   * link_to_company   — when true, rows with document identity link to /company/{type}/{number}
 
    The empty branch shows the same "Sin datos disponibles" copy as the
    other dashboard widgets, so the section never renders an empty <ol>
@@ -23,6 +24,11 @@
           <div class="flex-1 min-w-0">
             {% if link_to_organism %}
               <a href="/organism/{{ entry.name | urlencode }}"
+                 class="text-ink font-medium truncate hover:text-sello transition-colors block">
+                 {{ entry.name }}
+              </a>
+            {% elif link_to_company and entry.company_profile_url %}
+              <a href="{{ entry.company_profile_url }}"
                  class="text-ink font-medium truncate hover:text-sello transition-colors block">
                 {{ entry.name }}
               </a>
