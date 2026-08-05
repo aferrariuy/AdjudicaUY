@@ -1085,6 +1085,43 @@ def test_company_profile_renders_top_articles_widget_scoped_to_document(
     assert 'id="company-top-articles-heading"' in partial.text
 
 
+def test_company_profile_renders_win_rate_and_competitor_links(
+    client: TestClient, make_adjudication, make_oferente
+) -> None:
+    target_rows = [
+        make_adjudication(
+            winning_company="Target company",
+            company_document_type="RUT",
+            company_document="TARGET",
+            date=date(CURRENT_YEAR, 3, index),
+        )
+        for index in (1, 2, 3)
+    ]
+    make_adjudication(
+        winning_company="Canonical A",
+        company_document_type="RUT/X",
+        company_document="A B",
+        date=date(CURRENT_YEAR, 3, 4),
+    )
+    make_adjudication(
+        winning_company="Canonical B",
+        company_document_type="CI",
+        company_document="B",
+        date=date(CURRENT_YEAR, 3, 5),
+    )
+    for target in target_rows:
+        make_oferente(target.compra_id, tipo_doc_prov="RUT", nro_doc_prov="TARGET")
+    for target in target_rows[:2]:
+        make_oferente(target.compra_id, tipo_doc_prov="RUT/X", nro_doc_prov="A B")
+    make_oferente(target_rows[2].compra_id, tipo_doc_prov="CI", nro_doc_prov="B")
+    response = client.get("/company/RUT/TARGET")
+
+    assert 'id="company-win-rate-heading"' in response.text
+    assert "Ganadas" in response.text and "Participaciones" in response.text
+    assert 'href="/company/RUT%2FX/A%20B"' in response.text
+    assert 'href="/company/CI/B"' in response.text
+
+
 def test_company_export_scopes_document_and_active_filters(
     client: TestClient, make_adjudication
 ) -> None:
@@ -1192,6 +1229,7 @@ def test_unknown_company_profile_returns_200_empty_state(client: TestClient) -> 
 
     assert response.status_code == 200
     assert "No se encontró actividad registrada" in response.text
+    assert "No hay suficientes competidores" in response.text
     assert 'role="status"' in response.text
 
 

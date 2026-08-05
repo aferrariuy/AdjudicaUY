@@ -303,6 +303,36 @@ def make_adjudication(db_session: Session):
 
 
 @pytest.fixture
+def make_oferente(db_session: Session):
+    from app.models.oferente import Oferente
+
+    counter = {"n": 0}
+
+    def _factory(compra_id: int, **overrides: Any) -> Oferente:
+        counter["n"] += 1
+        n = counter["n"]
+        payload: dict[str, Any] = {
+            "compra_id": compra_id,
+            "nombre_comercial": f"Bidder {n}",
+            "nro_doc_prov": f"2100000000{n:02d}",
+            "tipo_doc_prov": "RUT",
+            "cant_ofertada": Decimal("10.00"),
+            "precio_unit_ofertado": Decimal("100.00"),
+            "id_moneda": 0,
+            "variacion": None,
+            "alternativas": None,
+        }
+        payload.update(overrides)
+        oferente = Oferente(**payload)
+        db_session.add(oferente)
+        db_session.commit()
+        db_session.refresh(oferente)
+        return oferente
+
+    return _factory
+
+
+@pytest.fixture
 def make_xml_compra():
     """Factory: build an :class:`XmlCompra` for parser tests."""
 

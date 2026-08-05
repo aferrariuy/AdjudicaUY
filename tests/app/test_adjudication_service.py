@@ -28,10 +28,13 @@ from app.models.oferente import Oferente
 from app.services.adjudication_service import (
     AdjudicationFilters,
     CompanyProfileSummary,
+    CompanyWinRate,
     ConcentrationResult,
     KpiSummary,
     ValidationError,
+    company_competitors,
     company_summary,
+    company_win_rate,
     concentration_ratio,
     kpi_summary,
     list_adjudications,
@@ -785,6 +788,93 @@ def test_company_summary_counts_distinct_purchases_and_excludes_null_amounts(
     assert result.purchase_count == 2
     assert result.organism_count == 2
     assert result.share_of_total == Decimal("0.5")
+
+
+def test_company_win_rate_is_inclusive_null_safe_and_date_scoped(
+    db_session, make_compra, add_adj, make_oferente
+) -> None:
+    company = ("RUT", "WIN-RATE")
+
+    def add_purchase(when: date, offered: bool, awarded: bool) -> None:
+        compra = make_compra(fecha_pub_adj=when)
+        if offered:
+            make_oferente(compra.id, tipo_doc_prov=company[0], nro_doc_prov=company[1])
+        if awarded:
+            add_adj(
+                compra,
+                nombre_comercial="Winner",
+                tipo_doc_prov=company[0],
+                nro_doc_prov=company[1],
+            )
+
+    for when, offered, awarded in (
+        (date(2024, 1, 1), True, True),
+        (date(2024, 1, 2), True, False),
+        (date(2024, 1, 3), False, True),
+        (date(2023, 1, 1), True, True),
+    ):
+        add_purchase(when, offered, awarded)
+
+    null_purchase = make_compra(fecha_pub_adj=date(2024, 1, 4))
+    make_oferente(null_purchase.id, tipo_doc_prov=None, nro_doc_prov=company[1])
+
+    result = company_win_rate(
+        db_session,
+        *company,
+        AdjudicationFilters(date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)),
+    )
+
+    assert (result.participations, result.wins) == (3, 2)
+    assert result.wins <= result.participations
+    assert result.rate == Decimal("2") / Decimal("3")
+    assert company_win_rate(
+        db_session, "RUT", "MISSING", AdjudicationFilters()
+    ) == CompanyWinRate(0, 0, None)
+
+
+def test_company_competitors_ranks_top_five_and_resolves_names_in_batch(
+    db_session, make_compra, add_adj, make_oferente
+) -> None:
+    target = ("RUT", "TARGET")
+    competitor_counts = {"A": 3, "B": 3, "C": 2, "D": 1, "E": 1, "F": 2}
+    for suffix, count in competitor_counts.items():
+        for index in range(count):
+            compra = make_compra(fecha_pub_adj=date(2024, 1, index + 1))
+            make_oferente(compra.id, tipo_doc_prov=target[0], nro_doc_prov=target[1])
+            make_oferente(
+                compra.id,
+                nombre_comercial=f"Fallback {suffix}",
+                tipo_doc_prov="RUT",
+                nro_doc_prov=f"COMP-{suffix}",
+            )
+            if suffix == "A" and index == 0:
+                make_oferente(compra.id, tipo_doc_prov=None, nro_doc_prov="NULL")
+            if suffix != "F":
+                add_adj(
+                    compra,
+                    nombre_comercial=f"Canonical {suffix}",
+                    tipo_doc_prov="RUT",
+                    nro_doc_prov=f"COMP-{suffix}",
+                    amount_uyu=Decimal("200" if suffix == "B" else "100"),
+                )
+
+    extra = make_compra(fecha_pub_adj=date(2023, 1, 1))
+    make_oferente(extra.id, tipo_doc_prov=target[0], nro_doc_prov=target[1])
+    make_oferente(extra.id, tipo_doc_prov="RUT", nro_doc_prov="COMP-OUT")
+
+    result = company_competitors(
+        db_session,
+        *target,
+        AdjudicationFilters(date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)),
+    )
+
+    assert [(row.display_name, row.purchase_count) for row in result] == [
+        ("Canonical B", 3),
+        ("Canonical A", 3),
+        ("Canonical C", 2),
+        ("Fallback F", 2),
+        ("Canonical D", 1),
+    ]
 
 
 def test_company_widgets_and_listing_are_scoped_by_document(

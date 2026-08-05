@@ -44,7 +44,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from sqlalchemy import Column, and_, case, func, select
+from sqlalchemy import Column, and_, case, func, or_, select
 
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
@@ -186,6 +186,29 @@ class CompanyProfileSummary:
     purchase_count: int
     organism_count: int
     share_of_total: Decimal
+
+
+@dataclass(frozen=True)
+class CompanyWinRate:
+    participations: int
+    wins: int
+    rate: Decimal | None
+
+
+@dataclass(frozen=True)
+class CompanyCompetitor:
+    company_type: str
+    company_number: str
+    display_name: str
+    purchase_count: int
+    awarded_amount_uyu: Decimal
+
+    @property
+    def company_profile_url(self) -> str:
+        return (
+            f"/company/{quote(self.company_type, safe='')}/"
+            f"{quote(self.company_number, safe='')}"
+        )
 
 
 @dataclass(frozen=True)
@@ -748,6 +771,184 @@ def lookup_company_identity(
         .limit(1)
     )
     return session.execute(stmt).scalar_one_or_none()
+
+
+def lookup_company_identities(
+    session: Session, company_pairs: list[tuple[str, str]]
+) -> dict[tuple[str, str], str | None]:
+    if not company_pairs:
+        return {}
+    predicates = [
+        and_(
+            Adjudicacion.tipo_doc_prov == company_type,
+            Adjudicacion.nro_doc_prov == company_number,
+        )
+        for company_type, company_number in set(company_pairs)
+    ]
+    stmt = (
+        select(
+            Adjudicacion.tipo_doc_prov,
+            Adjudicacion.nro_doc_prov,
+            Adjudicacion.nombre_comercial,
+        )
+        .join(Compra, Compra.id == Adjudicacion.compra_id)
+        .where(or_(*predicates))
+        .order_by(
+            Adjudicacion.tipo_doc_prov,
+            Adjudicacion.nro_doc_prov,
+            Compra.fecha_pub_adj.desc(),
+            Adjudicacion.id.desc(),
+        )
+    )
+    identities: dict[tuple[str, str], str | None] = {}
+    for row in session.execute(stmt):
+        identities.setdefault((row[0], row[1]), row[2])
+    return identities
+
+
+def _without_company_identity(filters: AdjudicationFilters) -> AdjudicationFilters:
+    return AdjudicationFilters(
+        organism=filters.organism,
+        organism_exact=filters.organism_exact,
+        article=filters.article,
+        article_id=filters.article_id,
+        date_from=filters.date_from,
+        date_to=filters.date_to,
+    )
+
+
+def _scoped_compra_ids(session: Session, filters: AdjudicationFilters) -> Any:
+    stmt = select(Compra.id)
+    scope_filters = _without_company_identity(filters)
+    if scope_filters.article or scope_filters.article_id:
+        stmt = stmt.join(Adjudicacion, Adjudicacion.compra_id == Compra.id)
+    return _apply_filters(stmt, scope_filters)
+
+
+def _document_pair_match(model: Any, company_type: str, company_number: str) -> Any:
+    return and_(
+        model.tipo_doc_prov.is_not(None),
+        model.nro_doc_prov.is_not(None),
+        model.tipo_doc_prov == company_type,
+        model.nro_doc_prov == company_number,
+    )
+
+
+def company_win_rate(
+    session: Session,
+    company_type: str,
+    company_number: str,
+    filters: AdjudicationFilters,
+) -> CompanyWinRate:
+    """Return inclusive wins divided by distinct company participations."""
+
+    scoped_ids = _scoped_compra_ids(session, filters).subquery("company_scope")
+    target_oferente = select(Oferente.id).where(
+        Oferente.compra_id == Compra.id,
+        _document_pair_match(Oferente, company_type, company_number),
+    )
+    target_adjudicacion = select(Adjudicacion.id).where(
+        Adjudicacion.compra_id == Compra.id,
+        _document_pair_match(Adjudicacion, company_type, company_number),
+    )
+    participation_stmt = select(func.count(func.distinct(Compra.id))).where(
+        Compra.id.in_(select(scoped_ids.c.id)),
+        or_(target_oferente.exists(), target_adjudicacion.exists()),
+    )
+    wins_stmt = select(func.count(func.distinct(Adjudicacion.compra_id))).where(
+        Adjudicacion.compra_id.in_(select(scoped_ids.c.id)),
+        _document_pair_match(Adjudicacion, company_type, company_number),
+    )
+    participations = int(session.execute(participation_stmt).scalar_one() or 0)
+    wins = int(session.execute(wins_stmt).scalar_one() or 0)
+    return CompanyWinRate(
+        participations=participations,
+        wins=wins,
+        rate=Decimal(wins) / Decimal(participations) if participations else None,
+    )
+
+
+def company_competitors(
+    session: Session,
+    company_type: str,
+    company_number: str,
+    filters: AdjudicationFilters,
+    *,
+    limit: int = 5,
+) -> list[CompanyCompetitor]:
+    """Return deterministic co-bidder rankings for the target company."""
+
+    scoped_ids = _scoped_compra_ids(session, filters).subquery("company_scope")
+    target_ids = (
+        select(Oferente.compra_id)
+        .where(
+            Oferente.compra_id.in_(select(scoped_ids.c.id)),
+            _document_pair_match(Oferente, company_type, company_number),
+        )
+        .distinct()
+        .subquery("target_purchases")
+    )
+    valid_competitor = and_(
+        Oferente.tipo_doc_prov.is_not(None),
+        Oferente.nro_doc_prov.is_not(None),
+        ~and_(
+            Oferente.tipo_doc_prov == company_type,
+            Oferente.nro_doc_prov == company_number,
+        ),
+    )
+    fallback_names = func.max(Oferente.nombre_comercial).label("fallback_name")
+    award_total = (
+        select(func.coalesce(func.sum(Adjudicacion.amount_uyu), 0))
+        .where(
+            Adjudicacion.compra_id.in_(select(target_ids.c.compra_id)),
+            Adjudicacion.tipo_doc_prov == Oferente.tipo_doc_prov,
+            Adjudicacion.nro_doc_prov == Oferente.nro_doc_prov,
+        )
+        .correlate(Oferente)
+        .scalar_subquery()
+    )
+    counts = (
+        select(
+            Oferente.tipo_doc_prov.label("company_type"),
+            Oferente.nro_doc_prov.label("company_number"),
+            fallback_names,
+            func.count(func.distinct(Oferente.compra_id)).label("purchase_count"),
+            award_total.label("awarded_amount_uyu"),
+        )
+        .where(Oferente.compra_id.in_(select(target_ids.c.compra_id)), valid_competitor)
+        .group_by(Oferente.tipo_doc_prov, Oferente.nro_doc_prov)
+        .subquery("competitor_counts")
+    )
+    stmt = select(
+        counts.c.company_type,
+        counts.c.company_number,
+        counts.c.fallback_name,
+        counts.c.purchase_count,
+        counts.c.awarded_amount_uyu,
+    )
+    rows = list(session.execute(stmt))
+    pairs = [(row.company_type, row.company_number) for row in rows]
+    identities = lookup_company_identities(session, pairs)
+    competitors = [
+        CompanyCompetitor(
+            company_type=row.company_type,
+            company_number=row.company_number,
+            display_name=identities.get((row.company_type, row.company_number))
+            or row.fallback_name
+            or "Empresa sin nombre",
+            purchase_count=int(row.purchase_count),
+            awarded_amount_uyu=Decimal(row.awarded_amount_uyu or 0),
+        )
+        for row in rows
+    ]
+    competitors.sort(
+        key=lambda row: (
+            -row.purchase_count,
+            -row.awarded_amount_uyu,
+            row.display_name,
+        )
+    )
+    return competitors[: max(limit, 0)]
 
 
 def company_summary(
