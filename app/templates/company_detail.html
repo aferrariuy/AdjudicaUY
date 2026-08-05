@@ -64,6 +64,11 @@
 {% block scripts %}
 <script>
   (function () {
+    var LIGHT_PALETTE = ['#1B2A4A','#B23B2E','#15803d','#a16207','#7c3aed','#0e7490','#be185d','#365314','#9333ea','#0f766e'];
+    var DARK_PALETTE = ['#D4D8E1','#CC5546','#58A696','#E8B84B','#7C93EE','#4DB8C8','#D45D7A','#7FA858','#A973E8','#4FABA6'];
+    var DARK_LINE_BORDER = '#5B8DEF';
+    var DARK_LINE_FILL = 'rgba(91, 141, 239, 0.15)';
+    var DARK_DOUGHNUT = ['#CC5546', '#5B8DEF'];
     function renderCharts() {
       if (!window.Chart) return;
       var isDark = document.documentElement.classList.contains('dark');
@@ -74,7 +79,22 @@
         var isDonut = spec.type === 'doughnut' || spec.type === 'pie';
         new Chart(canvas, {
           type: spec.type,
-          data: { labels: spec.labels, datasets: spec.datasets },
+          data: {
+            labels: spec.labels || [],
+            datasets: (spec.datasets || []).map(function (ds, i) {
+              var palette = isDark ? DARK_PALETTE : LIGHT_PALETTE;
+              var datasetType = ds.type || spec.type;
+              if (isDark) {
+                if (datasetType === 'line') { ds.borderColor = DARK_LINE_BORDER; ds.backgroundColor = DARK_LINE_FILL; }
+                else if (datasetType === 'doughnut' || datasetType === 'pie') { ds.backgroundColor = DARK_DOUGHNUT; ds.borderColor = DARK_DOUGHNUT; }
+                else { var color = palette[i % palette.length]; ds.backgroundColor = color; ds.borderColor = color; }
+              } else {
+                if (!ds.backgroundColor) ds.backgroundColor = palette[i % palette.length];
+                if (!ds.borderColor) ds.borderColor = ds.backgroundColor;
+              }
+              return ds;
+            })
+          },
           options: {
             responsive: true,
             maintainAspectRatio: false,
