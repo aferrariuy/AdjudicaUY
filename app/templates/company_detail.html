@@ -69,7 +69,41 @@
       document.querySelectorAll('canvas[data-chart]').forEach(function (canvas) {
         if (Chart.getChart(canvas)) Chart.getChart(canvas).destroy();
         var spec; try { spec = JSON.parse(canvas.dataset.chart); } catch (e) { return; }
-        new Chart(canvas, { type: spec.type, data: { labels: spec.labels, datasets: spec.datasets }, options: { responsive: true, maintainAspectRatio: false, animation: false } });
+        var isDonut = spec.type === 'doughnut' || spec.type === 'pie';
+        new Chart(canvas, {
+          type: spec.type,
+          data: { labels: spec.labels, datasets: spec.datasets },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            plugins: {
+              legend: {
+                position: 'bottom',
+                labels: {
+                  generateLabels: function (chart) {
+                    var items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                    items.forEach(function (item) {
+                      if (item.text) item.text = item.text.charAt(0).toUpperCase() + item.text.slice(1);
+                    });
+                    return items;
+                  }
+                }
+              },
+              tooltip: {
+                callbacks: {
+                  label: function (ctx) {
+                    if (isDonut) {
+                      var count = (ctx.parsed === null || ctx.parsed === undefined) ? 0 : ctx.parsed;
+                      return 'Compras ' + (ctx.label || '') + ': ' + count.toLocaleString('es-UY');
+                    }
+                    return Chart.defaults.plugins.tooltip.callbacks.label(ctx);
+                  }
+                }
+              }
+            }
+          }
+        });
       });
     }
     function loadCharts() {
