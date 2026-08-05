@@ -82,16 +82,41 @@
                 position: 'bottom',
                 labels: {
                   generateLabels: function (chart) {
-                    var items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
-                    items.forEach(function (item) {
-                      if (item.text) item.text = item.text.charAt(0).toUpperCase() + item.text.slice(1);
+                    // Non-doughnut charts (e.g. trend) keep the default
+                    // one-item-per-dataset legend.
+                    if (chart.config.type !== 'doughnut' && chart.config.type !== 'pie') {
+                      return Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                    }
+                    // Doughnut: one legend item per slice with its own color
+                    // and a capitalized label. Self-contained so it does not
+                    // depend on which generator the controller override
+                    // resolved (the global default is dataset-based and only
+                    // produces one item).
+                    var data = chart.data;
+                    var ds = (data.datasets && data.datasets[0]) || {};
+                    var bg = Array.isArray(ds.backgroundColor) ? ds.backgroundColor : [];
+                    return (data.labels || []).map(function (label, i) {
+                      var text = (label || '').toString();
+                      if (text) text = text.charAt(0).toUpperCase() + text.slice(1);
+                      return {
+                        text: text,
+                        fillStyle: bg[i] || '#1B2A4A',
+                        strokeStyle: bg[i] || '#1B2A4A',
+                        lineWidth: 0,
+                        hidden: !chart.getDataVisibility(i),
+                        index: i
+                      };
                     });
-                    return items;
                   }
                 }
               },
               tooltip: {
                 callbacks: {
+                  title: function (items) {
+                    if (!items || !items.length) return '';
+                    var text = (items[0].label || '').toString();
+                    return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
+                  },
                   label: function (ctx) {
                     if (isDonut) {
                       var count = (ctx.parsed === null || ctx.parsed === undefined) ? 0 : ctx.parsed;
