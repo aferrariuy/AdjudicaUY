@@ -1,0 +1,45 @@
+<div class="space-y-6">
+  {% if total == 0 %}
+    <p class="bg-folio border border-linea p-4 text-texto-sec" role="status">
+      No se encontró actividad registrada para esta empresa en el período seleccionado.
+    </p>
+  {% endif %}
+
+  <section aria-labelledby="company-kpi-heading" class="bg-folio border border-linea p-4 sm:p-6">
+    <h2 id="company-kpi-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Resumen</h2>
+    <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="rounded-md border border-linea p-4">
+        <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Adjudicaciones</dt>
+        <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">{{ company_summary.purchase_count | count_uy }}</dd>
+      </div>
+      <div class="rounded-md border border-linea p-4">
+        <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Total adjudicado</dt>
+        <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">{{ company_summary.total_amount | uyu }} UYU</dd>
+      </div>
+      <div class="rounded-md border border-linea p-4">
+        <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Organismos</dt>
+        <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">{{ company_summary.organism_count | count_uy }}</dd>
+      </div>
+      <div class="rounded-md border border-linea p-4">
+        <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Participación del total</dt>
+        <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">{{ (company_summary.share_of_total * 100) | round(1) }} %</dd>
+      </div>
+    </dl>
+  </section>
+
+  {% include "partials/_trend_chart.html" %}
+  {% include "partials/_concentration_chart.html" %}
+
+  {% with rows=ranking_rows, heading_id="company-organism-ranking-heading", title="Ranking de organismos", link_to_organism=true %}
+    {% include "partials/_ranking_list.html" %}
+  {% endwith %}
+
+  <section aria-labelledby="company-history-heading">
+    <h2 id="company-history-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Historial de adjudicaciones</h2>
+    <div id="table-container" aria-live="polite" aria-busy="false">
+      {% with company_profile=true, listing_base_url="/company/" ~ (company_type | urlencode) ~ "/" ~ (company_number | urlencode), filter_form_id="company-filter-form" %}
+        {% include "partials/_results_table.html" %}
+      {% endwith %}
+    </div>
+  </section>
+</div>

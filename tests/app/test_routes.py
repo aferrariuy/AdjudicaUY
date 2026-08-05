@@ -851,6 +851,123 @@ def test_organism_htmx_partial_still_returns_bare_fragment_on_excessive_range(
     assert "<header" not in body
 
 
+# ---------------------------------------------------------------------------
+# Company profile routes
+# ---------------------------------------------------------------------------
+
+
+def test_company_profile_full_page_renders_identity_kpis_and_history(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="ACME latest",
+        company_document_type="RUT",
+        company_document="210000000012",
+        date=date(CURRENT_YEAR, 3, 1),
+        amount_uyu=Decimal("1000.00"),
+    )
+
+    response = client.get("/company/RUT/210000000012")
+
+    assert response.status_code == 200
+    assert "ACME latest" in response.text
+    assert "Adjudicaciones" in response.text
+    assert "Organismos" in response.text
+    assert "Participación del total" in response.text
+    assert "No se encontró actividad" not in response.text
+
+
+def test_company_profile_partial_contains_body_without_page_chrome(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="PARTIAL-ACME",
+        company_document_type="RUT",
+        company_document="42",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/company/RUT/42/partial")
+
+    assert response.status_code == 200
+    assert "PARTIAL-ACME" in response.text
+    assert "<html" not in response.text
+    assert "Agencia de Compras y Contrataciones" not in response.text
+
+
+def test_unknown_company_profile_returns_200_empty_state(client: TestClient) -> None:
+    response = client.get("/company/RUT/999999999999")
+
+    assert response.status_code == 200
+    assert "No se encontró actividad registrada" in response.text
+    assert 'role="status"' in response.text
+
+
+def test_company_profile_decodes_both_path_segments(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="Encoded company",
+        company_document_type="RUT X",
+        company_document="00 123",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/company/RUT%20X/00%20123")
+
+    assert response.status_code == 200
+    assert "Encoded company" in response.text
+    assert "No se encontró actividad registrada" not in response.text
+
+
+def test_company_profile_out_of_bounds_page_redirects_to_last_page(
+    client: TestClient, make_adjudication
+) -> None:
+    for index in range(11):
+        make_adjudication(
+            winning_company=f"Paged-{index}",
+            company_document_type="RUT",
+            company_document="42",
+            date=date(CURRENT_YEAR, 3, 1),
+        )
+
+    response = client.get("/company/RUT/42?page=3", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "?page=2"
+
+
+def test_company_profile_hides_name_filter_but_keeps_organism_filter(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="Filter variant",
+        company_document_type="RUT",
+        company_document="42",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/company/RUT/42")
+
+    assert response.status_code == 200
+    assert 'name="company"' not in response.text
+    assert 'name="organism"' in response.text
+
+
+def test_company_profile_full_and_partial_validation_match_existing_style(
+    client: TestClient,
+) -> None:
+    full = client.get("/company/RUT/42?date_from=not-a-date")
+    partial = client.get("/company/RUT/42/partial?date_from=not-a-date")
+
+    assert full.status_code == 422
+    assert "<html" in full.text
+    assert "AAAA-MM-DD" in full.text
+    assert partial.status_code == 422
+    assert "<html" not in partial.text
+    assert 'role="alert"' in partial.text
+
+
 def test_limpiar_resets_to_current_year(client: TestClient) -> None:
     """The Limpiar control is a button that resets the form and re-triggers
     the HTMX request (NOT an <a href="/"> that would navigate)."""
