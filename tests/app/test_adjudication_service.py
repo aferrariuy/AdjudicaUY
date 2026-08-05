@@ -38,6 +38,7 @@ from app.services.adjudication_service import (
     lookup_company_identity,
     monthly_trend,
     ranking_by_organism,
+    top_articles,
 )
 
 if TYPE_CHECKING:
@@ -140,6 +141,123 @@ def add_oferente(db_session: Session):
         return of
 
     return _factory
+
+
+# ---------------------------------------------------------------------------
+# top_articles
+# ---------------------------------------------------------------------------
+
+
+class TestTopArticles:
+    """Top article totals use the exact company scope and active dates."""
+
+    def test_groups_by_id_or_description_and_excludes_null_amounts(
+        self, db_session, make_compra, add_adj
+    ) -> None:
+        company = ("RUT", "TOP-ARTICLE-A")
+
+        first = make_compra(fecha_pub_adj=date(2024, 3, 1))
+        add_adj(
+            first,
+            tipo_doc_prov=company[0],
+            nro_doc_prov=company[1],
+            id_articulo="100",
+            desc_articulo="Shared article",
+            amount_uyu=Decimal("500.00"),
+        )
+        second = make_compra(fecha_pub_adj=date(2024, 3, 2))
+        add_adj(
+            second,
+            tipo_doc_prov=company[0],
+            nro_doc_prov=company[1],
+            id_articulo="100",
+            desc_articulo="Updated description",
+            amount_uyu=Decimal("300.00"),
+        )
+        description_only = make_compra(fecha_pub_adj=date(2024, 3, 3))
+        add_adj(
+            description_only,
+            tipo_doc_prov=company[0],
+            nro_doc_prov=company[1],
+            id_articulo=None,
+            desc_articulo="Shared article",
+            amount_uyu=Decimal("700.00"),
+        )
+        null_amount = make_compra(fecha_pub_adj=date(2024, 3, 4))
+        add_adj(
+            null_amount,
+            tipo_doc_prov=company[0],
+            nro_doc_prov=company[1],
+            id_articulo="null-only",
+            desc_articulo="Ignored article",
+            amount_uyu=None,
+        )
+
+        result = top_articles(
+            db_session,
+            AdjudicationFilters(
+                company_doc_exact=company,
+                date_from=date(2024, 1, 1),
+                date_to=date(2024, 12, 31),
+            ),
+        )
+
+        assert [(row.article_id, row.name, row.total_amount_uyu) for row in result] == [
+            ("100", "Shared article", Decimal("800.00")),
+            (None, "Shared article", Decimal("700.00")),
+        ]
+        assert [row.adjudication_count for row in result] == [2, 1]
+
+    def test_scope_date_filter_order_and_cap(
+        self, db_session, make_compra, add_adj
+    ) -> None:
+        company = ("RUT", "TOP-ARTICLE-A")
+        for index in range(1, 22):
+            compra = make_compra(fecha_pub_adj=date(2024, 4, 1))
+            add_adj(
+                compra,
+                tipo_doc_prov=company[0],
+                nro_doc_prov=company[1],
+                id_articulo=f"article-{index}",
+                desc_articulo=f"Article {index}",
+                amount_uyu=Decimal(index * 100),
+            )
+
+        other_company = make_compra(fecha_pub_adj=date(2024, 4, 1))
+        add_adj(
+            other_company,
+            tipo_doc_prov="RUT",
+            nro_doc_prov="TOP-ARTICLE-B",
+            id_articulo="other",
+            desc_articulo="Other company article",
+            amount_uyu=Decimal("99999.00"),
+        )
+        previous_year = make_compra(fecha_pub_adj=date(2023, 4, 1))
+        add_adj(
+            previous_year,
+            tipo_doc_prov=company[0],
+            nro_doc_prov=company[1],
+            id_articulo="previous-year",
+            desc_articulo="Previous year article",
+            amount_uyu=Decimal("88888.00"),
+        )
+
+        result = top_articles(
+            db_session,
+            AdjudicationFilters(
+                company_doc_exact=company,
+                date_from=date(2024, 1, 1),
+                date_to=date(2024, 12, 31),
+            ),
+            limit=100,
+        )
+
+        assert len(result) == 20
+        assert result[0].article_id == "article-21"
+        assert result[0].total_amount_uyu == Decimal("2100.00")
+        assert result[-1].article_id == "article-2"
+        assert all(row.article_id != "article-1" for row in result)
+        assert all(row.article_id not in {"other", "previous-year"} for row in result)
 
 
 # ---------------------------------------------------------------------------

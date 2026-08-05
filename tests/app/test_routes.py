@@ -895,6 +895,49 @@ def test_company_profile_partial_contains_body_without_page_chrome(
     assert "Agencia de Compras y Contrataciones" not in response.text
 
 
+def test_company_profile_renders_top_articles_widget_scoped_to_document(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="TOP-ARTICLE-COMPANY",
+        company_document_type="RUT",
+        company_document="42",
+        article="TOP-ARTICLE-LAPTOP",
+        article_id="article-1",
+        amount_uyu=Decimal("200.00"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    make_adjudication(
+        winning_company="TOP-ARTICLE-COMPANY",
+        company_document_type="RUT",
+        company_document="42",
+        article="TOP-ARTICLE-MONITOR",
+        article_id="article-2",
+        amount_uyu=Decimal("100.00"),
+        date=date(CURRENT_YEAR, 3, 2),
+    )
+    make_adjudication(
+        winning_company="OTHER-COMPANY",
+        company_document_type="RUT",
+        company_document="99",
+        article="OTHER-COMPANY-ARTICLE",
+        article_id="article-other",
+        amount_uyu=Decimal("99999.00"),
+        date=date(CURRENT_YEAR, 3, 3),
+    )
+
+    full = client.get("/company/RUT/42")
+    partial = client.get("/company/RUT/42/partial")
+
+    assert full.status_code == 200
+    assert 'id="company-top-articles-heading"' in full.text
+    assert "TOP-ARTICLE-LAPTOP" in full.text
+    assert "TOP-ARTICLE-MONITOR" in full.text
+    assert "OTHER-COMPANY-ARTICLE" not in full.text
+    assert partial.status_code == 200
+    assert 'id="company-top-articles-heading"' in partial.text
+
+
 def test_unknown_company_profile_returns_200_empty_state(client: TestClient) -> None:
     response = client.get("/company/RUT/999999999999")
 
