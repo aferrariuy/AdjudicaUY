@@ -43,9 +43,12 @@ from app.services.adjudication_service import (
     MAX_EXPORT_ROWS,
     AdjudicationFilters,
     CompanyProfileSummary,
+    CompanyWinRate,
     ConcentrationResult,
     ValidationError,
+    company_competitors,
     company_summary,
+    company_win_rate,
     concentration_ratio,
     count_adjudications,
     distinct_organisms,
@@ -980,6 +983,16 @@ def _build_company_context(
         if not decoded_type or not decoded_number
         else concentration_ratio(db, filters)
     )
+    win_rate = (
+        CompanyWinRate(0, 0, None)
+        if not decoded_type or not decoded_number
+        else company_win_rate(db, decoded_type, decoded_number, filters)
+    )
+    competitors = (
+        []
+        if not decoded_type or not decoded_number
+        else company_competitors(db, decoded_type, decoded_number, filters)
+    )
     ranking_rows = (
         []
         if not decoded_type or not decoded_number
@@ -1021,6 +1034,8 @@ def _build_company_context(
             else None
         ),
         "has_concentration_data": concentration.ratio is not None,
+        "company_win_rate": win_rate,
+        "company_competitors": competitors,
         "company_variant": True,
     }
 
