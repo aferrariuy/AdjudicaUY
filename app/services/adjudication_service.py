@@ -237,6 +237,19 @@ class RankingEntry:
     name: str
     total_amount_uyu: Decimal
     adjudication_count: int
+    company_type: str | None = None
+    company_number: str | None = None
+
+    @property
+    def company_profile_url(self) -> str | None:
+        """Return the encoded company profile URL when identity is complete."""
+
+        if not self.company_type or not self.company_number:
+            return None
+        return (
+            f"/company/{quote(self.company_type, safe='')}/"
+            f"{quote(self.company_number, safe='')}"
+        )
 
 
 @dataclass(frozen=True)
@@ -560,6 +573,47 @@ def ranking_by_company(
     scenario).
     """
 
+    pair_count = func.count(Adjudicacion.id)
+    latest_date = func.max(Compra.fecha_pub_adj)
+    identity_stmt = (
+        select(
+            Adjudicacion.nombre_comercial.label("name"),
+            Adjudicacion.tipo_doc_prov.label("company_type"),
+            Adjudicacion.nro_doc_prov.label("company_number"),
+            pair_count.label("pair_count"),
+            latest_date.label("latest_date"),
+        )
+        .join(Compra, Compra.id == Adjudicacion.compra_id)
+        .where(
+            Adjudicacion.amount_uyu.is_not(None),
+            Adjudicacion.tipo_doc_prov.is_not(None),
+            Adjudicacion.nro_doc_prov.is_not(None),
+            Adjudicacion.tipo_doc_prov != "",
+            Adjudicacion.nro_doc_prov != "",
+        )
+        .group_by(
+            Adjudicacion.nombre_comercial,
+            Adjudicacion.tipo_doc_prov,
+            Adjudicacion.nro_doc_prov,
+        )
+    )
+    identity_stmt = _apply_filters(identity_stmt, filters)
+    identity_rows = identity_stmt.subquery("company_identity_counts")
+    identity_ranked = select(
+        identity_rows,
+        func.row_number()
+        .over(
+            partition_by=identity_rows.c.name,
+            order_by=(
+                identity_rows.c.pair_count.desc(),
+                identity_rows.c.latest_date.desc(),
+                identity_rows.c.company_type.asc(),
+                identity_rows.c.company_number.asc(),
+            ),
+        )
+        .label("identity_rank"),
+    ).subquery("company_identity_ranked")
+
     stmt = (
         select(
             Adjudicacion.nombre_comercial.label("name"),
@@ -567,10 +621,20 @@ def ranking_by_company(
                 "total_amount_uyu"
             ),
             func.count(Adjudicacion.id).label("adjudication_count"),
+            identity_ranked.c.company_type,
+            identity_ranked.c.company_number,
         )
         .join(Compra, Compra.id == Adjudicacion.compra_id)
+        .outerjoin(
+            identity_ranked,
+            and_(
+                identity_ranked.c.name == Adjudicacion.nombre_comercial,
+                identity_ranked.c.identity_rank == 1,
+            ),
+        )
         .where(Adjudicacion.amount_uyu.is_not(None))
         .group_by(Adjudicacion.nombre_comercial)
+        .group_by(identity_ranked.c.company_type, identity_ranked.c.company_number)
         .order_by(func.sum(Adjudicacion.amount_uyu).desc())
         .limit(limit)
     )
@@ -580,6 +644,8 @@ def ranking_by_company(
             name=row.name,
             total_amount_uyu=row.total_amount_uyu,
             adjudication_count=int(row.adjudication_count),
+            company_type=row.company_type,
+            company_number=row.company_number,
         )
         for row in session.execute(stmt)
     ]

@@ -37,6 +37,7 @@ from app.services.adjudication_service import (
     list_adjudications,
     lookup_company_identity,
     monthly_trend,
+    ranking_by_company,
     ranking_by_organism,
     top_articles,
 )
@@ -811,3 +812,84 @@ def test_company_widgets_and_listing_are_scoped_by_document(
     assert [entry.name for entry in ranking_by_organism(db_session, filters)] == ["OSE"]
     assert concentration_ratio(db_session, filters).single_bidder_count == 1
     assert len(list_adjudications(db_session, filters)) == 1
+
+
+def test_ranking_by_company_attaches_the_dominant_document_pair(
+    db_session, make_compra, add_adj
+) -> None:
+    for number in ("A", "A", "A", "B"):
+        compra = make_compra()
+        add_adj(
+            compra,
+            nombre_comercial="ACME",
+            tipo_doc_prov="RUT",
+            nro_doc_prov=number,
+            amount_uyu=Decimal("100"),
+        )
+
+    entry = ranking_by_company(db_session, AdjudicationFilters())[0]
+
+    assert entry.company_type == "RUT"
+    assert entry.company_number == "A"
+    assert entry.company_profile_url == "/company/RUT/A"
+
+
+def test_ranking_by_company_tie_breaks_by_latest_date_then_lexicographically(
+    db_session, make_compra, add_adj
+) -> None:
+    for pair, when in (
+        (("RUT", "2"), date(2024, 3, 1)),
+        (("RUT", "2"), date(2024, 3, 2)),
+        (("CI", "9"), date(2024, 4, 1)),
+        (("CI", "9"), date(2024, 4, 2)),
+    ):
+        compra = make_compra(fecha_pub_adj=when)
+        add_adj(
+            compra,
+            nombre_comercial="TIE",
+            tipo_doc_prov=pair[0],
+            nro_doc_prov=pair[1],
+            amount_uyu=Decimal("100"),
+        )
+
+    entry = ranking_by_company(db_session, AdjudicationFilters())[0]
+
+    assert (entry.company_type, entry.company_number) == ("CI", "9")
+
+
+def test_ranking_by_company_leaves_missing_document_identity_unlinked(
+    db_session, make_compra, add_adj
+) -> None:
+    compra = make_compra()
+    add_adj(
+        compra,
+        nombre_comercial="NAME-ONLY",
+        tipo_doc_prov=None,
+        nro_doc_prov=None,
+        amount_uyu=Decimal("100"),
+    )
+
+    entry = ranking_by_company(db_session, AdjudicationFilters())[0]
+
+    assert entry.company_type is None
+    assert entry.company_number is None
+    assert entry.company_profile_url is None
+
+
+def test_ranking_by_company_uses_lexical_pair_as_final_tie_break(
+    db_session, make_compra, add_adj
+) -> None:
+    for pair in (("RUT", "2"), ("CI", "9")):
+        for _ in range(2):
+            compra = make_compra(fecha_pub_adj=date(2024, 5, 1))
+            add_adj(
+                compra,
+                nombre_comercial="LEXICAL-TIE",
+                tipo_doc_prov=pair[0],
+                nro_doc_prov=pair[1],
+                amount_uyu=Decimal("100"),
+            )
+
+    entry = ranking_by_company(db_session, AdjudicationFilters())[0]
+
+    assert (entry.company_type, entry.company_number) == ("CI", "9")
