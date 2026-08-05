@@ -88,7 +88,14 @@
                     // Non-doughnut charts (e.g. trend) keep the default
                     // one-item-per-dataset legend.
                     if (chart.config.type !== 'doughnut' && chart.config.type !== 'pie') {
-                      return Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                      var items = Chart.defaults.plugins.legend.labels.generateLabels(chart);
+                      if (legendColor) {
+                        items.forEach(function (item) {
+                          item.color = legendColor;
+                          item.fontColor = legendColor;
+                        });
+                      }
+                      return items;
                     }
                     // Doughnut: one legend item per slice with its own color
                     // and a capitalized label. Self-contained so it does not
@@ -101,7 +108,7 @@
                     return (data.labels || []).map(function (label, i) {
                       var text = (label || '').toString();
                       if (text) text = text.charAt(0).toUpperCase() + text.slice(1);
-                      return {
+                      var item = {
                         text: text,
                         fillStyle: bg[i] || '#1B2A4A',
                         strokeStyle: bg[i] || '#1B2A4A',
@@ -109,6 +116,11 @@
                         hidden: !chart.getDataVisibility(i),
                         index: i
                       };
+                      if (legendColor) {
+                        item.color = legendColor;
+                        item.fontColor = legendColor;
+                      }
+                      return item;
                     });
                   }
                 }
