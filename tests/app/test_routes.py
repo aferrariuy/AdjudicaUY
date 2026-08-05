@@ -877,6 +877,31 @@ def test_company_profile_full_page_renders_identity_kpis_and_history(
     assert "No se encontró actividad" not in response.text
 
 
+def test_company_profile_full_page_contains_seo_and_corporation_json_ld(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="SEO Company",
+        company_document_type="RUT",
+        company_document="42",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/company/RUT/42")
+
+    assert response.status_code == 200
+    assert '<meta name="description"' in response.text
+    assert 'property="og:type" content="Corporation"' in response.text
+    assert 'property="og:url"' in response.text
+    assert '<link rel="canonical"' in response.text
+    assert 'type="application/ld+json"' in response.text
+    assert '"@type": "Corporation"' in response.text
+    assert '"name": "SEO Company"' in response.text
+    assert '"propertyID": "RUT"' in response.text
+    assert '"value": "42"' in response.text
+    assert "/company/RUT/42" in response.text
+
+
 def test_company_profile_partial_contains_body_without_page_chrome(
     client: TestClient, make_adjudication
 ) -> None:
@@ -938,12 +963,126 @@ def test_company_profile_renders_top_articles_widget_scoped_to_document(
     assert 'id="company-top-articles-heading"' in partial.text
 
 
+def test_company_export_scopes_document_and_active_filters(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="CSV-COMPANY-A-2024",
+        company_document_type="RUT",
+        company_document="42",
+        article="CSV-ARTICLE-MATCH",
+        date=date(2024, 3, 1),
+    )
+    make_adjudication(
+        winning_company="CSV-COMPANY-A-2025",
+        company_document_type="RUT",
+        company_document="42",
+        article="CSV-ARTICLE-MATCH",
+        date=date(2025, 3, 1),
+    )
+    make_adjudication(
+        winning_company="CSV-COMPANY-B",
+        company_document_type="RUT",
+        company_document="99",
+        article="CSV-ARTICLE-MATCH",
+        date=date(2024, 3, 1),
+    )
+    make_adjudication(
+        winning_company="CSV-COMPANY-A-WRONG-ARTICLE",
+        company_document_type="RUT",
+        company_document="42",
+        article="CSV-ARTICLE-OTHER",
+        date=date(2024, 3, 1),
+    )
+
+    response = client.get(
+        "/company/RUT/42/export?article=MATCH&date_from=2024-01-01&date_to=2024-12-31"
+    )
+
+    assert response.status_code == 200
+    assert "CSV-COMPANY-A-2024" in response.text
+    assert "CSV-COMPANY-A-2025" not in response.text
+    assert "CSV-COMPANY-B" not in response.text
+    assert "CSV-COMPANY-A-WRONG-ARTICLE" not in response.text
+
+
+def test_company_export_applies_same_row_cap_as_global_export(
+    client: TestClient, make_adjudication, monkeypatch
+) -> None:
+    import app.routes.adjudications as routes_module
+
+    monkeypatch.setattr(routes_module, "MAX_EXPORT_ROWS", 0)
+    make_adjudication(
+        company_document_type="RUT",
+        company_document="42",
+        article="laptop",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/company/RUT/42/export")
+
+    assert response.status_code == 400
+    assert "500.000" in response.text
+
+
+def test_company_export_decodes_identity_and_matches_global_csv_shape(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="CSV-ENCODED-COMPANY",
+        company_document_type="RUT X",
+        company_document="00 123",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/company/RUT%20X/00%20123/export")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/csv; charset=utf-8"
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="adjudicaciones.csv"'
+    )
+    assert response.content.startswith(b"\xef\xbb\xbf")
+    assert "CSV-ENCODED-COMPANY" in response.content.decode("utf-8-sig")
+
+
+def test_company_export_link_preserves_active_filters(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        company_document_type="RUT",
+        company_document="42",
+        article="laptop",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/company/RUT/42?article=laptop&date_from=2024-01-01")
+
+    assert response.status_code == 200
+    assert 'href="/company/RUT/42/export?' in response.text
+    assert "article=laptop" in response.text
+    assert "date_from=2024-01-01" in response.text
+
+
 def test_unknown_company_profile_returns_200_empty_state(client: TestClient) -> None:
     response = client.get("/company/RUT/999999999999")
 
     assert response.status_code == 200
     assert "No se encontró actividad registrada" in response.text
     assert 'role="status"' in response.text
+
+
+def test_unknown_company_profile_emits_identity_json_ld(
+    client: TestClient,
+) -> None:
+    response = client.get("/company/RUT/999999999999")
+
+    assert response.status_code == 200
+    assert '"@type": "Corporation"' in response.text
+    assert '"name": "RUT 999999999999"' in response.text
+    assert '"propertyID": "RUT"' in response.text
+    assert '"value": "999999999999"' in response.text
 
 
 def test_company_profile_decodes_both_path_segments(

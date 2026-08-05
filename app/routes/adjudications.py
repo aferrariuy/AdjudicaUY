@@ -662,25 +662,13 @@ def _row_to_csv_fields(row: Any) -> list[str]:
     ]
 
 
-@router.get("/adjudications/export", include_in_schema=False)
-def export_adjudications(request: Request) -> Response:
-    """Stream a CSV of adjudications matching the active filters.
+def _stream_csv_response(filters: AdjudicationFilters) -> Response:
+    """Stream the standard CSV response for a prepared filter set.
 
-    Uses a manual DB session (not ``Depends(get_db)``) because the
-    ``StreamingResponse`` generator runs after the route function
-    returns — the dependency-based session would be closed before
-    iteration starts. The generator owns the session lifecycle and
-    closes it in a ``finally`` block.
+    The generator owns a manual session because ``StreamingResponse`` begins
+    iterating after the route returns. Keeping this shared by the global and
+    company exports guarantees identical columns, limits, and lifecycle.
     """
-
-    params = cast("dict[str, str | None]", dict(request.query_params))
-    _inject_default_year_params(params)
-    try:
-        validate_date_params(params)
-    except ValidationError as exc:
-        return Response(exc.message, status_code=422, media_type="text/plain")
-
-    filters = filters_from_query_params(params)
 
     # Manual session — the generator closes it.
     session = get_session_factory()()
@@ -730,6 +718,35 @@ def export_adjudications(request: Request) -> Response:
             "Content-Disposition": 'attachment; filename="adjudicaciones.csv"',
         },
     )
+
+
+def _company_filters(
+    raw_type: str,
+    raw_number: str,
+    params: dict[str, str | None],
+) -> AdjudicationFilters:
+    """Build filters for a company document identity and shared query filters."""
+
+    parsed = filters_from_query_params(params)
+    return replace(
+        parsed,
+        company=None,
+        company_doc_exact=(unquote(raw_type), unquote(raw_number)),
+    )
+
+
+@router.get("/adjudications/export", include_in_schema=False)
+def export_adjudications(request: Request) -> Response:
+    """Stream a CSV of adjudications matching the active filters."""
+
+    params = cast("dict[str, str | None]", dict(request.query_params))
+    _inject_default_year_params(params)
+    try:
+        validate_date_params(params)
+    except ValidationError as exc:
+        return Response(exc.message, status_code=422, media_type="text/plain")
+
+    return _stream_csv_response(filters_from_query_params(params))
 
 
 # ---------------------------------------------------------------------------
@@ -907,15 +924,7 @@ def _build_company_context(
     decoded_number = unquote(raw_number)
     _inject_default_year_params(raw_params)
     validate_date_params(raw_params)
-    parsed = filters_from_query_params(raw_params)
-    filters = AdjudicationFilters(
-        organism=parsed.organism,
-        article=parsed.article,
-        article_id=parsed.article_id,
-        date_from=parsed.date_from,
-        date_to=parsed.date_to,
-        company_doc_exact=(decoded_type, decoded_number),
-    )
+    filters = _company_filters(raw_type, raw_number, raw_params)
 
     summary = CompanyProfileSummary(
         display_name=None,
@@ -1047,6 +1056,27 @@ def company_detail(
         )
     )
     return _render("company_detail.html", request, context)
+
+
+@router.get(
+    "/company/{tipo_doc_prov}/{nro_doc_prov}/export",
+    include_in_schema=False,
+)
+def export_company_adjudications(
+    tipo_doc_prov: str,
+    nro_doc_prov: str,
+    request: Request,
+) -> Response:
+    """Stream the standard CSV export scoped to one company document."""
+
+    params = cast("dict[str, str | None]", dict(request.query_params))
+    _inject_default_year_params(params)
+    try:
+        validate_date_params(params)
+    except ValidationError as exc:
+        return Response(exc.message, status_code=422, media_type="text/plain")
+
+    return _stream_csv_response(_company_filters(tipo_doc_prov, nro_doc_prov, params))
 
 
 @router.get(
