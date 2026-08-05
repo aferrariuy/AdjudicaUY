@@ -252,6 +252,8 @@ def _build_trend_chart_payload(
 
 def _build_concentration_chart_payload(
     result: ConcentrationResult,
+    *,
+    competition_labels: bool = False,
 ) -> dict[str, Any]:
     """Shape the market-concentration metric for a Chart.js doughnut.
 
@@ -268,9 +270,15 @@ def _build_concentration_chart_payload(
     separately by the partial.
     """
 
+    labels = (
+        ["sin competencia", "con competencia"]
+        if competition_labels
+        else ["1 oferente", "más de 1 oferente"]
+    )
+
     return {
         "type": "doughnut",
-        "labels": ["1 oferente", "más de 1 oferente"],
+        "labels": labels,
         "datasets": [
             {
                 "label": "Compras por oferentes",
@@ -490,6 +498,8 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
             "page_numbers": page_numbers,
             "ranking_rows": ranking_rows,
             "organism_rows": organism_rows,
+            "link_to_company": True,
+            "company_variant": False,
             "organisms": organisms,
             # Citizen-dashboard payloads. The dicts are serialized by
             # Jinja's ``|tojson`` filter in the templates, which escapes
@@ -606,6 +616,8 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
             "page_numbers": page_numbers,
             "ranking_rows": ranking_rows,
             "organism_rows": organism_rows,
+            "link_to_company": True,
+            "company_variant": False,
             # Citizen-dashboard payloads. The dicts are serialized by
             # Jinja's ``|tojson`` filter in the templates, which escapes
             # for safe use inside HTML attributes.
@@ -812,6 +824,8 @@ def _build_organism_context(
         "concentration": concentration,
         "concentration_payload": concentration_payload,
         "has_concentration_data": concentration.ratio is not None,
+        "link_to_company": True,
+        "company_variant": False,
         # The company ranking on the organism page reuses the same
         # variable names as the index page's ``_ranking_list.html``
         # partial — the partial reads ``ranking_rows`` regardless of
@@ -1002,11 +1016,12 @@ def _build_company_context(
         "has_trend_data": bool(trend_rows),
         "concentration": concentration,
         "concentration_payload": (
-            _build_concentration_chart_payload(concentration)
+            _build_concentration_chart_payload(concentration, competition_labels=True)
             if concentration.ratio is not None
             else None
         ),
         "has_concentration_data": concentration.ratio is not None,
+        "company_variant": True,
     }
 
 
