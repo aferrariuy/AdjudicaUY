@@ -66,6 +66,8 @@
   (function () {
     function renderCharts() {
       if (!window.Chart) return;
+      var isDark = document.documentElement.classList.contains('dark');
+      var legendColor = isDark ? '#D4D8E1' : undefined;
       document.querySelectorAll('canvas[data-chart]').forEach(function (canvas) {
         if (Chart.getChart(canvas)) Chart.getChart(canvas).destroy();
         var spec; try { spec = JSON.parse(canvas.dataset.chart); } catch (e) { return; }
@@ -81,6 +83,7 @@
               legend: {
                 position: 'bottom',
                 labels: {
+                  color: legendColor,
                   generateLabels: function (chart) {
                     // Non-doughnut charts (e.g. trend) keep the default
                     // one-item-per-dataset legend.
@@ -111,12 +114,10 @@
                 }
               },
               tooltip: {
+                titleColor: legendColor,
+                bodyColor: legendColor,
                 callbacks: {
-                  title: function (items) {
-                    if (!items || !items.length) return '';
-                    var text = (items[0].label || '').toString();
-                    return text ? text.charAt(0).toUpperCase() + text.slice(1) : '';
-                  },
+                  title: function () { return ''; },
                   label: function (ctx) {
                     if (isDonut) {
                       var count = (ctx.parsed === null || ctx.parsed === undefined) ? 0 : ctx.parsed;
@@ -140,6 +141,7 @@
     }
     document.addEventListener('DOMContentLoaded', loadCharts);
     document.body.addEventListener('htmx:afterSettle', renderCharts);
+    document.addEventListener('theme:changed', renderCharts);
   })();
 </script>
 {% endblock %}
