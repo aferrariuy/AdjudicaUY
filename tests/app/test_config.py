@@ -92,3 +92,31 @@ def test_disallowed_source_host_is_rejected(base_env, monkeypatch: Any) -> None:
     )
     with pytest.raises(ValueError, match="is not allowed"):
         _make_settings()
+
+
+@pytest.mark.parametrize("ttl", ["0", "300", "900"])
+def test_cache_ttl_accepts_zero_and_five_to_fifteen_minutes(
+    base_env, monkeypatch: Any, ttl: str
+) -> None:
+    monkeypatch.setenv("CACHE_TTL_SECONDS", ttl)
+
+    settings = _make_settings()
+
+    assert settings.cache_ttl_seconds == int(ttl)
+
+
+@pytest.mark.parametrize("ttl", ["299", "901"])
+def test_cache_ttl_rejects_values_outside_disabled_or_five_to_fifteen_minutes(
+    base_env, monkeypatch: Any, ttl: str
+) -> None:
+    monkeypatch.setenv("CACHE_TTL_SECONDS", ttl)
+
+    with pytest.raises(ValueError):
+        _make_settings()
+
+
+def test_cache_max_entries_requires_at_least_one(base_env, monkeypatch: Any) -> None:
+    monkeypatch.setenv("CACHE_MAX_ENTRIES", "0")
+
+    with pytest.raises(ValueError):
+        _make_settings()
