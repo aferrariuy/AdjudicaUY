@@ -353,7 +353,9 @@ def _legacy_company_win_rate_tuples(
     return participations, wins, rate
 
 
-def _seed_company_win_rate_edges(make_compra, add_adj, make_oferente) -> tuple[str, str]:
+def _seed_company_win_rate_edges(
+    make_compra, add_adj, make_oferente
+) -> tuple[str, str]:
     """Seed every inclusive win-rate edge without relying on the new query."""
 
     target = ("RUT", "WIN-RATE-EDGES")
