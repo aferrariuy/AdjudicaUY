@@ -986,9 +986,7 @@ def _build_company_context(
         summary = replace(
             cached_aggregate(
                 "company_summary",
-                lambda s, f: company_summary(
-                    s, f, market_total=market.total_amount
-                ),
+                lambda s, f: company_summary(s, f, market_total=market.total_amount),
                 db,
                 filters,
             ),
@@ -1023,9 +1021,7 @@ def _build_company_context(
         if not decoded_type or not decoded_number
         else cached_aggregate(
             "company_win_rate",
-            lambda s, f: company_win_rate(
-                s, decoded_type, decoded_number, f
-            ),
+            lambda s, f: company_win_rate(s, decoded_type, decoded_number, f),
             db,
             filters,
         )

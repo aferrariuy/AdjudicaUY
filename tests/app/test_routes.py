@@ -1578,7 +1578,9 @@ def test_company_context_cache_hits_eight_aggregates(db_session) -> None:
         patch(
             "app.routes.adjudications.company_competitors", return_value=[]
         ) as competitors_mock,
-        patch("app.routes.adjudications.top_articles", return_value=[]) as articles_mock,
+        patch(
+            "app.routes.adjudications.top_articles", return_value=[]
+        ) as articles_mock,
         patch("app.routes.adjudications.monthly_trend", return_value=[]) as trend_mock,
         patch(
             "app.routes.adjudications.concentration_ratio",
@@ -1636,7 +1638,9 @@ def test_company_context_cache_cold_miss_runs_eight_aggregates(db_session) -> No
         patch(
             "app.routes.adjudications.company_competitors", return_value=[]
         ) as competitors_mock,
-        patch("app.routes.adjudications.top_articles", return_value=[]) as articles_mock,
+        patch(
+            "app.routes.adjudications.top_articles", return_value=[]
+        ) as articles_mock,
         patch("app.routes.adjudications.monthly_trend", return_value=[]) as trend_mock,
         patch(
             "app.routes.adjudications.concentration_ratio",
@@ -1735,7 +1739,10 @@ def test_company_context_company_summary_uses_market_total(db_session) -> None:
             "app.routes.adjudications.lookup_company_identity",
             side_effect=["Initial Name", "Fresh Name"],
         ),
-        patch("app.routes.adjudications.company_win_rate", return_value=CompanyWinRate(0, 0, None)),
+        patch(
+            "app.routes.adjudications.company_win_rate",
+            return_value=CompanyWinRate(0, 0, None),
+        ),
         patch("app.routes.adjudications.company_competitors", return_value=[]),
         patch("app.routes.adjudications.top_articles", return_value=[]),
     ):
