@@ -1074,6 +1074,45 @@ def test_company_summary_counts_distinct_purchases_and_excludes_null_amounts(
     assert result.share_of_total == Decimal("0.5")
 
 
+def test_company_summary_total_equals_count_adjudications(
+    db_session, make_compra, add_adj
+) -> None:
+    company_filters = AdjudicationFilters(
+        company_doc_exact=("RUT", "42"),
+        date_from=date(2024, 1, 1),
+        date_to=date(2024, 12, 31),
+    )
+    for index in range(21):
+        compra = make_compra(fecha_pub_adj=date(2024, 1, index + 1))
+        add_adj(
+            compra,
+            nombre_comercial="ACME",
+            tipo_doc_prov="RUT",
+            nro_doc_prov="42",
+            amount_uyu=Decimal("10.00"),
+        )
+    other = make_compra(fecha_pub_adj=date(2024, 1, 31))
+    add_adj(
+        other,
+        nombre_comercial="Other",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="99",
+        amount_uyu=Decimal("20.00"),
+    )
+
+    summary = company_summary(db_session, company_filters)
+
+    assert summary.total == count_adjudications(db_session, company_filters) == 21
+
+    empty_filters = AdjudicationFilters(
+        company_doc_exact=("RUT", "missing"),
+        date_from=date(2024, 1, 1),
+        date_to=date(2024, 12, 31),
+    )
+    empty_summary = company_summary(db_session, empty_filters)
+    assert empty_summary.total == count_adjudications(db_session, empty_filters) == 0
+
+
 def test_company_win_rate_is_inclusive_null_safe_and_date_scoped(
     db_session, make_compra, add_adj, make_oferente
 ) -> None:

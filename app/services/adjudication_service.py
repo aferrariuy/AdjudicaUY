@@ -184,6 +184,7 @@ class CompanyProfileSummary:
 
     display_name: str | None
     total_amount: Decimal
+    total: int
     purchase_count: int
     organism_count: int
     share_of_total: Decimal
@@ -1000,9 +1001,10 @@ def company_summary(
     total_expr = func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label(
         "total_amount"
     )
+    count_expr = func.count(Adjudicacion.id).label("total")
     purchase_expr = func.count(func.distinct(Compra.id)).label("purchase_count")
     organism_expr = func.count(func.distinct(Compra.organismo)).label("organism_count")
-    company_stmt = select(total_expr, purchase_expr, organism_expr).join(
+    company_stmt = select(total_expr, count_expr, purchase_expr, organism_expr).join(
         Compra, Compra.id == Adjudicacion.compra_id
     )
     company_stmt = _apply_filters(company_stmt, filters)
@@ -1028,6 +1030,7 @@ def company_summary(
     return CompanyProfileSummary(
         display_name=None,
         total_amount=total,
+        total=int(company_row.total or 0),
         purchase_count=int(company_row.purchase_count or 0),
         organism_count=int(company_row.organism_count or 0),
         share_of_total=share,

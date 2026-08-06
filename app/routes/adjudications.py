@@ -973,6 +973,7 @@ def _build_company_context(
     summary = CompanyProfileSummary(
         display_name=None,
         total_amount=Decimal("0"),
+        total=0,
         purchase_count=0,
         organism_count=0,
         share_of_total=Decimal("0"),
@@ -986,11 +987,7 @@ def _build_company_context(
         )
 
     page = max(_coerce_page(raw_params.get("page")), 1)
-    total = (
-        0
-        if not decoded_type or not decoded_number
-        else count_adjudications(db, filters)
-    )
+    total = 0 if not decoded_type or not decoded_number else summary.total
     total_pages = max(1, math.ceil(total / PAGE_SIZE)) if total > 0 else 1
     results = (
         []

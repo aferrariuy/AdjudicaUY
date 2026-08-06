@@ -23,6 +23,7 @@ if TYPE_CHECKING:
 from app.routes.adjudications import _build_concentration_chart_payload
 from app.services.adjudication_service import (
     AdjudicationFilters,
+    CompanyProfileSummary,
     ConcentrationResult,
     KpiSummary,
     filters_from_query_params,
@@ -1421,6 +1422,69 @@ def test_company_profile_out_of_bounds_page_redirects_to_last_page(
 
     assert response.status_code == 302
     assert response.headers["location"] == "?page=2"
+
+
+def test_company_route_uses_summary_total_without_count(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        company_document_type="RUT",
+        company_document="42",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    summary = CompanyProfileSummary(
+        display_name=None,
+        total_amount=Decimal("100.00"),
+        purchase_count=1,
+        organism_count=1,
+        share_of_total=Decimal("1"),
+        total=25,
+    )
+    with (
+        patch("app.routes.adjudications.company_summary", return_value=summary),
+        patch(
+            "app.routes.adjudications.count_adjudications",
+            side_effect=AssertionError("company context must use summary.total"),
+        ) as count_mock,
+        patch(
+            "app.routes.adjudications._render", return_value=HTMLResponse("ok")
+        ) as render_mock,
+    ):
+        response = client.get("/company/RUT/42")
+
+    assert response.status_code == 200
+    assert render_mock.call_args.args[2]["total"] == 25
+    count_mock.assert_not_called()
+
+
+def test_company_route_redirects_out_of_bounds_from_summary_total(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        company_document_type="RUT",
+        company_document="42",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    summary = CompanyProfileSummary(
+        display_name=None,
+        total_amount=Decimal("100.00"),
+        purchase_count=1,
+        organism_count=1,
+        share_of_total=Decimal("1"),
+        total=11,
+    )
+    with (
+        patch("app.routes.adjudications.company_summary", return_value=summary),
+        patch(
+            "app.routes.adjudications.count_adjudications",
+            side_effect=AssertionError("company context must use summary.total"),
+        ) as count_mock,
+    ):
+        response = client.get("/company/RUT/42?page=3", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "?page=2"
+    count_mock.assert_not_called()
 
 
 def test_company_profile_hides_name_filter_but_keeps_organism_filter(
