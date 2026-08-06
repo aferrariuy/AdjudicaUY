@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 
-revision: str = "adjudicacion_compra_document_index"
+revision: str = "adjudicacion_compra_doc_index"
 down_revision: str | Sequence[str] | None = "dashboard_aggregate_indexes"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None

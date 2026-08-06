@@ -198,14 +198,18 @@ def test_dashboard_aggregate_indexes_migration_preserves_rows_on_sqlite() -> Non
         )
 
 
-def test_adjudicacion_compra_document_index_migration_preserves_rows_on_sqlite() -> (
-    None
-):
+def test_adjudicacion_compra_doc_index_migration_preserves_rows_on_sqlite() -> None:
     """The adjudicacion purchase/document index preserves rows on SQLite."""
 
     alembic_migration = pytest.importorskip("alembic.migration")
     alembic_operations = pytest.importorskip("alembic.operations")
-    from migrations.versions import adjudicacion_compra_document_index
+    from migrations.versions import adjudicacion_compra_doc_index
+
+    # Alembic's default version table column is VARCHAR(32); a longer
+    # revision id fails on PostgreSQL with StringDataRightTruncation
+    # (SQLite silently accepts any length, so this guard must be
+    # explicit — see the production deploy incident 2026-08-06).
+    assert len(adjudicacion_compra_doc_index.revision) <= 32
 
     MigrationContext = alembic_migration.MigrationContext
     Operations = alembic_operations.Operations
@@ -238,12 +242,12 @@ def test_adjudicacion_compra_document_index_migration_preserves_rows_on_sqlite()
 
         context = MigrationContext.configure(connection)
         operations = Operations(context)
-        original = adjudicacion_compra_document_index.op
-        adjudicacion_compra_document_index.op = operations
+        original = adjudicacion_compra_doc_index.op
+        adjudicacion_compra_doc_index.op = operations
         try:
-            adjudicacion_compra_document_index.upgrade()
+            adjudicacion_compra_doc_index.upgrade()
         finally:
-            adjudicacion_compra_document_index.op = original
+            adjudicacion_compra_doc_index.op = original
 
         indexes = inspect(connection).get_indexes("adjudicacion")
         index = next(
@@ -259,12 +263,12 @@ def test_adjudicacion_compra_document_index_migration_preserves_rows_on_sqlite()
 
         context = MigrationContext.configure(connection)
         operations = Operations(context)
-        original = adjudicacion_compra_document_index.op
-        adjudicacion_compra_document_index.op = operations
+        original = adjudicacion_compra_doc_index.op
+        adjudicacion_compra_doc_index.op = operations
         try:
-            adjudicacion_compra_document_index.downgrade()
+            adjudicacion_compra_doc_index.downgrade()
         finally:
-            adjudicacion_compra_document_index.op = original
+            adjudicacion_compra_doc_index.op = original
 
         assert "ix_adjudicacion_compra_document" not in {
             index["name"] for index in inspect(connection).get_indexes("adjudicacion")
