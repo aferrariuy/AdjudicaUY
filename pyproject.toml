@@ -30,4 +30,12 @@ ignore_missing_imports = true
 files = ["app", "scraper", "tests"]
 exclude = ["migrations/", ".venv/"]
 
+# ---------------------------------------------------------------------------
+# Bandit — security scanner (CI: bandit -r app scraper -c pyproject.toml)
+# ---------------------------------------------------------------------------
+[tool.bandit]
+# B104: uvicorn host="0.0.0.0" is required for the Docker container (app/main.py)
+# B311: random.uniform jitter in retry backoff is not security-sensitive (scraper/retry.py)
+skips = ["B104", "B311"]
+
 
