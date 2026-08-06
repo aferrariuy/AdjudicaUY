@@ -436,19 +436,21 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
         )
     filters = filters_from_query_params(params)
 
+    # KPI total is computed before pagination so out-of-bounds requests can
+    # redirect without a separate count query.
+    kpi = kpi_summary(db, filters)
+    total = kpi.total
+
     # Pagination. The ``page`` param is parsed manually so missing /
     # empty / non-integer / negative values all collapse to page 1
     # (the spec forbids a 4xx for malformed input).
     page = max(_coerce_page(params.get("page")), 1)
     offset = (page - 1) * PAGE_SIZE
 
-    # Count BEFORE listing so we can redirect out-of-bounds pages
-    # without spending a second query for the slice that will be
-    # discarded. ``total_pages`` is at least 1 even when the result
+    # ``total_pages`` is at least 1 even when the result
     # set is empty — the empty-state branch uses ``total == 0`` to
     # show the "no results" panel and the pagination bar is gated on
     # ``total_pages > 1`` in the template.
-    total = count_adjudications(db, filters)
     total_pages = max(1, math.ceil(total / PAGE_SIZE)) if total > 0 else 1
     if page > total_pages and total > 0:
         # Out-of-bounds: land the user on the last valid page so they
@@ -469,7 +471,6 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
     # The aggregates are NOT paginated — they reflect the full
     # filtered set, not the current page slice (adjudication-
     # pagination spec, "Dashboard Aggregates Use Full Filtered Set").
-    kpi = kpi_summary(db, filters)
     trend_rows = monthly_trend(db, filters)
     concentration = concentration_ratio(db, filters)
     concentration_payload = (
@@ -537,17 +538,25 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
         return _validation_error_response(exc.message)
     filters = filters_from_query_params(params)
 
-    # Pagination — see the index route for the parsing rationale.
-    page = max(_coerce_page(params.get("page")), 1)
-    offset = (page - 1) * PAGE_SIZE
-
     # When ``partial=table`` is present, the request comes from a
     # pagination link that only needs the table + pagination bar.
     # We skip the expensive aggregate queries (rankings, KPI, trend,
     # concentration) since they don't change between pages.
     table_only = params.get("partial") == "table"
 
-    total = count_adjudications(db, filters)
+    if table_only:
+        # Pagination — see the index route for the parsing rationale.
+        page = max(_coerce_page(params.get("page")), 1)
+        offset = (page - 1) * PAGE_SIZE
+        total = count_adjudications(db, filters)
+    else:
+        # Full responses use the KPI's full-set row count, avoiding a
+        # separate count query for the same filters.
+        kpi = kpi_summary(db, filters)
+        total = kpi.total
+        page = max(_coerce_page(params.get("page")), 1)
+        offset = (page - 1) * PAGE_SIZE
+
     total_pages = max(1, math.ceil(total / PAGE_SIZE)) if total > 0 else 1
     if page > total_pages and total > 0:
         return RedirectResponse(url=f"?page={total_pages}", status_code=302)
@@ -587,7 +596,6 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
     # rationale on the empty-state payload rule for concentration.
     # Aggregates are NOT paginated — they reflect the full filtered
     # set, not the current page slice.
-    kpi = kpi_summary(db, filters)
     trend_rows = monthly_trend(db, filters)
     concentration = concentration_ratio(db, filters)
     concentration_payload = (
