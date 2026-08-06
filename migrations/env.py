@@ -6,6 +6,7 @@ always applied against the same connection string the rest of the app uses.
 
 from __future__ import annotations
 
+from contextlib import suppress
 from logging.config import fileConfig
 
 from alembic import context
@@ -85,10 +86,18 @@ def run_migrations_online() -> None:
                 context.run_migrations()
         finally:
             if is_postgres:
-                connection.execute(
-                    text("SELECT pg_advisory_unlock(:key)"),
-                    {"key": _MIGRATION_LOCK_KEY},
-                )
+                # If a migration failed, the connection's transaction is
+                # aborted and ANY further statement fails with
+                # InFailedSqlTransaction. Roll back to clear the aborted
+                # state before releasing the advisory lock, and never let
+                # an unlock failure mask the original migration error.
+                with suppress(Exception):
+                    connection.rollback()
+                with suppress(Exception):
+                    connection.execute(
+                        text("SELECT pg_advisory_unlock(:key)"),
+                        {"key": _MIGRATION_LOCK_KEY},
+                    )
 
 
 if context.is_offline_mode():
