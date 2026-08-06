@@ -9,7 +9,14 @@ from __future__ import annotations
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import engine_from_config, pool, text
+
+# Advisory lock key used to serialize concurrent ``alembic upgrade head``
+# runs. The app and worker containers both run migrations on startup
+# (see scripts/entrypoint.sh); without this lock they race on the
+# ``alembic_version`` table during a deploy. The key is an arbitrary
+# fixed integer scoped to this project.
+_MIGRATION_LOCK_KEY = 828374628
 
 from app.config import get_settings
 from app.database import Base
@@ -58,13 +65,30 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection,
-            target_metadata=target_metadata,
-        )
+        # Serialize concurrent migration runs (app + worker containers both
+        # call ``alembic upgrade head`` on startup). PostgreSQL advisory
+        # locks are session-scoped and independent of transactions, so the
+        # lock survives the migration transaction below. SQLite (tests) has
+        # no advisory locks — nothing to serialize there.
+        is_postgres = connection.dialect.name == "postgresql"
+        if is_postgres:
+            connection.execute(
+                text("SELECT pg_advisory_lock(:key)"), {"key": _MIGRATION_LOCK_KEY}
+            )
+        try:
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+            )
 
-        with context.begin_transaction():
-            context.run_migrations()
+            with context.begin_transaction():
+                context.run_migrations()
+        finally:
+            if is_postgres:
+                connection.execute(
+                    text("SELECT pg_advisory_unlock(:key)"),
+                    {"key": _MIGRATION_LOCK_KEY},
+                )
 
 
 if context.is_offline_mode():
