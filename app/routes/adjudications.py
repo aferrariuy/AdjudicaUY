@@ -63,6 +63,7 @@ from app.services.adjudication_service import (
     top_articles,
     validate_date_params,
 )
+from app.services.query_cache import cached_aggregate
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -417,8 +418,8 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
 
     On the first GET (no filters in the query string), this returns the
     same data the ``/adjudications`` partial would return so the page is
-    useful on cold load. The cost of a no-filter COUNT + 50-row scan is
-    negligible at the data volumes the scraper produces.
+    useful on cold load. The KPI aggregate plus 50-row scan is kept bounded
+    and cached between identical dashboard requests.
 
     The return type is ``Response`` (not ``HTMLResponse``) because the
     pagination spec requires a 302 ``RedirectResponse`` for
@@ -438,7 +439,7 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
 
     # KPI total is computed before pagination so out-of-bounds requests can
     # redirect without a separate count query.
-    kpi = kpi_summary(db, filters)
+    kpi = cached_aggregate("kpi_summary", kpi_summary, db, filters)
     total = kpi.total
 
     # Pagination. The ``page`` param is parsed manually so missing /
@@ -461,9 +462,19 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
 
     results = list_adjudications(db, filters, limit=PAGE_SIZE, offset=offset)
     page_numbers = _build_page_numbers(page, total_pages)
-    ranking_rows = ranking_by_company(db, filters, limit=RANKING_LIMIT)
-    organism_rows = ranking_by_organism(db, filters, limit=RANKING_LIMIT)
-    organisms = distinct_organisms(db, filters, limit=ORGANISM_SUGGEST_LIMIT)
+    ranking_rows = cached_aggregate(
+        "ranking_by_company", ranking_by_company, db, filters, limit=RANKING_LIMIT
+    )
+    organism_rows = cached_aggregate(
+        "ranking_by_organism", ranking_by_organism, db, filters, limit=RANKING_LIMIT
+    )
+    organisms = cached_aggregate(
+        "distinct_organisms",
+        distinct_organisms,
+        db,
+        filters,
+        limit=ORGANISM_SUGGEST_LIMIT,
+    )
 
     # Citizen-dashboard aggregates (PR#1). Each one honours the same
     # filter set as the listing so the KPI / trend / concentration
@@ -471,8 +482,10 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
     # The aggregates are NOT paginated — they reflect the full
     # filtered set, not the current page slice (adjudication-
     # pagination spec, "Dashboard Aggregates Use Full Filtered Set").
-    trend_rows = monthly_trend(db, filters)
-    concentration = concentration_ratio(db, filters)
+    trend_rows = cached_aggregate("monthly_trend", monthly_trend, db, filters)
+    concentration = cached_aggregate(
+        "concentration_ratio", concentration_ratio, db, filters
+    )
     concentration_payload = (
         _build_concentration_chart_payload(concentration)
         if concentration.ratio is not None
@@ -552,7 +565,7 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
     else:
         # Full responses use the KPI's full-set row count, avoiding a
         # separate count query for the same filters.
-        kpi = kpi_summary(db, filters)
+        kpi = cached_aggregate("kpi_summary", kpi_summary, db, filters)
         total = kpi.total
         page = max(_coerce_page(params.get("page")), 1)
         offset = (page - 1) * PAGE_SIZE
@@ -589,15 +602,21 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
         )
 
     # Full response: table + all dashboard aggregates.
-    ranking_rows = ranking_by_company(db, filters, limit=RANKING_LIMIT)
-    organism_rows = ranking_by_organism(db, filters, limit=RANKING_LIMIT)
+    ranking_rows = cached_aggregate(
+        "ranking_by_company", ranking_by_company, db, filters, limit=RANKING_LIMIT
+    )
+    organism_rows = cached_aggregate(
+        "ranking_by_organism", ranking_by_organism, db, filters, limit=RANKING_LIMIT
+    )
 
     # Citizen-dashboard aggregates (PR#1). See the index route for the
     # rationale on the empty-state payload rule for concentration.
     # Aggregates are NOT paginated — they reflect the full filtered
     # set, not the current page slice.
-    trend_rows = monthly_trend(db, filters)
-    concentration = concentration_ratio(db, filters)
+    trend_rows = cached_aggregate("monthly_trend", monthly_trend, db, filters)
+    concentration = cached_aggregate(
+        "concentration_ratio", concentration_ratio, db, filters
+    )
     concentration_payload = (
         _build_concentration_chart_payload(concentration)
         if concentration.ratio is not None

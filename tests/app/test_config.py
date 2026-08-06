@@ -94,29 +94,23 @@ def test_disallowed_source_host_is_rejected(base_env, monkeypatch: Any) -> None:
         _make_settings()
 
 
-@pytest.mark.parametrize("ttl", ["0", "300", "900"])
-def test_cache_ttl_accepts_zero_and_five_to_fifteen_minutes(
-    base_env, monkeypatch: Any, ttl: str
+@pytest.mark.parametrize(
+    "ttl,valid",
+    [("0", True), ("300", True), ("900", True), ("299", False), ("901", False)],
+)
+def test_cache_ttl_accepts_only_disabled_or_five_to_fifteen_minutes(
+    base_env, monkeypatch: Any, ttl: str, valid: bool
 ) -> None:
     monkeypatch.setenv("CACHE_TTL_SECONDS", ttl)
 
-    settings = _make_settings()
-
-    assert settings.cache_ttl_seconds == int(ttl)
-
-
-@pytest.mark.parametrize("ttl", ["299", "901"])
-def test_cache_ttl_rejects_values_outside_disabled_or_five_to_fifteen_minutes(
-    base_env, monkeypatch: Any, ttl: str
-) -> None:
-    monkeypatch.setenv("CACHE_TTL_SECONDS", ttl)
-
-    with pytest.raises(ValueError):
-        _make_settings()
+    if valid:
+        assert _make_settings().cache_ttl_seconds == int(ttl)
+    else:
+        with pytest.raises(ValueError):
+            _make_settings()
 
 
 def test_cache_max_entries_requires_at_least_one(base_env, monkeypatch: Any) -> None:
     monkeypatch.setenv("CACHE_MAX_ENTRIES", "0")
-
     with pytest.raises(ValueError):
         _make_settings()

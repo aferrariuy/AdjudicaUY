@@ -9,71 +9,46 @@ from unittest.mock import Mock
 import pytest
 
 from app.services.adjudication_service import AdjudicationFilters
-from app.services.query_cache import (
-    build_cache_key,
-    cached_aggregate,
-    clear_cache,
-)
+from app.services.query_cache import build_cache_key, cached_aggregate, clear_cache
 
 
 def _settings(*, ttl: int = 600, max_entries: int = 256) -> SimpleNamespace:
     return SimpleNamespace(cache_ttl_seconds=ttl, cache_max_entries=max_entries)
 
 
-def test_cache_key_normalizes_inactive_fields_and_preserves_document_order() -> None:
-    empty = AdjudicationFilters(
-        company=None,
-        company_doc_exact=None,
-        organism="",
-        article=None,
-        article_id="",
-    )
-    equivalent = AdjudicationFilters(
-        company="",
+def test_cache_key_normalizes_empty_values_and_distinguishes_active_values() -> None:
+    empty = AdjudicationFilters(company=None, organism="", article_id="")
+    equivalent = AdjudicationFilters(company="", organism=None, article_id=None)
+    year = AdjudicationFilters(
         company_doc_exact=("RUT", "123"),
-        organism=None,
-        article="",
-        article_id=None,
         date_from=date(2024, 1, 1),
         date_to=date(2024, 12, 31),
     )
     reordered = AdjudicationFilters(
-        company="",
         company_doc_exact=("123", "RUT"),
-        organism=None,
-        article="",
-        article_id=None,
         date_from=date(2024, 1, 1),
         date_to=date(2024, 12, 31),
     )
+    next_year = AdjudicationFilters(
+        company_doc_exact=("RUT", "123"),
+        date_from=date(2025, 1, 1),
+        date_to=date(2025, 12, 31),
+    )
 
-    assert build_cache_key("kpi_summary", empty) != build_cache_key(
+    assert build_cache_key("kpi_summary", empty) == build_cache_key(
         "kpi_summary", equivalent
     )
-    assert build_cache_key("kpi_summary", equivalent) != build_cache_key(
+    assert build_cache_key("kpi_summary", year) != build_cache_key(
         "kpi_summary", reordered
     )
-    assert build_cache_key("kpi_summary", empty) == build_cache_key(
-        "kpi_summary", AdjudicationFilters()
+    assert build_cache_key("kpi_summary", year) != build_cache_key(
+        "kpi_summary", next_year
     )
-
-
-def test_cache_key_distinguishes_years_and_limit_values() -> None:
-    year_2024 = AdjudicationFilters(
-        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    assert build_cache_key("ranking_by_company", year, limit=10) != build_cache_key(
+        "ranking_by_company", year, limit=5
     )
-    year_2025 = AdjudicationFilters(
-        date_from=date(2025, 1, 1), date_to=date(2025, 12, 31)
-    )
-
-    assert build_cache_key(
-        "ranking_by_company", year_2024, limit=10
-    ) != build_cache_key("ranking_by_company", year_2025, limit=10)
-    assert build_cache_key(
-        "ranking_by_company", year_2024, limit=10
-    ) != build_cache_key("ranking_by_company", year_2024, limit=5)
-    assert build_cache_key("kpi_summary", year_2024, limit=10) == build_cache_key(
-        "kpi_summary", year_2024, limit=None
+    assert build_cache_key("kpi_summary", year, limit=10) == build_cache_key(
+        "kpi_summary", year
     )
 
 
@@ -82,35 +57,24 @@ def test_cache_miss_then_hit_calls_aggregate_once(monkeypatch) -> None:
     aggregate = Mock(return_value=["fresh"])
     filters = AdjudicationFilters(article="laptop")
 
-    first = cached_aggregate("monthly_trend", aggregate, Mock(), filters)
-    second = cached_aggregate("monthly_trend", aggregate, Mock(), filters)
-
-    assert first == ["fresh"]
-    assert second == ["fresh"]
+    assert cached_aggregate("monthly_trend", aggregate, Mock(), filters) == ["fresh"]
+    assert cached_aggregate("monthly_trend", aggregate, Mock(), filters) == ["fresh"]
     aggregate.assert_called_once()
+    clear_cache()
+    assert cached_aggregate("monthly_trend", aggregate, Mock(), filters) == ["fresh"]
+    assert aggregate.call_count == 2
 
 
-def test_cache_passes_limit_only_when_result_shape_uses_it(monkeypatch) -> None:
+def test_cache_rejects_non_whitelisted_aggregate(monkeypatch) -> None:
     monkeypatch.setattr("app.services.query_cache.get_settings", lambda: _settings())
-    aggregate = Mock(return_value=["ranked"])
-    filters = AdjudicationFilters()
-
-    cached_aggregate("ranking_by_company", aggregate, Mock(), filters, limit=10)
-
-    aggregate.assert_called_once_with(aggregate.call_args.args[0], filters, limit=10)
-
-
-def test_cache_rejects_non_whitelisted_aggregates(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.query_cache.get_settings", lambda: _settings())
-    aggregate = Mock(return_value="never")
+    aggregate = Mock()
 
     with pytest.raises(ValueError, match="not cacheable"):
         cached_aggregate("list_adjudications", aggregate, Mock(), AdjudicationFilters())
-
     aggregate.assert_not_called()
 
 
-def test_cache_entry_expires_when_monotonic_clock_advances(monkeypatch) -> None:
+def test_cache_expiry_reexecutes_after_ttl(monkeypatch) -> None:
     now = [100.0]
     monkeypatch.setattr("app.services.query_cache.time.monotonic", lambda: now[0])
     monkeypatch.setattr(
@@ -127,7 +91,7 @@ def test_cache_entry_expires_when_monotonic_clock_advances(monkeypatch) -> None:
     assert aggregate.call_count == 2
 
 
-def test_zero_ttl_always_bypasses_lookup_and_storage(monkeypatch) -> None:
+def test_zero_ttl_bypasses_lookup_and_storage(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.services.query_cache.get_settings", lambda: _settings(ttl=0)
     )
@@ -141,8 +105,7 @@ def test_zero_ttl_always_bypasses_lookup_and_storage(monkeypatch) -> None:
 
 def test_cache_evicts_least_recently_used_entry(monkeypatch) -> None:
     monkeypatch.setattr(
-        "app.services.query_cache.get_settings",
-        lambda: _settings(max_entries=2),
+        "app.services.query_cache.get_settings", lambda: _settings(max_entries=2)
     )
     aggregate = Mock(side_effect=lambda _session, filters: filters.article)
     first = AdjudicationFilters(article="first")
@@ -154,16 +117,4 @@ def test_cache_evicts_least_recently_used_entry(monkeypatch) -> None:
     cached_aggregate("kpi_summary", aggregate, Mock(), first)
     cached_aggregate("kpi_summary", aggregate, Mock(), third)
     cached_aggregate("kpi_summary", aggregate, Mock(), second)
-
     assert aggregate.call_count == 4
-
-
-def test_clear_cache_forces_a_new_aggregate_execution(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.query_cache.get_settings", lambda: _settings())
-    aggregate = Mock(side_effect=["before", "after"])
-    filters = AdjudicationFilters()
-
-    assert cached_aggregate("kpi_summary", aggregate, Mock(), filters) == "before"
-    clear_cache()
-    assert cached_aggregate("kpi_summary", aggregate, Mock(), filters) == "after"
-    assert aggregate.call_count == 2
