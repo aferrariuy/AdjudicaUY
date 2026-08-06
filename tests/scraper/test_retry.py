@@ -29,7 +29,7 @@ def test_retry_succeeds_on_first_attempt(monkeypatch: pytest.MonkeyPatch) -> Non
         call_count += 1
         return "ok"
 
-    result = retry_module.retry_with_backoff("test", _op)
+    result: str = retry_module.retry_with_backoff("test", _op)
 
     assert result == "ok"
     assert call_count == 1
@@ -51,7 +51,7 @@ def test_retry_succeeds_after_transient_failure(
             raise httpx.HTTPError("transient")
         return "ok"
 
-    result = retry_module.retry_with_backoff("test", _op)
+    result: str = retry_module.retry_with_backoff("test", _op)
 
     assert result == "ok"
     assert call_count == 3
@@ -126,7 +126,7 @@ def test_retry_honors_custom_retryable_tuple(
         return "ok"
 
     # RuntimeError is NOT in the default retryable tuple, so we pass it explicitly.
-    result = retry_module.retry_with_backoff(
+    result: str = retry_module.retry_with_backoff(
         "test",
         _op,
         retryable=(RuntimeError,),
@@ -160,7 +160,7 @@ def test_retry_applies_backoff_schedule_with_jitter(
             raise httpx.HTTPError("transient")
         return "ok"
 
-    result = retry_module.retry_with_backoff(
+    result: str = retry_module.retry_with_backoff(
         "test",
         _op,
         backoff_schedule=(1.0, 3.0, 9.0),

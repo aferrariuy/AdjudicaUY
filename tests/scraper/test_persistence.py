@@ -24,10 +24,13 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 from sqlalchemy import func, select
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
@@ -443,4 +446,4 @@ def test_bulk_insert_propagates_sqlalchemy_error(db_session) -> None:
             pass
 
     with pytest.raises(SQLAlchemyError, match="simulated DB failure"):
-        _bulk_insert(_AlwaysFailSession(), [_compra_row()])
+        _bulk_insert(cast("Session", _AlwaysFailSession()), [_compra_row()])

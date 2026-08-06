@@ -9,11 +9,9 @@ security headers are all present and correct in the final output.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, cast
 
-import pytest
 from bs4 import BeautifulSoup
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -26,16 +24,24 @@ def _parse(html: str) -> BeautifulSoup:
     return BeautifulSoup(html, "html.parser")
 
 
-def _meta_content(soup: BeautifulSoup, *, name: str | None = None, property: str | None = None) -> str | None:
-    """Return the ``content`` attribute of a ``<meta>`` tag matched by name or property."""
+def _meta_content(
+    soup: BeautifulSoup,
+    *,
+    name: str | None = None,
+    property_name: str | None = None,
+) -> str | None:
+    """Return the ``content`` attribute of a ``<meta>`` tag matched by name or
+    property."""
 
     if name is not None:
         tag = soup.find("meta", attrs={"name": name})
-    elif property is not None:
-        tag = soup.find("meta", attrs={"property": property})
+    elif property_name is not None:
+        tag = soup.find("meta", attrs={"property": property_name})
     else:
         return None
-    return tag["content"] if tag and tag.has_attr("content") else None
+    return cast(
+        "str | None", tag["content"] if tag and tag.has_attr("content") else None
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +68,7 @@ class TestIndexSEO:
 
         response = client.get("/")
         soup = _parse(response.text)
-        content = _meta_content(soup, property="og:title")
+        content = _meta_content(soup, property_name="og:title")
         assert content is not None, "<meta property='og:title'> must be present"
         assert "AdjudicaUY" in content
 
@@ -71,7 +77,7 @@ class TestIndexSEO:
 
         response = client.get("/")
         soup = _parse(response.text)
-        content = _meta_content(soup, property="og:type")
+        content = _meta_content(soup, property_name="og:type")
         assert content == "website", f"og:type must be 'website', got {content!r}"
 
     def test_canonical_link_present(self, client: Any) -> None:
@@ -93,8 +99,11 @@ class TestIndexSEO:
         soup = _parse(response.text)
         ld_script = soup.find("script", attrs={"type": "application/ld+json"})
         assert ld_script is not None, "JSON-LD <script> must be present"
+        assert ld_script.string is not None, "JSON-LD <script> must contain text"
         data = json.loads(ld_script.string)
-        assert data.get("@type") == "WebSite", f"@type must be 'WebSite', got {data.get('@type')!r}"
+        assert data.get("@type") == "WebSite", (
+            f"@type must be 'WebSite', got {data.get('@type')!r}"
+        )
         assert "name" in data, "JSON-LD must include 'name'"
 
 
@@ -130,6 +139,7 @@ class TestAboutSEO:
         canonical = soup.find("link", attrs={"rel": "canonical"})
         assert canonical is not None
         href = canonical.get("href", "")
+        assert isinstance(href, str), "canonical href must be a string"
         assert "/about" in href, f"canonical href must contain '/about', got {href!r}"
 
     def test_about_og_tags(self, client: Any) -> None:
@@ -137,9 +147,9 @@ class TestAboutSEO:
 
         response = client.get("/about")
         soup = _parse(response.text)
-        og_title = _meta_content(soup, property="og:title")
-        og_description = _meta_content(soup, property="og:description")
-        og_type = _meta_content(soup, property="og:type")
+        og_title = _meta_content(soup, property_name="og:title")
+        og_description = _meta_content(soup, property_name="og:description")
+        og_type = _meta_content(soup, property_name="og:type")
         assert og_title is not None, "og:title must be present"
         assert og_description is not None, "og:description must be present"
         assert og_type == "website", f"og:type must be 'website', got {og_type!r}"
@@ -149,7 +159,7 @@ class TestAboutSEO:
 
         response = client.get("/about")
         soup = _parse(response.text)
-        og_title = _meta_content(soup, property="og:title")
+        og_title = _meta_content(soup, property_name="og:title")
         assert og_title is not None
         assert "AdjudicaUY" in og_title
 
@@ -162,9 +172,7 @@ class TestAboutSEO:
 class TestPaginationHrefs:
     """E2E: Pagination <a> elements have real href attributes."""
 
-    def test_next_link_has_href(
-        self, client: Any, make_adjudication: Any
-    ) -> None:
+    def test_next_link_has_href(self, client: Any, make_adjudication: Any) -> None:
         """When on page 1 with multiple pages, the 'Siguiente' link has a real href."""
 
         # Create enough adjudications to trigger pagination (PAGE_SIZE=10).
@@ -181,7 +189,9 @@ class TestPaginationHrefs:
 
         # Find the "Siguiente" (next) pagination link.
         next_link = soup.find("a", string="Siguiente")
-        assert next_link is not None, "'Siguiente' link must be present when total_pages > 1"
+        assert next_link is not None, (
+            "'Siguiente' link must be present when total_pages > 1"
+        )
         href = next_link.get("href")
         assert href is not None, "Next link must have a real 'href' attribute"
         assert "page=2" in href, f"Next link href must contain 'page=2', got {href!r}"
@@ -207,7 +217,9 @@ class TestPaginationHrefs:
         assert prev_link is not None, "'Anterior' link must be present on page 2"
         href = prev_link.get("href")
         assert href is not None, "Previous link must have a real 'href' attribute"
-        assert "page=1" in href, f"Previous link href must contain 'page=1', got {href!r}"
+        assert "page=1" in href, (
+            f"Previous link href must contain 'page=1', got {href!r}"
+        )
 
     def test_pagination_links_have_htmx_attrs(
         self, client: Any, make_adjudication: Any

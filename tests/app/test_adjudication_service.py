@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pytest
 import sqlalchemy as sa
@@ -1296,7 +1296,7 @@ def test_company_win_rate_runs_one_execute(
             return self.wrapped.execute(*args, **kwargs)
 
     counted_session = ExecuteCountingSession(db_session)
-    result = company_win_rate(counted_session, *company, filters)
+    result = company_win_rate(cast("Session", counted_session), *company, filters)
 
     assert (result.participations, result.wins) == (4, 2)
     assert counted_session.execute_calls == 1

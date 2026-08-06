@@ -20,13 +20,14 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import httpx
 from sqlalchemy import select
 
 if TYPE_CHECKING:
     import pytest
+    from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
 from app.database import Base
@@ -127,7 +128,8 @@ def test_scrape_store_query_serve_round_trip(
     #    test engine. The conftest already created the schema on the
     #    test engine (``Base.metadata.create_all``).
     # ------------------------------------------------------------------
-    test_engine = client.app.dependency_overrides  # ensure app built
+    app = cast("FastAPI", client.app)
+    _ = app.dependency_overrides  # ensure app built
     # Get the actual test engine by accessing the override's session.
     # We don't have a direct handle on the test engine, so we build
     # a session factory from the same in-memory URL used by the
@@ -170,7 +172,7 @@ def test_scrape_store_query_serve_round_trip(
         finally:
             db.close()
 
-    client.app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_db] = _override_get_db
 
     try:
         # --------------------------------------------------------------
@@ -214,7 +216,7 @@ def test_scrape_store_query_serve_round_trip(
         assert len(compras) == 3
         assert len(adjs) == 3
 
-        companies = sorted(a.nombre_comercial for a in adjs)
+        companies = sorted(cast("str", a.nombre_comercial) for a in adjs)
         assert companies == sorted(
             [
                 "E2E-COMPANY-Limpieza",
@@ -223,7 +225,7 @@ def test_scrape_store_query_serve_round_trip(
             ]
         )
 
-        by_company = {a.nombre_comercial: a for a in adjs}
+        by_company = {cast("str", a.nombre_comercial): a for a in adjs}
         assert by_company["E2E-COMPANY-Laptop"].amount_uyu == Decimal("40000.00")
         assert by_company["E2E-COMPANY-Monitor"].amount_uyu == Decimal("20000.00")
         assert by_company["E2E-COMPANY-Limpieza"].amount_uyu == Decimal("20000.00")

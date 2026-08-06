@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from typing import cast
 
 import pytest
 from sqlalchemy import inspect
@@ -416,7 +417,7 @@ def test_filter_by_article_id_comma_separated(db_session, make_adjudication) -> 
         db_session, AdjudicationFilters(article_id="42851, 42852")
     )
 
-    returned = sorted(row.article_id for row in rows)
+    returned = sorted(cast("str", row.article_id) for row in rows)
     assert returned == sorted(["42851", "42852"])
 
 

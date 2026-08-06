@@ -1555,7 +1555,7 @@ def test_company_route_passes_cached_market_kpi_and_preserves_key_identity(
 def test_company_context_cache_hits_eight_aggregates(db_session) -> None:
     from app.routes.adjudications import _build_company_context
 
-    raw_params = {
+    raw_params: dict[str, str | None] = {
         "date_from": f"{CURRENT_YEAR}-01-01",
         "date_to": f"{CURRENT_YEAR}-12-31",
     }
@@ -1726,7 +1726,7 @@ def test_company_context_company_summary_uses_market_total(db_session) -> None:
         organism_count=1,
         share_of_total=Decimal("0.33"),
     )
-    raw_params = {
+    raw_params: dict[str, str | None] = {
         "date_from": f"{CURRENT_YEAR}-01-01",
         "date_to": f"{CURRENT_YEAR}-12-31",
     }
