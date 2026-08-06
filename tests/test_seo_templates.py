@@ -10,7 +10,6 @@ import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from jinja2.runtime import Context
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -101,7 +100,11 @@ def _index_seo_context(**overrides):
         "meta_description": "Buscador de adjudicaciones del Estado uruguayo",
         "og_type": "website",
         "canonical_url": "https://adjudica.digitales.gub.uy/",
-        "json_ld": {"@context": "https://schema.org", "@type": "WebSite", "name": "AdjudicaUY"},
+        "json_ld": {
+            "@context": "https://schema.org",
+            "@type": "WebSite",
+            "name": "AdjudicaUY",
+        },
     }
     ctx.update(overrides)
     return ctx
@@ -202,15 +205,19 @@ class TestBaseTemplateSEO:
         """The json_ld block exists; empty by default so no script tag."""
         html = _render_full(self.env, "base.html", _base_context())
         # With no json_ld data, the script tag should NOT appear
-        assert 'application/ld+json' not in html
+        assert "application/ld+json" not in html
 
     def test_json_ld_renders_when_provided(self):
         """When json_ld dict is provided, script tag renders with valid JSON."""
         ctx = {
-            "json_ld": {"@context": "https://schema.org", "@type": "WebSite", "name": "Test"},
+            "json_ld": {
+                "@context": "https://schema.org",
+                "@type": "WebSite",
+                "name": "Test",
+            },
         }
         html = _render_full(self.env, "base.html", ctx)
-        assert 'application/ld+json' in html
+        assert "application/ld+json" in html
         assert '"@type": "WebSite"' in html
 
     def test_meta_description_uses_default_when_not_provided(self):
@@ -242,7 +249,9 @@ class TestIndexTemplateSEO:
         assert "AdjudicaUY" in html
 
     def test_meta_description_mentions_adjudications(self):
-        html = _render_block(self.env, "index.html", "meta_description", _index_seo_context())
+        html = _render_block(
+            self.env, "index.html", "meta_description", _index_seo_context()
+        )
         assert "adjudicaciones" in html.lower()
 
     def test_og_type_is_website(self):
@@ -250,7 +259,9 @@ class TestIndexTemplateSEO:
         assert "website" in html
 
     def test_canonical_url_present(self):
-        html = _render_block(self.env, "index.html", "canonical_url", _index_seo_context())
+        html = _render_block(
+            self.env, "index.html", "canonical_url", _index_seo_context()
+        )
         assert "https://adjudica.digitales.gub.uy/" in html
 
     def test_website_json_ld(self):
@@ -261,8 +272,8 @@ class TestIndexTemplateSEO:
     def test_twitter_card_present(self):
         # Twitter tags are in base.html using meta_title/meta_description vars
         html = _render_full(self.env, "base.html", _index_seo_context())
-        assert 'twitter:card' in html
-        assert 'twitter:title' in html
+        assert "twitter:card" in html
+        assert "twitter:title" in html
 
 
 # ===========================================================================
@@ -278,23 +289,36 @@ class TestOrganismDetailTemplateSEO:
         self.env = _make_jinja_env()
 
     def test_title_contains_organism_name(self):
-        html = _render_block(self.env, "organism_detail.html", "title", _organism_seo_context())
+        html = _render_block(
+            self.env, "organism_detail.html", "title", _organism_seo_context()
+        )
         assert "MSP" in html
 
     def test_meta_description_mentions_organism(self):
-        html = _render_block(self.env, "organism_detail.html", "meta_description", _organism_seo_context())
+        html = _render_block(
+            self.env,
+            "organism_detail.html",
+            "meta_description",
+            _organism_seo_context(),
+        )
         assert "MSP" in html
 
     def test_og_type_is_government_organization(self):
-        html = _render_block(self.env, "organism_detail.html", "og_type", _organism_seo_context())
+        html = _render_block(
+            self.env, "organism_detail.html", "og_type", _organism_seo_context()
+        )
         assert "GovernmentOrganization" in html
 
     def test_canonical_url_contains_organism(self):
-        html = _render_block(self.env, "organism_detail.html", "canonical_url", _organism_seo_context())
+        html = _render_block(
+            self.env, "organism_detail.html", "canonical_url", _organism_seo_context()
+        )
         assert "/organism/MSP" in html
 
     def test_government_organization_json_ld(self):
-        html = _render_block(self.env, "organism_detail.html", "json_ld", _organism_seo_context())
+        html = _render_block(
+            self.env, "organism_detail.html", "json_ld", _organism_seo_context()
+        )
         assert '"@type": "GovernmentOrganization"' in html
         assert '"name": "MSP"' in html
 
@@ -321,10 +345,16 @@ class TestAboutPageSEO:
     def _about_context(self):
         return {
             "meta_title": "Sobre AdjudicaUY",
-            "meta_description": "Plataforma de búsqueda de adjudicaciones estatales del Uruguay",
+            "meta_description": (
+                "Plataforma de búsqueda de adjudicaciones estatales del Uruguay"
+            ),
             "og_type": "website",
             "canonical_url": "https://adjudica.digitales.gub.uy/about",
-            "json_ld": {"@context": "https://schema.org", "@type": "WebSite", "name": "AdjudicaUY"},
+            "json_ld": {
+                "@context": "https://schema.org",
+                "@type": "WebSite",
+                "name": "AdjudicaUY",
+            },
         }
 
     def test_about_template_exists(self):
@@ -332,19 +362,27 @@ class TestAboutPageSEO:
         assert template is not None
 
     def test_about_title(self):
-        html = _render_block(self.env, "pages/about.html", "title", self._about_context())
+        html = _render_block(
+            self.env, "pages/about.html", "title", self._about_context()
+        )
         assert "Sobre AdjudicaUY" in html
 
     def test_about_meta_description(self):
-        html = _render_block(self.env, "pages/about.html", "meta_description", self._about_context())
+        html = _render_block(
+            self.env, "pages/about.html", "meta_description", self._about_context()
+        )
         assert "adjudicaciones" in html.lower()
 
     def test_about_og_type_website(self):
-        html = _render_block(self.env, "pages/about.html", "og_type", self._about_context())
+        html = _render_block(
+            self.env, "pages/about.html", "og_type", self._about_context()
+        )
         assert "website" in html
 
     def test_about_website_json_ld(self):
-        html = _render_block(self.env, "pages/about.html", "json_ld", self._about_context())
+        html = _render_block(
+            self.env, "pages/about.html", "json_ld", self._about_context()
+        )
         assert '"@type": "WebSite"' in html
 
     def test_about_has_informational_content(self):
@@ -365,27 +403,38 @@ class TestPaginationHref:
         self.env = _make_jinja_env()
 
     def test_previous_link_has_href(self):
-        html = _render_full(self.env, "partials/_results_table.html", _pagination_context())
+        html = _render_full(
+            self.env, "partials/_results_table.html", _pagination_context()
+        )
         assert 'href="/adjudications?page=1"' in html
 
     def test_next_link_has_href(self):
-        html = _render_full(self.env, "partials/_results_table.html", _pagination_context())
+        html = _render_full(
+            self.env, "partials/_results_table.html", _pagination_context()
+        )
         assert 'href="/adjudications?page=3"' in html
 
     def test_page_number_links_have_href(self):
-        html = _render_full(self.env, "partials/_results_table.html", _pagination_context())
+        html = _render_full(
+            self.env, "partials/_results_table.html", _pagination_context()
+        )
         assert 'href="/adjudications?page=1"' in html
         assert 'href="/adjudications?page=3"' in html
 
     def test_pagination_href_excludes_partial_param(self):
-        html = _render_full(self.env, "partials/_results_table.html", _pagination_context())
+        html = _render_full(
+            self.env, "partials/_results_table.html", _pagination_context()
+        )
         import re
+
         hrefs = re.findall(r'href="[^"]*page=\d+[^"]*"', html)
         assert len(hrefs) > 0, "Expected at least one pagination href"
         for href in hrefs:
             assert "partial" not in href, f"href contains 'partial': {href}"
 
     def test_pagination_href_and_hx_get_coexist(self):
-        html = _render_full(self.env, "partials/_results_table.html", _pagination_context())
+        html = _render_full(
+            self.env, "partials/_results_table.html", _pagination_context()
+        )
         assert 'hx-get="/adjudications?page=1&partial=table"' in html
         assert 'href="/adjudications?page=1"' in html

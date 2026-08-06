@@ -19,11 +19,11 @@ from sqlalchemy import engine_from_config, pool, text
 # fixed integer scoped to this project.
 _MIGRATION_LOCK_KEY = 828374628
 
-from app.config import get_settings
-from app.database import Base
+from app.config import get_settings  # noqa: E402
+from app.database import Base  # noqa: E402
 
 # Import models so their metadata is registered on Base before autogenerate.
-from app.models import (  # noqa: F401
+from app.models import (  # noqa: F401, E402
     adjudicacion,
     compra,
     oferente,

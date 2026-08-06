@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 def _seed_compra(
-    db_session: "Session",
+    db_session: Session,
     id_compra: str,
     organismo: str,
 ) -> Compra:
@@ -51,7 +51,7 @@ def _seed_compra(
     return compra
 
 
-def test_all_organisms_returns_distinct_names(db_session: "Session") -> None:
+def test_all_organisms_returns_distinct_names(db_session: Session) -> None:
     """Duplicate organism names are collapsed into a single entry."""
 
     _seed_compra(db_session, "c-1", "Ministerio de Interior")
@@ -62,7 +62,7 @@ def test_all_organisms_returns_distinct_names(db_session: "Session") -> None:
     assert sorted(result) == ["ANEP", "Ministerio de Interior"]
 
 
-def test_all_organisms_has_no_limit(db_session: "Session") -> None:
+def test_all_organisms_has_no_limit(db_session: Session) -> None:
     """All distinct organisms are returned, even when there are many."""
 
     for i in range(250):
@@ -73,7 +73,7 @@ def test_all_organisms_has_no_limit(db_session: "Session") -> None:
 
 
 def test_all_organisms_returns_empty_list_when_no_data(
-    db_session: "Session",
+    db_session: Session,
 ) -> None:
     """An empty database yields an empty list, not an error."""
 
@@ -81,7 +81,7 @@ def test_all_organisms_returns_empty_list_when_no_data(
     assert result == []
 
 
-def test_all_organisms_excludes_null_organism(db_session: "Session") -> None:
+def test_all_organisms_excludes_null_organism(db_session: Session) -> None:
     """Rows with NULL organismo are excluded from the result."""
 
     _seed_compra(db_session, "c-null", None)  # type: ignore[arg-type]

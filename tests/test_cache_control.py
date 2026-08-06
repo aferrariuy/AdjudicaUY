@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 EXPECTED_CACHE_HEADER = "public, max-age=31536000, immutable"
 
 
