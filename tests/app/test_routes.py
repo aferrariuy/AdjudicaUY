@@ -1524,7 +1524,9 @@ def test_company_route_passes_cached_market_kpi_and_preserves_key_identity(
             "app.routes.adjudications.cached_aggregate",
             side_effect=record_cache,
         ),
-        patch("app.routes.adjudications.company_summary", return_value=summary) as summary_mock,
+        patch(
+            "app.routes.adjudications.company_summary", return_value=summary
+        ) as summary_mock,
         patch("app.routes.adjudications._render", return_value=HTMLResponse("ok")),
     ):
         response = client.get("/company/RUT/42")

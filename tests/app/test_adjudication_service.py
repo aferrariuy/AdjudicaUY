@@ -1143,9 +1143,7 @@ def test_company_summary_provided_market_total_skips_market_query(
 
     monkeypatch.setattr(db_session, "execute", one_execute_only)
 
-    provided = company_summary(
-        db_session, company_filters, market_total=Decimal("300")
-    )
+    provided = company_summary(db_session, company_filters, market_total=Decimal("300"))
     assert provided.total == 2
     assert provided.share_of_total == Decimal("0.5")
 

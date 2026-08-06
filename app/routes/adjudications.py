@@ -1009,9 +1009,7 @@ def _build_company_context(
     concentration = (
         ConcentrationResult(None, 0, 0)
         if not decoded_type or not decoded_number
-        else cached_aggregate(
-            "concentration_ratio", concentration_ratio, db, filters
-        )
+        else cached_aggregate("concentration_ratio", concentration_ratio, db, filters)
     )
     win_rate = (
         CompanyWinRate(0, 0, None)
