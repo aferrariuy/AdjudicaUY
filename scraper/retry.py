@@ -13,7 +13,10 @@ from __future__ import annotations
 import logging
 import random
 import time
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 import httpx
 
@@ -24,7 +27,7 @@ T = TypeVar("T")
 
 def retry_with_backoff(
     label: str,
-    operation: callable[[], T],  # noqa: ARG001
+    operation: Callable[[], T],
     *,
     retryable: tuple[type[Exception], ...] = (httpx.HTTPError,),
     backoff_schedule: tuple[float, ...] = (1.0, 3.0, 9.0),
@@ -81,7 +84,9 @@ def retry_with_backoff(
 
     # ``last_exc`` is always set here because the loop makes at least one
     # attempt and every failed attempt assigns it.
-    raise last_exc  # type: ignore[misc]
+    if last_exc is None:  # pragma: no cover - unreachable in practice
+        raise RuntimeError("retry loop always makes at least one attempt")
+    raise last_exc
 
 
 __all__ = ["retry_with_backoff"]

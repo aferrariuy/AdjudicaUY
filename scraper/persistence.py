@@ -148,6 +148,10 @@ def _bulk_insert(session: Session, rows: Iterable[CompraRow]) -> int:
     oferente_payloads: list[dict[str, Any]] = []
     for r in rows:
         pk = id_compra_to_pk.get(r.id_compra)
+        if pk is None:
+            raise RuntimeError(
+                f"no database id resolved for compra {r.id_compra!r} after upsert"
+            )
         adj_payloads.extend(_adjudicacion_dict(pk, a) for a in r.adjudicaciones)
         oferente_payloads.extend(_oferente_dict(pk, o) for o in r.oferentes)
 

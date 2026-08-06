@@ -376,7 +376,7 @@ def _render_str(template_name: str, request: Request, context: dict[str, Any]) -
 
     templates = request.app.state.templates
     template = templates.get_template(template_name)
-    return template.render({**context, "request": request})
+    return cast("str", template.render({**context, "request": request}))
 
 
 def _render(

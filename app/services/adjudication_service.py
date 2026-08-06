@@ -1137,7 +1137,10 @@ def monthly_trend(
 
     # Dialect-aware month formatting: strftime for SQLite (tests),
     # to_char for PostgreSQL (production).
-    dialect = session.bind.dialect.name
+    bind = session.bind
+    if bind is None:
+        raise RuntimeError("session is not bound to an engine")
+    dialect = bind.dialect.name
     if dialect == "postgresql":
         ym_expr = func.to_char(Compra.fecha_pub_adj, "YYYY-MM").label("ym")
     else:
