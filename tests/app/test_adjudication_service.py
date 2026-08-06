@@ -1113,6 +1113,53 @@ def test_company_summary_total_equals_count_adjudications(
     assert empty_summary.total == count_adjudications(db_session, empty_filters) == 0
 
 
+def test_company_summary_provided_market_total_skips_market_query(
+    db_session, make_compra, add_adj, monkeypatch
+) -> None:
+    company_filters = AdjudicationFilters(
+        company_doc_exact=("RUT", "42"),
+        date_from=date(2024, 1, 1),
+        date_to=date(2024, 12, 31),
+    )
+    for amount, document in ((75, "42"), (75, "42"), (150, "99")):
+        compra = make_compra(fecha_pub_adj=date(2024, 1, amount // 75))
+        add_adj(
+            compra,
+            nombre_comercial="ACME" if document == "42" else "Other",
+            tipo_doc_prov="RUT",
+            nro_doc_prov=document,
+            amount_uyu=Decimal(amount),
+        )
+
+    original_execute = db_session.execute
+    execute_count = 0
+
+    def one_execute_only(statement, *args, **kwargs):
+        nonlocal execute_count
+        execute_count += 1
+        if execute_count > 1:
+            raise AssertionError("provided market_total must skip market SUM")
+        return original_execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", one_execute_only)
+
+    provided = company_summary(
+        db_session, company_filters, market_total=Decimal("300")
+    )
+    assert provided.total == 2
+    assert provided.share_of_total == Decimal("0.5")
+
+    execute_count = 0
+    zero_market = company_summary(
+        db_session, company_filters, market_total=Decimal("0")
+    )
+    assert zero_market.share_of_total == Decimal("0")
+
+    monkeypatch.setattr(db_session, "execute", original_execute)
+    self_computed = company_summary(db_session, company_filters)
+    assert self_computed.share_of_total == Decimal("0.5")
+
+
 def test_company_win_rate_is_inclusive_null_safe_and_date_scoped(
     db_session, make_compra, add_adj, make_oferente
 ) -> None:

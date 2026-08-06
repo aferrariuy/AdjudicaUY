@@ -1487,6 +1487,68 @@ def test_company_route_redirects_out_of_bounds_from_summary_total(
     count_mock.assert_not_called()
 
 
+def test_company_route_passes_cached_market_kpi_and_preserves_key_identity(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        company_document_type="RUT",
+        company_document="42",
+        date=date(CURRENT_YEAR, 3, 1),
+        amount_uyu=Decimal("150.00"),
+    )
+    kpi = KpiSummary(
+        total_amount=Decimal("300.00"),
+        average_amount=Decimal("150.00"),
+        purchase_count=2,
+        company_count=2,
+        total=2,
+    )
+    summary = CompanyProfileSummary(
+        display_name=None,
+        total_amount=Decimal("150.00"),
+        purchase_count=1,
+        organism_count=1,
+        share_of_total=Decimal("0.5"),
+        total=1,
+    )
+    cache_calls: list[tuple[str, AdjudicationFilters]] = []
+
+    def record_cache(name, aggregate, session, filters, **kwargs):
+        cache_calls.append((name, filters))
+        if name == "kpi_summary":
+            return kpi
+        return aggregate(session, filters, **kwargs)
+
+    with (
+        patch(
+            "app.routes.adjudications.cached_aggregate",
+            side_effect=record_cache,
+        ),
+        patch("app.routes.adjudications.company_summary", return_value=summary) as summary_mock,
+        patch("app.routes.adjudications._render", return_value=HTMLResponse("ok")),
+    ):
+        response = client.get("/company/RUT/42")
+
+    assert response.status_code == 200
+    market_calls = [filters for name, filters in cache_calls if name == "kpi_summary"]
+    assert len(market_calls) == 1
+    market_filters = market_calls[0]
+    assert market_filters.company_doc_exact is None
+
+    from app.services.query_cache import build_cache_key
+
+    dashboard_filters = filters_from_query_params(
+        {
+            "date_from": f"{CURRENT_YEAR}-01-01",
+            "date_to": f"{CURRENT_YEAR}-12-31",
+        }
+    )
+    assert build_cache_key("kpi_summary", market_filters) == build_cache_key(
+        "kpi_summary", dashboard_filters
+    )
+    assert summary_mock.call_args.kwargs["market_total"] == kpi.total_amount
+
+
 def test_company_profile_hides_name_filter_but_keeps_organism_filter(
     client: TestClient, make_adjudication
 ) -> None:

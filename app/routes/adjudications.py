@@ -981,8 +981,10 @@ def _build_company_context(
     identity_name: str | None = None
     if decoded_type and decoded_number:
         identity_name = lookup_company_identity(db, decoded_type, decoded_number)
+        market_filters = replace(filters, company_doc_exact=None)
+        market = cached_aggregate("kpi_summary", kpi_summary, db, market_filters)
         summary = replace(
-            company_summary(db, filters),
+            company_summary(db, filters, market_total=market.total_amount),
             display_name=identity_name,
         )
 
