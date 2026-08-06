@@ -104,3 +104,95 @@ def test_oferente_company_document_index_migration_is_sqlite_compatible() -> Non
             index["name"] for index in inspect(connection).get_indexes("oferente")
         }
         assert "ix_oferente_company_document" not in index_names
+
+
+def test_dashboard_aggregate_indexes_migration_preserves_rows_on_sqlite() -> None:
+    """Dashboard aggregate indexes can be upgraded and downgraded on SQLite."""
+
+    alembic_migration = pytest.importorskip("alembic.migration")
+    alembic_operations = pytest.importorskip("alembic.operations")
+    from migrations.versions import dashboard_aggregate_indexes
+
+    MigrationContext = alembic_migration.MigrationContext
+    Operations = alembic_operations.Operations
+
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE compra (
+                id INTEGER PRIMARY KEY,
+                organismo VARCHAR(255)
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE adjudicacion (
+                id INTEGER PRIMARY KEY,
+                compra_id INTEGER NOT NULL,
+                nombre_comercial VARCHAR(255) NOT NULL
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            "INSERT INTO compra (id, organismo) VALUES (1, 'OSE'), (2, 'ANEP')"
+        )
+        connection.exec_driver_sql(
+            """
+            INSERT INTO adjudicacion (id, compra_id, nombre_comercial)
+            VALUES (1, 1, 'Proveedor Uno'), (2, 2, 'Proveedor Dos')
+            """
+        )
+        original_rows = {
+            "compra": connection.exec_driver_sql(
+                "SELECT id, organismo FROM compra ORDER BY id"
+            ).all(),
+            "adjudicacion": connection.exec_driver_sql(
+                "SELECT id, compra_id, nombre_comercial FROM adjudicacion ORDER BY id"
+            ).all(),
+        }
+
+        context = MigrationContext.configure(connection)
+        operations = Operations(context)
+        original = dashboard_aggregate_indexes.op
+        dashboard_aggregate_indexes.op = operations
+        try:
+            dashboard_aggregate_indexes.upgrade()
+        finally:
+            dashboard_aggregate_indexes.op = original
+
+        assert "ix_compra_organismo" in {
+            index["name"] for index in inspect(connection).get_indexes("compra")
+        }
+        assert "ix_adjudicacion_nombre_comercial" in {
+            index["name"] for index in inspect(connection).get_indexes("adjudicacion")
+        }
+
+        context = MigrationContext.configure(connection)
+        operations = Operations(context)
+        original = dashboard_aggregate_indexes.op
+        dashboard_aggregate_indexes.op = operations
+        try:
+            dashboard_aggregate_indexes.downgrade()
+        finally:
+            dashboard_aggregate_indexes.op = original
+
+        assert "ix_compra_organismo" not in {
+            index["name"] for index in inspect(connection).get_indexes("compra")
+        }
+        assert "ix_adjudicacion_nombre_comercial" not in {
+            index["name"] for index in inspect(connection).get_indexes("adjudicacion")
+        }
+        assert (
+            connection.exec_driver_sql(
+                "SELECT id, organismo FROM compra ORDER BY id"
+            ).all()
+            == original_rows["compra"]
+        )
+        assert (
+            connection.exec_driver_sql(
+                "SELECT id, compra_id, nombre_comercial FROM adjudicacion ORDER BY id"
+            ).all()
+            == original_rows["adjudicacion"]
+        )
