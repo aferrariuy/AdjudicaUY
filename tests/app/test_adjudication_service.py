@@ -21,6 +21,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 import pytest
+import sqlalchemy as sa
 
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
@@ -32,6 +33,8 @@ from app.services.adjudication_service import (
     ConcentrationResult,
     KpiSummary,
     ValidationError,
+    _document_pair_match,
+    _scoped_compra_ids,
     company_competitors,
     company_summary,
     company_win_rate,
@@ -39,6 +42,7 @@ from app.services.adjudication_service import (
     count_adjudications,
     kpi_summary,
     list_adjudications,
+    lookup_company_identities,
     lookup_company_identity,
     monthly_trend,
     ranking_by_company,
@@ -146,6 +150,174 @@ def add_oferente(db_session: Session):
         return of
 
     return _factory
+
+
+def _legacy_company_competitor_tuples(
+    session: Session,
+    company_type: str,
+    company_number: str,
+    filters: AdjudicationFilters,
+    *,
+    limit: int = 5,
+) -> list[tuple[str, str, int, Decimal, str]]:
+    scoped_ids = _scoped_compra_ids(session, filters).subquery("company_scope")
+    target_ids = (
+        sa.select(Oferente.compra_id)
+        .where(
+            Oferente.compra_id.in_(sa.select(scoped_ids.c.id)),
+            _document_pair_match(Oferente, company_type, company_number),
+        )
+        .distinct()
+        .subquery("target_purchases")
+    )
+    valid_competitor = sa.and_(
+        Oferente.tipo_doc_prov.is_not(None),
+        Oferente.nro_doc_prov.is_not(None),
+        ~sa.and_(
+            Oferente.tipo_doc_prov == company_type,
+            Oferente.nro_doc_prov == company_number,
+        ),
+    )
+    award_total = (
+        sa.select(sa.func.coalesce(sa.func.sum(Adjudicacion.amount_uyu), 0))
+        .where(
+            Adjudicacion.compra_id.in_(sa.select(target_ids.c.compra_id)),
+            Adjudicacion.tipo_doc_prov == Oferente.tipo_doc_prov,
+            Adjudicacion.nro_doc_prov == Oferente.nro_doc_prov,
+        )
+        .correlate(Oferente)
+        .scalar_subquery()
+    )
+    counts = (
+        sa.select(
+            Oferente.tipo_doc_prov.label("company_type"),
+            Oferente.nro_doc_prov.label("company_number"),
+            sa.func.max(Oferente.nombre_comercial).label("fallback_name"),
+            sa.func.count(sa.func.distinct(Oferente.compra_id)).label("purchase_count"),
+            award_total.label("awarded_amount_uyu"),
+        )
+        .where(
+            Oferente.compra_id.in_(sa.select(target_ids.c.compra_id)), valid_competitor
+        )
+        .group_by(Oferente.tipo_doc_prov, Oferente.nro_doc_prov)
+        .subquery("competitor_counts")
+    )
+    rows = list(session.execute(sa.select(counts)))
+    pairs = [(row.company_type, row.company_number) for row in rows]
+    identities = lookup_company_identities(session, pairs)
+    competitors = [
+        (
+            row.company_type,
+            row.company_number,
+            int(row.purchase_count),
+            Decimal(row.awarded_amount_uyu or 0),
+            identities.get((row.company_type, row.company_number))
+            or row.fallback_name
+            or "Empresa sin nombre",
+        )
+        for row in rows
+    ]
+    competitors.sort(key=lambda row: (-row[2], -row[3], row[4]))
+    return competitors[: max(limit, 0)]
+
+
+def _seed_company_competitor_edges(
+    make_compra, add_adj, make_oferente
+) -> tuple[str, str]:
+    target = ("RUT", "TARGET")
+
+    def bid(compra: Compra, pair: tuple[str | None, str | None], name: str) -> None:
+        make_oferente(
+            compra.id,
+            nombre_comercial=name,
+            tipo_doc_prov=pair[0],
+            nro_doc_prov=pair[1],
+        )
+
+    first, second, third = (
+        make_compra(fecha_pub_adj=date(2024, 1, day)) for day in (1, 2, 3)
+    )
+    for compra in (first, second, third):
+        bid(compra, target, "Target bidder")
+
+    bid(first, ("RUT", "COMP-A"), "Fallback A first")
+    bid(first, ("RUT", "COMP-A"), "Fallback A duplicate")
+    bid(second, ("RUT", "COMP-A"), "Fallback A second")
+    bid(first, ("RUT", "COMP-B"), "Fallback B first")
+    bid(third, ("RUT", "COMP-B"), "Fallback B third")
+    bid(first, ("RUT", "COMP-F"), "Fallback F")
+    bid(first, (None, "NULL-TYPE"), "Null type")
+    bid(first, ("RUT", None), "Null number")
+    bid(first, (None, None), "Absent pair")
+
+    add_adj(
+        first,
+        nombre_comercial="Canonical A",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="COMP-A",
+        desc_articulo="A line one",
+        amount_uyu=Decimal("100.00"),
+    )
+    add_adj(
+        first,
+        nombre_comercial="Canonical A",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="COMP-A",
+        desc_articulo="A line two",
+        amount_uyu=Decimal("50.00"),
+    )
+    add_adj(
+        second,
+        nombre_comercial="Canonical A",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="COMP-A",
+        desc_articulo="A award without bid",
+        amount_uyu=Decimal("25.00"),
+    )
+    add_adj(
+        first,
+        nombre_comercial="Canonical B",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="COMP-B",
+        desc_articulo="B line",
+        amount_uyu=Decimal("80.00"),
+    )
+    add_adj(
+        third,
+        nombre_comercial="Canonical B",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="COMP-B",
+        desc_articulo="B null line",
+        amount_uyu=None,
+    )
+    add_adj(
+        first,
+        nombre_comercial="Target winner",
+        tipo_doc_prov=target[0],
+        nro_doc_prov=target[1],
+        desc_articulo="Target line",
+        amount_uyu=Decimal("999.00"),
+    )
+    add_adj(
+        first,
+        nombre_comercial="Award-only",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="AWARD-ONLY",
+        desc_articulo="No bid line",
+        amount_uyu=Decimal("700.00"),
+    )
+
+    outsider = make_compra(fecha_pub_adj=date(2023, 1, 1))
+    bid(outsider, ("RUT", "OUTSIDER"), "Outsider")
+    add_adj(
+        outsider,
+        nombre_comercial="Outsider",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="OUTSIDER",
+        desc_articulo="Outsider line",
+        amount_uyu=Decimal("600.00"),
+    )
+    return target
 
 
 # ---------------------------------------------------------------------------
@@ -900,6 +1072,143 @@ def test_company_competitors_ranks_top_five_and_resolves_names_in_batch(
         ("Fallback F", 2),
         ("Canonical D", 1),
     ]
+
+
+def test_company_competitors_matches_frozen_oracle_on_multi_edge_fixture(
+    db_session, make_compra, add_adj, make_oferente
+) -> None:
+    target = _seed_company_competitor_edges(make_compra, add_adj, make_oferente)
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    expected = _legacy_company_competitor_tuples(db_session, *target, filters)
+    actual = [
+        (
+            row.company_type,
+            row.company_number,
+            row.purchase_count,
+            row.awarded_amount_uyu,
+            row.display_name,
+        )
+        for row in company_competitors(db_session, *target, filters)
+    ]
+
+    assert expected == [
+        ("RUT", "COMP-A", 2, Decimal("175.00"), "Canonical A"),
+        ("RUT", "COMP-B", 2, Decimal("80.00"), "Canonical B"),
+        ("RUT", "COMP-F", 1, Decimal("0"), "Fallback F"),
+    ]
+    assert actual == expected
+
+
+def test_company_competitors_returns_empty_for_target_without_co_bidders(
+    db_session, make_compra, make_oferente
+) -> None:
+    target = ("RUT", "TARGET-EMPTY")
+    compra = make_compra(fecha_pub_adj=date(2024, 2, 1))
+    make_oferente(compra.id, tipo_doc_prov=target[0], nro_doc_prov=target[1])
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    expected = _legacy_company_competitor_tuples(db_session, *target, filters)
+    actual = company_competitors(db_session, *target, filters)
+
+    assert expected == []
+    assert actual == []
+
+
+def test_company_competitors_matches_oracle_for_single_competitor(
+    db_session, make_compra, add_adj, make_oferente
+) -> None:
+    target = ("RUT", "TARGET-SINGLE")
+    compra = make_compra(fecha_pub_adj=date(2024, 2, 1))
+    make_oferente(compra.id, tipo_doc_prov=target[0], nro_doc_prov=target[1])
+    make_oferente(
+        compra.id,
+        nombre_comercial="Fallback single",
+        tipo_doc_prov="CI",
+        nro_doc_prov="SINGLE",
+    )
+    add_adj(
+        compra,
+        nombre_comercial="Canonical single",
+        tipo_doc_prov="CI",
+        nro_doc_prov="SINGLE",
+        amount_uyu=Decimal("42.00"),
+    )
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    expected = _legacy_company_competitor_tuples(db_session, *target, filters)
+    actual = [
+        (
+            row.company_type,
+            row.company_number,
+            row.purchase_count,
+            row.awarded_amount_uyu,
+            row.display_name,
+        )
+        for row in company_competitors(db_session, *target, filters)
+    ]
+
+    assert expected == [("CI", "SINGLE", 1, Decimal("42.00"), "Canonical single")]
+    assert actual == expected
+
+
+def test_company_competitors_excludes_award_only_document_pair(
+    db_session, make_compra, add_adj, make_oferente
+) -> None:
+    target = _seed_company_competitor_edges(make_compra, add_adj, make_oferente)
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    result = company_competitors(db_session, *target, filters)
+
+    assert [row.company_number for row in result] == ["COMP-A", "COMP-B", "COMP-F"]
+
+
+def test_company_competitors_transparent_to_composite_index(
+    db_session, make_compra, add_adj, make_oferente
+) -> None:
+    target = _seed_company_competitor_edges(make_compra, add_adj, make_oferente)
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+    without_index = [
+        (
+            row.company_type,
+            row.company_number,
+            row.purchase_count,
+            row.awarded_amount_uyu,
+            row.display_name,
+        )
+        for row in company_competitors(db_session, *target, filters)
+    ]
+    index = sa.Index(
+        "ix_adjudicacion_compra_document",
+        Adjudicacion.compra_id,
+        Adjudicacion.tipo_doc_prov,
+        Adjudicacion.nro_doc_prov,
+    )
+    try:
+        index.create(bind=db_session.get_bind())
+        with_index = [
+            (
+                row.company_type,
+                row.company_number,
+                row.purchase_count,
+                row.awarded_amount_uyu,
+                row.display_name,
+            )
+            for row in company_competitors(db_session, *target, filters)
+        ]
+        assert with_index == without_index
+    finally:
+        index.drop(bind=db_session.get_bind())
 
 
 def test_company_widgets_and_listing_are_scoped_by_document(
