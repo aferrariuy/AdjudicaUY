@@ -151,7 +151,7 @@ class AdjudicationRow:
 class KpiSummary:
     """Summary metrics for the currently filtered adjudication set.
 
-    The four values are produced by a single query so the snapshot is
+    The five values are produced by a single query so the snapshot is
     atomic (no chance of a filter change landing between aggregates)
     and round-trip cost stays at one DB call.
 
@@ -175,6 +175,7 @@ class KpiSummary:
     average_amount: Decimal
     purchase_count: int
     company_count: int
+    total: int
 
 
 @dataclass(frozen=True)
@@ -1033,12 +1034,14 @@ def kpi_summary(session: Session, filters: AdjudicationFilters) -> KpiSummary:
     company_count_expr = func.count(func.distinct(Adjudicacion.nombre_comercial)).label(
         "company_count"
     )
+    total_expr = func.count(Adjudicacion.id).label("total")
 
     stmt = select(
         total_amount_expr,
         non_null_amount_count,
         purchase_count_expr,
         company_count_expr,
+        total_expr,
     ).join(Compra, Compra.id == Adjudicacion.compra_id)
     stmt = _apply_filters(stmt, filters)
 
@@ -1051,6 +1054,7 @@ def kpi_summary(session: Session, filters: AdjudicationFilters) -> KpiSummary:
         average_amount=average,
         purchase_count=int(row.purchase_count or 0),
         company_count=int(row.company_count or 0),
+        total=int(row.total or 0),
     )
 
 

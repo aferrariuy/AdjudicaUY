@@ -36,6 +36,7 @@ from app.services.adjudication_service import (
     company_summary,
     company_win_rate,
     concentration_ratio,
+    count_adjudications,
     kpi_summary,
     list_adjudications,
     lookup_company_identity,
@@ -302,6 +303,28 @@ class TestKpiSummary:
         # 4 distinct winning companies.
         assert result.company_count == 4
 
+    def test_total_matches_full_filtered_set_not_listing_page(
+        self, db_session, make_compra, add_adj
+    ) -> None:
+        for index in range(21):
+            compra = make_compra(organismo="OSE")
+            add_adj(
+                compra,
+                nombre_comercial=f"Company {index}",
+                amount_uyu=None if index == 0 else Decimal("100.00"),
+            )
+        other = make_compra(organismo="Other")
+        add_adj(other, nombre_comercial="Outside filter")
+
+        filters = AdjudicationFilters(organism="OSE")
+        result = kpi_summary(db_session, filters)
+
+        assert result.total == count_adjudications(db_session, filters) == 21
+        assert len(list_adjudications(db_session, filters, limit=10, offset=0)) == 10
+        assert len(list_adjudications(db_session, filters, limit=10, offset=10)) == 10
+        assert len(list_adjudications(db_session, filters, limit=10, offset=20)) == 1
+        assert result.total == 21
+
     def test_null_amount_uyu_excluded_from_sum_and_average(
         self, db_session, make_compra, add_adj
     ) -> None:
@@ -320,6 +343,7 @@ class TestKpiSummary:
         assert result.total_amount == Decimal("1000.00")
         # And from the COUNT used for the average, so 1000 / 1 = 1000.
         assert result.average_amount == Decimal("1000.00")
+        assert result.total == 2
         # But the company is still distinct (we counted by DISTINCT
         # nombre_comercial, not by amount).
         assert result.company_count == 2
@@ -354,6 +378,7 @@ class TestKpiSummary:
         assert result.average_amount == Decimal(0)
         assert result.purchase_count == 0
         assert result.company_count == 0
+        assert result.total == 0
 
     def test_empty_db_returns_zero_values(self, db_session) -> None:
         result = kpi_summary(db_session, AdjudicationFilters())
