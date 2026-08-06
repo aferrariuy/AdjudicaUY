@@ -320,6 +320,93 @@ def _seed_company_competitor_edges(
     return target
 
 
+def _legacy_company_win_rate_tuples(
+    session: Session,
+    company_type: str,
+    company_number: str,
+    filters: AdjudicationFilters,
+) -> tuple[int, int, Decimal | None]:
+    """Frozen oracle for the pre-rewrite two-statement win-rate query."""
+
+    scoped_ids = _scoped_compra_ids(session, filters).subquery("company_scope")
+    target_oferente = sa.select(Oferente.id).where(
+        Oferente.compra_id == Compra.id,
+        _document_pair_match(Oferente, company_type, company_number),
+    )
+    target_adjudicacion = sa.select(Adjudicacion.id).where(
+        Adjudicacion.compra_id == Compra.id,
+        _document_pair_match(Adjudicacion, company_type, company_number),
+    )
+    participation_stmt = sa.select(sa.func.count(sa.func.distinct(Compra.id))).where(
+        Compra.id.in_(sa.select(scoped_ids.c.id)),
+        sa.or_(target_oferente.exists(), target_adjudicacion.exists()),
+    )
+    wins_stmt = sa.select(
+        sa.func.count(sa.func.distinct(Adjudicacion.compra_id))
+    ).where(
+        Adjudicacion.compra_id.in_(sa.select(scoped_ids.c.id)),
+        _document_pair_match(Adjudicacion, company_type, company_number),
+    )
+    participations = int(session.execute(participation_stmt).scalar_one() or 0)
+    wins = int(session.execute(wins_stmt).scalar_one() or 0)
+    rate = Decimal(wins) / Decimal(participations) if participations else None
+    return participations, wins, rate
+
+
+def _seed_company_win_rate_edges(
+    make_compra, add_adj, make_oferente
+) -> tuple[str, str]:
+    """Seed every inclusive win-rate edge without relying on the new query."""
+
+    target = ("RUT", "WIN-RATE-EDGES")
+
+    def bid(compra: Compra, pair: tuple[str | None, str | None]) -> None:
+        make_oferente(
+            compra.id,
+            tipo_doc_prov=pair[0],
+            nro_doc_prov=pair[1],
+        )
+
+    offered_only = make_compra(fecha_pub_adj=date(2024, 1, 1))
+    bid(offered_only, target)
+
+    awarded_only = make_compra(fecha_pub_adj=date(2024, 1, 2))
+    add_adj(
+        awarded_only,
+        nombre_comercial="Awarded only",
+        tipo_doc_prov=target[0],
+        nro_doc_prov=target[1],
+    )
+
+    both_sides = make_compra(fecha_pub_adj=date(2024, 1, 3))
+    bid(both_sides, target)
+    for article in ("First line", "Second line"):
+        add_adj(
+            both_sides,
+            nombre_comercial="Both sides",
+            tipo_doc_prov=target[0],
+            nro_doc_prov=target[1],
+            desc_articulo=article,
+        )
+
+    duplicate_offers = make_compra(fecha_pub_adj=date(2024, 1, 4))
+    bid(duplicate_offers, target)
+    bid(duplicate_offers, target)
+
+    null_pair = make_compra(fecha_pub_adj=date(2024, 1, 5))
+    bid(null_pair, (None, target[1]))
+
+    out_of_year = make_compra(fecha_pub_adj=date(2023, 12, 31))
+    bid(out_of_year, target)
+    add_adj(
+        out_of_year,
+        nombre_comercial="Out of year",
+        tipo_doc_prov=target[0],
+        nro_doc_prov=target[1],
+    )
+    return target
+
+
 # ---------------------------------------------------------------------------
 # top_articles
 # ---------------------------------------------------------------------------
@@ -1027,6 +1114,108 @@ def test_company_win_rate_is_inclusive_null_safe_and_date_scoped(
     assert company_win_rate(
         db_session, "RUT", "MISSING", AdjudicationFilters()
     ) == CompanyWinRate(0, 0, None)
+
+
+def test_company_win_rate_matches_legacy_oracle_on_multi_edge_fixture(
+    db_session, make_compra, add_adj, make_oferente
+) -> None:
+    company = _seed_company_win_rate_edges(make_compra, add_adj, make_oferente)
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    expected = _legacy_company_win_rate_tuples(db_session, *company, filters)
+    result = company_win_rate(db_session, *company, filters)
+
+    assert expected == (4, 2, Decimal("2") / Decimal("4"))
+    assert (result.participations, result.wins, result.rate) == expected
+
+
+def test_company_win_rate_matches_legacy_oracle_on_zero_activity(db_session) -> None:
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    expected = _legacy_company_win_rate_tuples(
+        db_session, "RUT", "NO-ACTIVITY", filters
+    )
+    result = company_win_rate(db_session, "RUT", "NO-ACTIVITY", filters)
+
+    assert expected == (0, 0, None)
+    assert (result.participations, result.wins, result.rate) == expected
+
+
+def test_company_win_rate_matches_legacy_oracle_on_single_offered_edge(
+    db_session, make_compra, make_oferente
+) -> None:
+    company = ("RUT", "OFFERED-ONLY")
+    compra = make_compra(fecha_pub_adj=date(2024, 6, 1))
+    make_oferente(compra.id, tipo_doc_prov=company[0], nro_doc_prov=company[1])
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    expected = _legacy_company_win_rate_tuples(db_session, *company, filters)
+    result = company_win_rate(db_session, *company, filters)
+
+    assert expected == (1, 0, Decimal(0))
+    assert (result.participations, result.wins, result.rate) == expected
+
+
+def test_company_win_rate_matches_legacy_oracle_on_rate_math(
+    db_session, make_compra, add_adj, make_oferente
+) -> None:
+    company = ("RUT", "RATE-MATH")
+    both = make_compra(fecha_pub_adj=date(2024, 7, 1))
+    make_oferente(both.id, tipo_doc_prov=company[0], nro_doc_prov=company[1])
+    add_adj(
+        both,
+        nombre_comercial="Rate math winner",
+        tipo_doc_prov=company[0],
+        nro_doc_prov=company[1],
+    )
+    offered = make_compra(fecha_pub_adj=date(2024, 7, 2))
+    make_oferente(offered.id, tipo_doc_prov=company[0], nro_doc_prov=company[1])
+    awarded = make_compra(fecha_pub_adj=date(2024, 7, 3))
+    add_adj(
+        awarded,
+        nombre_comercial="Rate math winner",
+        tipo_doc_prov=company[0],
+        nro_doc_prov=company[1],
+    )
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    expected = _legacy_company_win_rate_tuples(db_session, *company, filters)
+    result = company_win_rate(db_session, *company, filters)
+
+    assert expected == (3, 2, Decimal(2) / Decimal(3))
+    assert (result.participations, result.wins, result.rate) == expected
+
+
+def test_company_win_rate_runs_one_execute(
+    db_session, make_compra, add_adj, make_oferente
+) -> None:
+    company = _seed_company_win_rate_edges(make_compra, add_adj, make_oferente)
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    class ExecuteCountingSession:
+        def __init__(self, wrapped: Session) -> None:
+            self.wrapped = wrapped
+            self.execute_calls = 0
+
+        def execute(self, *args, **kwargs):
+            self.execute_calls += 1
+            return self.wrapped.execute(*args, **kwargs)
+
+    counted_session = ExecuteCountingSession(db_session)
+    result = company_win_rate(counted_session, *company, filters)
+
+    assert (result.participations, result.wins) == (4, 2)
+    assert counted_session.execute_calls == 1
 
 
 def test_company_competitors_ranks_top_five_and_resolves_names_in_batch(

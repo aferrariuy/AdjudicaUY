@@ -843,25 +843,37 @@ def company_win_rate(
 ) -> CompanyWinRate:
     """Return inclusive wins divided by distinct company participations."""
 
-    scoped_ids = _scoped_compra_ids(session, filters).subquery("company_scope")
-    target_oferente = select(Oferente.id).where(
-        Oferente.compra_id == Compra.id,
-        _document_pair_match(Oferente, company_type, company_number),
+    scope = _scoped_compra_ids(session, filters).subquery("company_scope")
+    target_bids = (
+        select(Oferente.compra_id.label("compra_id"))
+        .where(
+            Oferente.compra_id.in_(select(scope.c.id)),
+            _document_pair_match(Oferente, company_type, company_number),
+        )
+        .distinct()
+        .cte("target_bids")
     )
-    target_adjudicacion = select(Adjudicacion.id).where(
-        Adjudicacion.compra_id == Compra.id,
-        _document_pair_match(Adjudicacion, company_type, company_number),
+    target_wins = (
+        select(Adjudicacion.compra_id.label("compra_id"))
+        .where(
+            Adjudicacion.compra_id.in_(select(scope.c.id)),
+            _document_pair_match(Adjudicacion, company_type, company_number),
+        )
+        .distinct()
+        .cte("target_wins")
     )
-    participation_stmt = select(func.count(func.distinct(Compra.id))).where(
-        Compra.id.in_(select(scoped_ids.c.id)),
-        or_(target_oferente.exists(), target_adjudicacion.exists()),
+    participations_stmt = select(func.count()).select_from(
+        select(target_bids.c.compra_id)
+        .union(select(target_wins.c.compra_id))
+        .subquery()
     )
-    wins_stmt = select(func.count(func.distinct(Adjudicacion.compra_id))).where(
-        Adjudicacion.compra_id.in_(select(scoped_ids.c.id)),
-        _document_pair_match(Adjudicacion, company_type, company_number),
+    stmt = select(
+        participations_stmt.scalar_subquery().label("participations"),
+        select(func.count()).select_from(target_wins).scalar_subquery().label("wins"),
     )
-    participations = int(session.execute(participation_stmt).scalar_one() or 0)
-    wins = int(session.execute(wins_stmt).scalar_one() or 0)
+    row = session.execute(stmt).one()
+    participations = int(row.participations or 0)
+    wins = int(row.wins or 0)
     return CompanyWinRate(
         participations=participations,
         wins=wins,
