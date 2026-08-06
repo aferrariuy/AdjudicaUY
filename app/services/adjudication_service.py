@@ -879,15 +879,15 @@ def company_competitors(
 ) -> list[CompanyCompetitor]:
     """Return deterministic co-bidder rankings for the target company."""
 
-    scoped_ids = _scoped_compra_ids(session, filters).subquery("company_scope")
-    target_ids = (
-        select(Oferente.compra_id)
+    scoped = _scoped_compra_ids(session, filters).subquery("company_scope")
+    target = (
+        select(Oferente.compra_id.label("compra_id"))
         .where(
-            Oferente.compra_id.in_(select(scoped_ids.c.id)),
+            Oferente.compra_id.in_(select(scoped.c.id)),
             _document_pair_match(Oferente, company_type, company_number),
         )
         .distinct()
-        .subquery("target_purchases")
+        .cte("target")
     )
     valid_competitor = and_(
         Oferente.tipo_doc_prov.is_not(None),
@@ -897,35 +897,63 @@ def company_competitors(
             Oferente.nro_doc_prov == company_number,
         ),
     )
-    fallback_names = func.max(Oferente.nombre_comercial).label("fallback_name")
-    award_total = (
-        select(func.coalesce(func.sum(Adjudicacion.amount_uyu), 0))
-        .where(
-            Adjudicacion.compra_id.in_(select(target_ids.c.compra_id)),
-            Adjudicacion.tipo_doc_prov == Oferente.tipo_doc_prov,
-            Adjudicacion.nro_doc_prov == Oferente.nro_doc_prov,
-        )
-        .correlate(Oferente)
-        .scalar_subquery()
-    )
-    counts = (
+    bids = (
         select(
+            Oferente.compra_id.label("compra_id"),
             Oferente.tipo_doc_prov.label("company_type"),
             Oferente.nro_doc_prov.label("company_number"),
-            fallback_names,
-            func.count(func.distinct(Oferente.compra_id)).label("purchase_count"),
-            award_total.label("awarded_amount_uyu"),
+            func.max(Oferente.nombre_comercial).label("fallback_name"),
         )
-        .where(Oferente.compra_id.in_(select(target_ids.c.compra_id)), valid_competitor)
-        .group_by(Oferente.tipo_doc_prov, Oferente.nro_doc_prov)
-        .subquery("competitor_counts")
+        .where(
+            Oferente.compra_id.in_(select(target.c.compra_id)),
+            valid_competitor,
+        )
+        .group_by(
+            Oferente.compra_id,
+            Oferente.tipo_doc_prov,
+            Oferente.nro_doc_prov,
+        )
+        .cte("bids")
     )
-    stmt = select(
-        counts.c.company_type,
-        counts.c.company_number,
-        counts.c.fallback_name,
-        counts.c.purchase_count,
-        counts.c.awarded_amount_uyu,
+    awards = (
+        select(
+            Adjudicacion.compra_id.label("compra_id"),
+            Adjudicacion.tipo_doc_prov.label("company_type"),
+            Adjudicacion.nro_doc_prov.label("company_number"),
+            func.sum(Adjudicacion.amount_uyu).label("awarded_amount_uyu"),
+        )
+        .where(
+            Adjudicacion.compra_id.in_(select(target.c.compra_id)),
+            Adjudicacion.tipo_doc_prov.is_not(None),
+            Adjudicacion.nro_doc_prov.is_not(None),
+        )
+        .group_by(
+            Adjudicacion.compra_id,
+            Adjudicacion.tipo_doc_prov,
+            Adjudicacion.nro_doc_prov,
+        )
+        .cte("awards")
+    )
+    stmt = (
+        select(
+            bids.c.company_type,
+            bids.c.company_number,
+            func.max(bids.c.fallback_name).label("fallback_name"),
+            func.count(func.distinct(bids.c.compra_id)).label("purchase_count"),
+            func.coalesce(func.sum(awards.c.awarded_amount_uyu), 0).label(
+                "awarded_amount_uyu"
+            ),
+        )
+        .select_from(bids)
+        .outerjoin(
+            awards,
+            and_(
+                awards.c.compra_id == bids.c.compra_id,
+                awards.c.company_type == bids.c.company_type,
+                awards.c.company_number == bids.c.company_number,
+            ),
+        )
+        .group_by(bids.c.company_type, bids.c.company_number)
     )
     rows = list(session.execute(stmt))
     pairs = [(row.company_type, row.company_number) for row in rows]
