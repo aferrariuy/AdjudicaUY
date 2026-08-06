@@ -3,9 +3,9 @@
 After self-hosting fonts and vendor JS, the index page must reference
 local paths (/static/...) and must NOT reference external CDNs.
 
-Phase 5 adds PageSpeed optimization assertions: critical CSS inlined,
-async stylesheet loading, anti-FOUC relocation, font preload scoping,
-and theme:changed event wiring.
+Phase 5 adds PageSpeed optimization assertions: synchronous stylesheet
+loading (post-CLS-revert guard), anti-FOUC relocation, font preload
+scoping, and theme:changed event wiring.
 """
 
 from __future__ import annotations
@@ -57,54 +57,49 @@ def test_index_references_local_fonts_css(client: Any) -> None:
 
 
 # ── Phase 5: PageSpeed optimization assertions ─────────────────────────
+# Async CSS loading with inline critical CSS was reverted (f3f6cb0):
+# two-phase rendering caused CLS of 0.928 on desktop / 0.6 on mobile.
+# Synchronous loading is the intentional state — these tests guard it.
 
 
-def test_base_inlines_critical_css(client: Any) -> None:
-    """GET / has an inline <style> block in <head> with critical CSS."""
+def test_stylesheets_loaded_synchronously(client: Any) -> None:
+    """GET / loads fonts.css and style.css as render-blocking stylesheets.
+
+    Regression guard for the CLS revert: reintroducing the preload+onload
+    async pattern (rel="preload" as="style") must fail this test.
+    """
 
     response = client.get("/")
     text = response.text
-    # Extract <head> content
+    assert 'rel="stylesheet" href="/static/css/fonts.css"' in text
+    assert 'rel="stylesheet" href="/static/css/style.css"' in text
+    # No preload+onload async CSS pattern
+    assert 'rel="preload" href="/static/css/fonts.css"' not in text
+    assert 'rel="preload" href="/static/css/style.css"' not in text
+
+
+def test_no_critical_css_inlined(client: Any) -> None:
+    """GET / does not inline critical CSS (box-sizing reset) in <head>.
+
+    Critical CSS inlining belonged to the reverted async-loading approach
+    (two-phase rendering). The only inline <style> allowed is the HTMX
+    transition helper.
+    """
+
+    response = client.get("/")
+    text = response.text
     head_match = re.search(r"<head>(.*?)</head>", text, re.DOTALL)
     assert head_match, "<head> not found"
     head = head_match.group(1)
-    # Must contain an inline <style> block with box-sizing and font-family
-    style_match = re.search(r"<style>(.*?)</style>", head, re.DOTALL)
-    assert style_match, "Inline <style> block not found in <head>"
-    style_content = style_match.group(1)
-    assert "box-sizing" in style_content, "Critical CSS missing box-sizing reset"
-    assert "font-family" in style_content, "Critical CSS missing font-family"
-
-
-def test_fonts_css_async_loaded(client: Any) -> None:
-    """GET / loads fonts.css via preload+onload, not render-blocking stylesheet."""
-
-    response = client.get("/")
-    text = response.text
-    # fonts.css should appear as rel="preload" with as="style"
-    assert 'rel="preload"' in text
-    assert 'href="/static/css/fonts.css"' in text
-    assert 'as="style"' in text
-    # fonts.css should NOT appear as a render-blocking stylesheet
-    # (the noscript fallback is fine — strip noscript blocks before checking)
-    without_noscript = re.sub(
-        r"<noscript>.*?</noscript>", "", text, flags=re.DOTALL
-    )
-    assert 'rel="stylesheet" href="/static/css/fonts.css"' not in without_noscript
-
-
-def test_style_css_async_loaded(client: Any) -> None:
-    """GET / loads style.css via preload+onload, not render-blocking stylesheet."""
-
-    response = client.get("/")
-    text = response.text
-    assert 'href="/static/css/style.css"' in text
-    assert 'as="style"' in text
-    # style.css should NOT appear as a render-blocking stylesheet
-    without_noscript = re.sub(
-        r"<noscript>.*?</noscript>", "", text, flags=re.DOTALL
-    )
-    assert 'rel="stylesheet" href="/static/css/style.css"' not in without_noscript
+    style_matches = re.findall(r"<style>(.*?)</style>", head, re.DOTALL)
+    assert style_matches, "Inline <style> block not found in <head>"
+    for style_content in style_matches:
+        assert "box-sizing" not in style_content, (
+            "Critical CSS should not be inlined (caused CLS when async)"
+        )
+        assert "font-family" not in style_content, (
+            "Critical CSS should not be inlined (caused CLS when async)"
+        )
 
 
 def test_anti_fouc_in_body(client: Any) -> None:
@@ -132,9 +127,7 @@ def test_only_ibmplexsans_preloaded(client: Any) -> None:
     response = client.get("/")
     text = response.text
     # Find all font preload links
-    font_preloads = re.findall(
-        r'<link[^>]*rel="preload"[^>]*as="font"[^>]*>', text
-    )
+    font_preloads = re.findall(r'<link[^>]*rel="preload"[^>]*as="font"[^>]*>', text)
     assert len(font_preloads) == 1, (
         f"Expected exactly 1 font preload, found {len(font_preloads)}: {font_preloads}"
     )
@@ -180,6 +173,6 @@ def test_theme_changed_event_dispatched(client: Any) -> None:
     assert "dispatchEvent" in text
     assert "theme:changed" in text
     # Verify it's in the toggle context (not just the listener)
-    assert "new Event('theme:changed')" in text or 'new Event("theme:changed")' in text, (
-        "Theme toggle should dispatch a theme:changed event"
-    )
+    assert (
+        "new Event('theme:changed')" in text or 'new Event("theme:changed")' in text
+    ), "Theme toggle should dispatch a theme:changed event"
