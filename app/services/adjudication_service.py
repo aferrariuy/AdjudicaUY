@@ -184,6 +184,7 @@ class CompanyProfileSummary:
 
     display_name: str | None
     total_amount: Decimal
+    total: int
     purchase_count: int
     organism_count: int
     share_of_total: Decimal
@@ -993,41 +994,47 @@ def company_competitors(
 
 
 def company_summary(
-    session: Session, filters: AdjudicationFilters
+    session: Session,
+    filters: AdjudicationFilters,
+    *,
+    market_total: Decimal | None = None,
 ) -> CompanyProfileSummary:
     """Return exact-document KPIs and share of the filtered market total."""
 
     total_expr = func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label(
         "total_amount"
     )
+    count_expr = func.count(Adjudicacion.id).label("total")
     purchase_expr = func.count(func.distinct(Compra.id)).label("purchase_count")
     organism_expr = func.count(func.distinct(Compra.organismo)).label("organism_count")
-    company_stmt = select(total_expr, purchase_expr, organism_expr).join(
+    company_stmt = select(total_expr, count_expr, purchase_expr, organism_expr).join(
         Compra, Compra.id == Adjudicacion.compra_id
     )
     company_stmt = _apply_filters(company_stmt, filters)
     company_row = session.execute(company_stmt).one()
     total = Decimal(company_row.total_amount or 0)
 
-    market_filters = AdjudicationFilters(
-        company=filters.company,
-        organism=filters.organism,
-        organism_exact=filters.organism_exact,
-        article=filters.article,
-        article_id=filters.article_id,
-        date_from=filters.date_from,
-        date_to=filters.date_to,
-    )
-    market_stmt = select(func.coalesce(func.sum(Adjudicacion.amount_uyu), 0)).join(
-        Compra, Compra.id == Adjudicacion.compra_id
-    )
-    market_stmt = _apply_filters(market_stmt, market_filters)
-    market_total = Decimal(session.execute(market_stmt).scalar_one() or 0)
+    if market_total is None:
+        market_filters = AdjudicationFilters(
+            company=filters.company,
+            organism=filters.organism,
+            organism_exact=filters.organism_exact,
+            article=filters.article,
+            article_id=filters.article_id,
+            date_from=filters.date_from,
+            date_to=filters.date_to,
+        )
+        market_stmt = select(func.coalesce(func.sum(Adjudicacion.amount_uyu), 0)).join(
+            Compra, Compra.id == Adjudicacion.compra_id
+        )
+        market_stmt = _apply_filters(market_stmt, market_filters)
+        market_total = Decimal(session.execute(market_stmt).scalar_one() or 0)
     share = total / market_total if market_total > 0 else Decimal(0)
 
     return CompanyProfileSummary(
         display_name=None,
         total_amount=total,
+        total=int(company_row.total or 0),
         purchase_count=int(company_row.purchase_count or 0),
         organism_count=int(company_row.organism_count or 0),
         share_of_total=share,
