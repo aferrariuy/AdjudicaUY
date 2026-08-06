@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 from unittest.mock import patch
 
+import pytest
 from bs4 import BeautifulSoup
 from fastapi.responses import HTMLResponse
 
@@ -349,6 +350,40 @@ def test_table_only_partial_keeps_count_without_kpi(
     assert render_mock.call_args.args[2]["total"] == 1
     count_mock.assert_called_once()
     kpi_mock.assert_not_called()
+
+
+@pytest.mark.parametrize("path", ["/", "/adjudications"])
+def test_dashboard_aggregate_routes_use_the_query_cache(
+    client: TestClient, path: str
+) -> None:
+    kpi = KpiSummary(Decimal("0"), Decimal("0"), 0, 0, 0)
+
+    def run_uncached(_name, aggregate, session, filters, **kwargs):
+        return aggregate(session, filters, **kwargs)
+
+    expected_names = ["kpi_summary", "ranking_by_company", "ranking_by_organism"]
+    if path == "/":
+        expected_names.append("distinct_organisms")
+    expected_names += ["monthly_trend", "concentration_ratio"]
+
+    with (
+        patch(
+            "app.routes.adjudications.cached_aggregate",
+            side_effect=run_uncached,
+        ) as cache_mock,
+        patch("app.routes.adjudications.kpi_summary", return_value=kpi),
+        patch("app.routes.adjudications.ranking_by_company", return_value=[]),
+        patch("app.routes.adjudications.ranking_by_organism", return_value=[]),
+        patch("app.routes.adjudications.distinct_organisms", return_value=[]),
+        patch("app.routes.adjudications.monthly_trend", return_value=[]),
+        patch(
+            "app.routes.adjudications.concentration_ratio",
+            return_value=ConcentrationResult(None, 0, 0),
+        ),
+    ):
+        client.get(path)
+
+    assert [call.args[0] for call in cache_mock.call_args_list] == expected_names
 
 
 # ---------------------------------------------------------------------------

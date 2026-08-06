@@ -107,6 +107,20 @@ class Settings(BaseSettings):
         ),
     )
 
+    cache_ttl_seconds: int = Field(
+        default=600,
+        description=(
+            "Dashboard aggregate cache TTL in seconds. Zero disables caching; "
+            "otherwise values must be between five and fifteen minutes."
+        ),
+    )
+
+    cache_max_entries: int = Field(
+        default=256,
+        ge=1,
+        description="Maximum number of dashboard aggregate results kept in memory.",
+    )
+
     allow_http_source_url: bool = Field(
         default=False,
         description=(
@@ -140,6 +154,13 @@ class Settings(BaseSettings):
             allowed_hosts={"cotizaciones.bcu.gub.uy"},
             allow_http=False,
         )
+
+    @field_validator("cache_ttl_seconds")
+    @classmethod
+    def _validate_cache_ttl(cls, value: int) -> int:
+        if value != 0 and not 300 <= value <= 900:
+            raise ValueError("cache_ttl_seconds must be 0 or between 300 and 900")
+        return value
 
 
 def get_settings() -> Settings:

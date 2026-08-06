@@ -44,6 +44,8 @@ _TEST_ENV: dict[str, str] = {
     "BCU_API_URL": (
         "https://cotizaciones.bcu.gub.uy/wscotizaciones/servlet/awsbcucotizaciones"
     ),
+    "CACHE_TTL_SECONDS": "600",
+    "CACHE_MAX_ENTRIES": "256",
 }
 
 # Apply once at import time. Individual tests can override a variable by
@@ -52,6 +54,17 @@ _TEST_ENV: dict[str, str] = {
 # the cached value is missing — see :mod:`app.config`).
 for key, value in _TEST_ENV.items():
     os.environ.setdefault(key, value)
+
+
+@pytest.fixture(autouse=True)
+def reset_query_cache():
+    """Keep process-global aggregate cache state isolated per test."""
+
+    from app.services.query_cache import clear_cache
+
+    clear_cache()
+    yield
+    clear_cache()
 
 
 # ---------------------------------------------------------------------------
