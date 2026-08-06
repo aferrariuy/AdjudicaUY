@@ -13,9 +13,13 @@ EXPECTED_CACHE_HEADER = "public, max-age=31536000, immutable"
 
 
 def test_static_css_has_cache_control(client: Any) -> None:
-    """GET /static/css/style.css returns Cache-Control with immutable."""
+    """GET /static/css/fonts.css returns Cache-Control with immutable.
 
-    response = client.get("/static/css/style.css")
+    Uses fonts.css (committed) rather than style.css (compiled Tailwind
+    output, gitignored — absent in CI checkouts).
+    """
+
+    response = client.get("/static/css/fonts.css")
     assert response.status_code == 200
     cache_control = response.headers.get("Cache-Control", "")
     assert "public" in cache_control
@@ -53,9 +57,9 @@ def test_index_returns_gzip_when_accepted(client: Any) -> None:
 
 
 def test_static_css_returns_gzip_when_accepted(client: Any) -> None:
-    """GET /static/css/style.css returns gzip when client accepts it."""
+    """GET /static/css/fonts.css returns gzip when client accepts it."""
 
-    response = client.get("/static/css/style.css", headers={"Accept-Encoding": "gzip"})
+    response = client.get("/static/css/fonts.css", headers={"Accept-Encoding": "gzip"})
     assert response.status_code == 200
     assert response.headers.get("Content-Encoding") == "gzip"
 
