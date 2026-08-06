@@ -9,8 +9,8 @@
 #   * tailwind — compiles ``app/static/css/style.css`` from Tailwind sources
 #   * runtime  — copies the venv + compiled CSS + source, runs as non-root
 #
-# Python 3.13 to match the project's runtime (see ``.python-version`` and
-# the scraper/type annotations in ``app/`` and ``scraper/``).
+# Python 3.13 to match the project's runtime and the type annotations in
+# ``app/`` and ``scraper/``.
 
 # ---------------------------------------------------------------------------
 # builder

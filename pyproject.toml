@@ -16,7 +16,6 @@ select = ["E", "F", "I", "UP", "B", "S", "A", "C4", "SIM", "TCH"]
 "app/**" = ["B008"]   # Depends() in FastAPI route defaults is the standard pattern
 "scraper/**" = ["S320"]  # lxml parsing is the core scraper functionality
 "tests/**" = ["S101"]  # allow assert in tests
-"tests/scraper/test_rss_feed.py" = ["E501"]  # XML test data strings are inherently long
 "tests/scraper/test_xml_report.py" = ["E501"]  # XML test data strings are inherently long
 
 # ---------------------------------------------------------------------------
