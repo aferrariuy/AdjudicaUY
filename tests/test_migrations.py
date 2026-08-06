@@ -196,3 +196,86 @@ def test_dashboard_aggregate_indexes_migration_preserves_rows_on_sqlite() -> Non
             ).all()
             == original_rows["adjudicacion"]
         )
+
+
+def test_adjudicacion_compra_document_index_migration_preserves_rows_on_sqlite() -> (
+    None
+):
+    """The adjudicacion purchase/document index preserves rows on SQLite."""
+
+    alembic_migration = pytest.importorskip("alembic.migration")
+    alembic_operations = pytest.importorskip("alembic.operations")
+    from migrations.versions import adjudicacion_compra_document_index
+
+    MigrationContext = alembic_migration.MigrationContext
+    Operations = alembic_operations.Operations
+
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE adjudicacion (
+                id INTEGER PRIMARY KEY,
+                compra_id INTEGER NOT NULL,
+                tipo_doc_prov VARCHAR(10),
+                nro_doc_prov VARCHAR(50)
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            """
+            INSERT INTO adjudicacion (id, compra_id, tipo_doc_prov, nro_doc_prov)
+            VALUES (1, 10, 'RUT', '123'), (2, 20, 'CI', '456')
+            """
+        )
+        original_rows = connection.exec_driver_sql(
+            """
+            SELECT id, compra_id, tipo_doc_prov, nro_doc_prov
+            FROM adjudicacion
+            ORDER BY id
+            """
+        ).all()
+
+        context = MigrationContext.configure(connection)
+        operations = Operations(context)
+        original = adjudicacion_compra_document_index.op
+        adjudicacion_compra_document_index.op = operations
+        try:
+            adjudicacion_compra_document_index.upgrade()
+        finally:
+            adjudicacion_compra_document_index.op = original
+
+        indexes = inspect(connection).get_indexes("adjudicacion")
+        index = next(
+            index
+            for index in indexes
+            if index["name"] == "ix_adjudicacion_compra_document"
+        )
+        assert index["column_names"] == [
+            "compra_id",
+            "tipo_doc_prov",
+            "nro_doc_prov",
+        ]
+
+        context = MigrationContext.configure(connection)
+        operations = Operations(context)
+        original = adjudicacion_compra_document_index.op
+        adjudicacion_compra_document_index.op = operations
+        try:
+            adjudicacion_compra_document_index.downgrade()
+        finally:
+            adjudicacion_compra_document_index.op = original
+
+        assert "ix_adjudicacion_compra_document" not in {
+            index["name"] for index in inspect(connection).get_indexes("adjudicacion")
+        }
+        assert (
+            connection.exec_driver_sql(
+                """
+                SELECT id, compra_id, tipo_doc_prov, nro_doc_prov
+                FROM adjudicacion
+                ORDER BY id
+                """
+            ).all()
+            == original_rows
+        )
