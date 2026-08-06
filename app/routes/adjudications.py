@@ -984,7 +984,12 @@ def _build_company_context(
         market_filters = replace(filters, company_doc_exact=None)
         market = cached_aggregate("kpi_summary", kpi_summary, db, market_filters)
         summary = replace(
-            company_summary(db, filters, market_total=market.total_amount),
+            cached_aggregate(
+                "company_summary",
+                lambda s, f: company_summary(s, f, market_total=market.total_amount),
+                db,
+                filters,
+            ),
             display_name=identity_name,
         )
 
@@ -1014,12 +1019,22 @@ def _build_company_context(
     win_rate = (
         CompanyWinRate(0, 0, None)
         if not decoded_type or not decoded_number
-        else company_win_rate(db, decoded_type, decoded_number, filters)
+        else cached_aggregate(
+            "company_win_rate",
+            lambda s, f: company_win_rate(s, decoded_type, decoded_number, f),
+            db,
+            filters,
+        )
     )
     competitors = (
         []
         if not decoded_type or not decoded_number
-        else company_competitors(db, decoded_type, decoded_number, filters)
+        else cached_aggregate(
+            "company_competitors",
+            lambda s, f: company_competitors(s, decoded_type, decoded_number, f),
+            db,
+            filters,
+        )
     )
     ranking_rows = (
         []
@@ -1035,7 +1050,13 @@ def _build_company_context(
     top_article_rows = (
         []
         if not decoded_type or not decoded_number
-        else top_articles(db, filters, limit=RANKING_LIMIT)
+        else cached_aggregate(
+            "top_articles",
+            top_articles,
+            db,
+            filters,
+            limit=RANKING_LIMIT,
+        )
     )
 
     return {

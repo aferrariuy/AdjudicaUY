@@ -1,4 +1,4 @@
-"""Process-local TTL/LRU cache for pure dashboard aggregate results."""
+"""Process-local TTL/LRU cache for whitelisted dashboard and company aggregates."""
 
 from __future__ import annotations
 
@@ -28,10 +28,14 @@ _CACHEABLE_AGGREGATES = frozenset(
         "ranking_by_company",
         "ranking_by_organism",
         "distinct_organisms",
+        "company_win_rate",
+        "company_competitors",
+        "company_summary",
+        "top_articles",
     }
 )
 _LIMIT_AWARE_AGGREGATES = frozenset(
-    {"ranking_by_company", "ranking_by_organism", "distinct_organisms"}
+    {"ranking_by_company", "ranking_by_organism", "distinct_organisms", "top_articles"}
 )
 _CacheEntry = tuple[float, Any]
 _cache: OrderedDict[str, _CacheEntry] = OrderedDict()

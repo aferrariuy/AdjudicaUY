@@ -65,13 +65,51 @@ def test_cache_miss_then_hit_calls_aggregate_once(monkeypatch) -> None:
     assert aggregate.call_count == 2
 
 
-def test_cache_rejects_non_whitelisted_aggregate(monkeypatch) -> None:
+def test_cache_accepts_company_deep_path_aggregates(monkeypatch) -> None:
     monkeypatch.setattr("app.services.query_cache.get_settings", lambda: _settings())
-    aggregate = Mock()
+    filters = AdjudicationFilters(company_doc_exact=("RUT", "42"))
 
-    with pytest.raises(ValueError, match="not cacheable"):
-        cached_aggregate("list_adjudications", aggregate, Mock(), AdjudicationFilters())
-    aggregate.assert_not_called()
+    for name in (
+        "company_win_rate",
+        "company_competitors",
+        "company_summary",
+        "top_articles",
+    ):
+        aggregate = Mock(return_value=name)
+
+        assert cached_aggregate(name, aggregate, Mock(), filters) == name
+        assert cached_aggregate(name, aggregate, Mock(), filters) == name
+        aggregate.assert_called_once()
+
+
+@pytest.mark.parametrize("ttl", [600, 0])
+def test_cache_rejects_non_whitelisted_aggregates(monkeypatch, ttl: int) -> None:
+    monkeypatch.setattr(
+        "app.services.query_cache.get_settings", lambda: _settings(ttl=ttl)
+    )
+
+    for name in ("list_adjudications", "count_adjudications", "iter_adjudications"):
+        aggregate = Mock()
+        with pytest.raises(ValueError, match="not cacheable"):
+            cached_aggregate(name, aggregate, Mock(), AdjudicationFilters())
+        aggregate.assert_not_called()
+
+
+def test_top_articles_limit_is_keyed_and_forwarded(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.query_cache.get_settings", lambda: _settings())
+    filters = AdjudicationFilters(company_doc_exact=("RUT", "42"))
+
+    assert build_cache_key("top_articles", filters, limit=10) != build_cache_key(
+        "top_articles", filters, limit=20
+    )
+    assert build_cache_key("top_articles", filters, limit=10) != build_cache_key(
+        "top_articles", filters, limit=None
+    )
+
+    aggregate = Mock(return_value=[])
+    session = Mock()
+    cached_aggregate("top_articles", aggregate, session, filters, limit=10)
+    aggregate.assert_called_once_with(session, filters, limit=10)
 
 
 def test_cache_expiry_reexecutes_after_ttl(monkeypatch) -> None:
@@ -101,6 +139,25 @@ def test_zero_ttl_bypasses_lookup_and_storage(monkeypatch) -> None:
     assert cached_aggregate("kpi_summary", aggregate, Mock(), filters) == "first"
     assert cached_aggregate("kpi_summary", aggregate, Mock(), filters) == "second"
     assert aggregate.call_count == 2
+
+
+def test_zero_ttl_bypasses_storage_for_company_deep_paths(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "app.services.query_cache.get_settings", lambda: _settings(ttl=0)
+    )
+    filters = AdjudicationFilters(company_doc_exact=("RUT", "42"))
+
+    for name in (
+        "company_win_rate",
+        "company_competitors",
+        "company_summary",
+        "top_articles",
+    ):
+        aggregate = Mock(side_effect=["first", "second"])
+
+        assert cached_aggregate(name, aggregate, Mock(), filters, limit=10) == "first"
+        assert cached_aggregate(name, aggregate, Mock(), filters, limit=10) == "second"
+        assert aggregate.call_count == 2
 
 
 def test_cache_evicts_least_recently_used_entry(monkeypatch) -> None:

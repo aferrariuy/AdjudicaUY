@@ -24,6 +24,7 @@ from app.routes.adjudications import _build_concentration_chart_payload
 from app.services.adjudication_service import (
     AdjudicationFilters,
     CompanyProfileSummary,
+    CompanyWinRate,
     ConcentrationResult,
     KpiSummary,
     filters_from_query_params,
@@ -1551,14 +1552,35 @@ def test_company_route_passes_cached_market_kpi_and_preserves_key_identity(
     assert summary_mock.call_args.kwargs["market_total"] == kpi.total_amount
 
 
-def test_company_context_cache_hits_four_aggregates(db_session) -> None:
+def test_company_context_cache_hits_eight_aggregates(db_session) -> None:
     from app.routes.adjudications import _build_company_context
 
     raw_params = {
         "date_from": f"{CURRENT_YEAR}-01-01",
         "date_to": f"{CURRENT_YEAR}-12-31",
     }
+    summary = CompanyProfileSummary(
+        display_name=None,
+        total_amount=Decimal("0"),
+        total=0,
+        purchase_count=0,
+        organism_count=0,
+        share_of_total=Decimal("0"),
+    )
     with (
+        patch(
+            "app.routes.adjudications.company_summary", return_value=summary
+        ) as summary_mock,
+        patch(
+            "app.routes.adjudications.company_win_rate",
+            return_value=CompanyWinRate(0, 0, None),
+        ) as win_rate_mock,
+        patch(
+            "app.routes.adjudications.company_competitors", return_value=[]
+        ) as competitors_mock,
+        patch(
+            "app.routes.adjudications.top_articles", return_value=[]
+        ) as articles_mock,
         patch("app.routes.adjudications.monthly_trend", return_value=[]) as trend_mock,
         patch(
             "app.routes.adjudications.concentration_ratio",
@@ -1588,12 +1610,37 @@ def test_company_context_cache_hits_four_aggregates(db_session) -> None:
     assert concentration_mock.call_count == 1
     assert ranking_mock.call_count == 1
     assert organisms_mock.call_count == 1
+    assert summary_mock.call_count == 1
+    assert win_rate_mock.call_count == 1
+    assert competitors_mock.call_count == 1
+    assert articles_mock.call_count == 1
 
 
-def test_company_context_cache_cold_miss_runs_four_aggregates(db_session) -> None:
+def test_company_context_cache_cold_miss_runs_eight_aggregates(db_session) -> None:
     from app.routes.adjudications import _build_company_context
 
+    summary = CompanyProfileSummary(
+        display_name=None,
+        total_amount=Decimal("0"),
+        total=0,
+        purchase_count=0,
+        organism_count=0,
+        share_of_total=Decimal("0"),
+    )
     with (
+        patch(
+            "app.routes.adjudications.company_summary", return_value=summary
+        ) as summary_mock,
+        patch(
+            "app.routes.adjudications.company_win_rate",
+            return_value=CompanyWinRate(0, 0, None),
+        ) as win_rate_mock,
+        patch(
+            "app.routes.adjudications.company_competitors", return_value=[]
+        ) as competitors_mock,
+        patch(
+            "app.routes.adjudications.top_articles", return_value=[]
+        ) as articles_mock,
         patch("app.routes.adjudications.monthly_trend", return_value=[]) as trend_mock,
         patch(
             "app.routes.adjudications.concentration_ratio",
@@ -1620,6 +1667,10 @@ def test_company_context_cache_cold_miss_runs_four_aggregates(db_session) -> Non
     assert concentration_mock.call_count == 1
     assert ranking_mock.call_count == 1
     assert organisms_mock.call_count == 1
+    assert summary_mock.call_count == 1
+    assert win_rate_mock.call_count == 1
+    assert competitors_mock.call_count == 1
+    assert articles_mock.call_count == 1
 
 
 def test_company_cache_keys_differ_from_dashboard_keys() -> None:
@@ -1639,10 +1690,14 @@ def test_company_cache_keys_differ_from_dashboard_keys() -> None:
         "concentration_ratio",
         "ranking_by_organism",
         "distinct_organisms",
+        "company_win_rate",
+        "company_competitors",
+        "company_summary",
+        "top_articles",
     ):
         limit = (
             10
-            if name == "ranking_by_organism"
+            if name in {"ranking_by_organism", "top_articles"}
             else 200
             if name == "distinct_organisms"
             else None
@@ -1657,6 +1712,58 @@ def test_company_cache_keys_differ_from_dashboard_keys() -> None:
     assert build_cache_key("distinct_organisms", company_filters, limit=100) != (
         build_cache_key("distinct_organisms", company_filters, limit=200)
     )
+
+
+def test_company_context_company_summary_uses_market_total(db_session) -> None:
+    from app.routes.adjudications import _build_company_context
+
+    kpi = KpiSummary(Decimal("900.00"), Decimal("0"), 3, 2, 4)
+    summary = CompanyProfileSummary(
+        display_name=None,
+        total_amount=Decimal("300.00"),
+        total=1,
+        purchase_count=1,
+        organism_count=1,
+        share_of_total=Decimal("0.33"),
+    )
+    raw_params = {
+        "date_from": f"{CURRENT_YEAR}-01-01",
+        "date_to": f"{CURRENT_YEAR}-12-31",
+    }
+    with (
+        patch("app.routes.adjudications.kpi_summary", return_value=kpi) as kpi_mock,
+        patch(
+            "app.routes.adjudications.company_summary", return_value=summary
+        ) as summary_mock,
+        patch(
+            "app.routes.adjudications.lookup_company_identity",
+            side_effect=["Initial Name", "Fresh Name"],
+        ),
+        patch(
+            "app.routes.adjudications.company_win_rate",
+            return_value=CompanyWinRate(0, 0, None),
+        ),
+        patch("app.routes.adjudications.company_competitors", return_value=[]),
+        patch("app.routes.adjudications.top_articles", return_value=[]),
+    ):
+        first = _build_company_context(
+            db_session,
+            raw_type="RUT",
+            raw_number="42",
+            raw_params=raw_params.copy(),
+        )
+        second = _build_company_context(
+            db_session,
+            raw_type="RUT",
+            raw_number="42",
+            raw_params=raw_params.copy(),
+        )
+
+    assert kpi_mock.call_count == 1
+    assert summary_mock.call_count == 1
+    assert summary_mock.call_args.kwargs["market_total"] == Decimal("900.00")
+    assert first["company_summary"].display_name == "Initial Name"
+    assert second["company_summary"].display_name == "Fresh Name"
 
 
 def test_company_profile_hides_name_filter_but_keeps_organism_filter(
