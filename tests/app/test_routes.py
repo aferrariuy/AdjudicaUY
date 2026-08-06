@@ -11,8 +11,10 @@ import json
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
+from unittest.mock import patch
 
 from bs4 import BeautifulSoup
+from fastapi.responses import HTMLResponse
 
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
@@ -21,6 +23,7 @@ from app.routes.adjudications import _build_concentration_chart_payload
 from app.services.adjudication_service import (
     AdjudicationFilters,
     ConcentrationResult,
+    KpiSummary,
     filters_from_query_params,
 )
 
@@ -240,6 +243,112 @@ def test_adjudications_partial_logs_htmx_false_for_plain_get(
         client.get("/adjudications")
 
     assert any("htmx=False" in record.message for record in caplog.records)
+
+
+def test_index_uses_kpi_total_for_pagination_without_count(
+    client: TestClient,
+) -> None:
+    kpi = KpiSummary(
+        total_amount=Decimal("0"),
+        average_amount=Decimal("0"),
+        purchase_count=0,
+        company_count=0,
+        total=25,
+    )
+    with (
+        patch("app.routes.adjudications.kpi_summary", return_value=kpi),
+        patch(
+            "app.routes.adjudications.count_adjudications",
+            side_effect=AssertionError("index must not call count_adjudications"),
+        ) as count_mock,
+        patch(
+            "app.routes.adjudications._render",
+            return_value=HTMLResponse("ok"),
+        ) as render_mock,
+    ):
+        response = client.get("/")
+
+    assert response.status_code == 200
+    assert render_mock.call_args.args[2]["total"] == 25
+    count_mock.assert_not_called()
+
+
+def test_index_redirect_uses_kpi_total_without_count(
+    client: TestClient,
+) -> None:
+    kpi = KpiSummary(
+        total_amount=Decimal("0"),
+        average_amount=Decimal("0"),
+        purchase_count=0,
+        company_count=0,
+        total=25,
+    )
+    with (
+        patch("app.routes.adjudications.kpi_summary", return_value=kpi),
+        patch(
+            "app.routes.adjudications.count_adjudications",
+            side_effect=AssertionError("index must not call count_adjudications"),
+        ) as count_mock,
+    ):
+        response = client.get("/?page=999", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"].endswith("?page=3")
+    count_mock.assert_not_called()
+
+
+def test_full_adjudications_partial_uses_kpi_total_without_count(
+    client: TestClient,
+) -> None:
+    kpi = KpiSummary(
+        total_amount=Decimal("0"),
+        average_amount=Decimal("0"),
+        purchase_count=0,
+        company_count=0,
+        total=25,
+    )
+    with (
+        patch("app.routes.adjudications.kpi_summary", return_value=kpi),
+        patch(
+            "app.routes.adjudications.count_adjudications",
+            side_effect=AssertionError(
+                "full partial must not call count_adjudications"
+            ),
+        ) as count_mock,
+        patch(
+            "app.routes.adjudications._render",
+            return_value=HTMLResponse("ok"),
+        ) as render_mock,
+    ):
+        response = client.get("/adjudications")
+
+    assert response.status_code == 200
+    assert render_mock.call_args.args[2]["total"] == 25
+    count_mock.assert_not_called()
+
+
+def test_table_only_partial_keeps_count_without_kpi(
+    client: TestClient,
+) -> None:
+    with (
+        patch(
+            "app.routes.adjudications.count_adjudications", return_value=1
+        ) as count_mock,
+        patch(
+            "app.routes.adjudications.kpi_summary",
+            side_effect=AssertionError("table-only partial must not call KPI"),
+        ) as kpi_mock,
+        patch(
+            "app.routes.adjudications._render",
+            return_value=HTMLResponse("ok"),
+        ) as render_mock,
+    ):
+        response = client.get("/adjudications?partial=table")
+
+    assert response.status_code == 200
+    assert render_mock.call_args.args[2]["total"] == 1
+    count_mock.assert_called_once()
+    kpi_mock.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
