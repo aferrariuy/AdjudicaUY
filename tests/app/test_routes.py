@@ -1549,6 +1549,114 @@ def test_company_route_passes_cached_market_kpi_and_preserves_key_identity(
     assert summary_mock.call_args.kwargs["market_total"] == kpi.total_amount
 
 
+def test_company_context_cache_hits_four_aggregates(db_session) -> None:
+    from app.routes.adjudications import _build_company_context
+
+    raw_params = {
+        "date_from": f"{CURRENT_YEAR}-01-01",
+        "date_to": f"{CURRENT_YEAR}-12-31",
+    }
+    with (
+        patch("app.routes.adjudications.monthly_trend", return_value=[]) as trend_mock,
+        patch(
+            "app.routes.adjudications.concentration_ratio",
+            return_value=ConcentrationResult(None, 0, 0),
+        ) as concentration_mock,
+        patch(
+            "app.routes.adjudications.ranking_by_organism", return_value=[]
+        ) as ranking_mock,
+        patch(
+            "app.routes.adjudications.distinct_organisms", return_value=[]
+        ) as organisms_mock,
+    ):
+        _build_company_context(
+            db_session,
+            raw_type="RUT",
+            raw_number="42",
+            raw_params=raw_params.copy(),
+        )
+        _build_company_context(
+            db_session,
+            raw_type="RUT",
+            raw_number="42",
+            raw_params=raw_params.copy(),
+        )
+
+    assert trend_mock.call_count == 1
+    assert concentration_mock.call_count == 1
+    assert ranking_mock.call_count == 1
+    assert organisms_mock.call_count == 1
+
+
+def test_company_context_cache_cold_miss_runs_four_aggregates(db_session) -> None:
+    from app.routes.adjudications import _build_company_context
+
+    with (
+        patch("app.routes.adjudications.monthly_trend", return_value=[]) as trend_mock,
+        patch(
+            "app.routes.adjudications.concentration_ratio",
+            return_value=ConcentrationResult(None, 0, 0),
+        ) as concentration_mock,
+        patch(
+            "app.routes.adjudications.ranking_by_organism", return_value=[]
+        ) as ranking_mock,
+        patch(
+            "app.routes.adjudications.distinct_organisms", return_value=[]
+        ) as organisms_mock,
+    ):
+        _build_company_context(
+            db_session,
+            raw_type="RUT",
+            raw_number="42",
+            raw_params={
+                "date_from": f"{CURRENT_YEAR}-01-01",
+                "date_to": f"{CURRENT_YEAR}-12-31",
+            },
+        )
+
+    assert trend_mock.call_count == 1
+    assert concentration_mock.call_count == 1
+    assert ranking_mock.call_count == 1
+    assert organisms_mock.call_count == 1
+
+
+def test_company_cache_keys_differ_from_dashboard_keys() -> None:
+    from dataclasses import replace
+
+    from app.services.query_cache import build_cache_key
+
+    company_filters = AdjudicationFilters(
+        company_doc_exact=("RUT", "42"),
+        date_from=date(CURRENT_YEAR, 1, 1),
+        date_to=date(CURRENT_YEAR, 12, 31),
+    )
+    dashboard_filters = replace(company_filters, company_doc_exact=None)
+
+    for name in (
+        "monthly_trend",
+        "concentration_ratio",
+        "ranking_by_organism",
+        "distinct_organisms",
+    ):
+        limit = (
+            10
+            if name == "ranking_by_organism"
+            else 200
+            if name == "distinct_organisms"
+            else None
+        )
+        assert build_cache_key(name, company_filters, limit=limit) != build_cache_key(
+            name, dashboard_filters, limit=limit
+        )
+
+    assert build_cache_key("ranking_by_organism", company_filters, limit=10) != (
+        build_cache_key("ranking_by_organism", company_filters, limit=20)
+    )
+    assert build_cache_key("distinct_organisms", company_filters, limit=100) != (
+        build_cache_key("distinct_organisms", company_filters, limit=200)
+    )
+
+
 def test_company_profile_hides_name_filter_but_keeps_organism_filter(
     client: TestClient, make_adjudication
 ) -> None:

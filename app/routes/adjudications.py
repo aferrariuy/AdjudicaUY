@@ -1002,12 +1002,16 @@ def _build_company_context(
         )
     )
     trend_rows = (
-        [] if not decoded_type or not decoded_number else monthly_trend(db, filters)
+        []
+        if not decoded_type or not decoded_number
+        else cached_aggregate("monthly_trend", monthly_trend, db, filters)
     )
     concentration = (
         ConcentrationResult(None, 0, 0)
         if not decoded_type or not decoded_number
-        else concentration_ratio(db, filters)
+        else cached_aggregate(
+            "concentration_ratio", concentration_ratio, db, filters
+        )
     )
     win_rate = (
         CompanyWinRate(0, 0, None)
@@ -1022,7 +1026,13 @@ def _build_company_context(
     ranking_rows = (
         []
         if not decoded_type or not decoded_number
-        else ranking_by_organism(db, filters, limit=RANKING_LIMIT)
+        else cached_aggregate(
+            "ranking_by_organism",
+            ranking_by_organism,
+            db,
+            filters,
+            limit=RANKING_LIMIT,
+        )
     )
     top_article_rows = (
         []
@@ -1048,7 +1058,13 @@ def _build_company_context(
         "organisms": (
             []
             if not decoded_type or not decoded_number
-            else distinct_organisms(db, filters, limit=ORGANISM_SUGGEST_LIMIT)
+            else cached_aggregate(
+                "distinct_organisms",
+                distinct_organisms,
+                db,
+                filters,
+                limit=ORGANISM_SUGGEST_LIMIT,
+            )
         ),
         "trend_rows": trend_rows,
         "trend_payload": _build_trend_chart_payload(trend_rows),
