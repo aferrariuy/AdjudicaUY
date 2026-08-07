@@ -3,7 +3,6 @@
 from fastapi import APIRouter
 
 from app.main import HeadAwareAPIRoute
-
 from app.routes.about import router as about_router
 from app.routes.company import router as company_router
 from app.routes.dashboard import router as dashboard_router

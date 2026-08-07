@@ -10,9 +10,7 @@ from fastapi.testclient import TestClient
 
 
 @pytest.mark.parametrize("path", ["/", "/healthz"])
-def test_head_get_routes_return_empty_success(
-    client: TestClient, path: str
-) -> None:
+def test_head_get_routes_return_empty_success(client: TestClient, path: str) -> None:
     response = client.head(path)
 
     assert response.status_code == 200

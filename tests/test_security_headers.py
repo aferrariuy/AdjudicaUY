@@ -196,7 +196,7 @@ def test_csp_nonce_varies_and_exists_on_error_html(client: TestClient) -> None:
 
     def nonce(response: Any) -> str:
         policy = response.headers["content-security-policy"]
-        return policy.split("'nonce-", 1)[1].split("'", 1)[0]
+        return str(policy.split("'nonce-", 1)[1].split("'", 1)[0])
 
     assert nonce(first) != nonce(second)
     assert not_found.status_code == 404
