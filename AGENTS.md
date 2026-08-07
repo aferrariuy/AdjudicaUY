@@ -64,9 +64,12 @@ app/                  # FastAPI web app
   config.py           # Pydantic Settings; URL validators enforce HTTPS + host allowlist
   database.py         # Lazy engine + session factory (pool_pre_ping), get_db dependency
   formatting.py       # es-UY number formatting as Jinja filters (no system locale needed)
+  presenters.py       # Pure view-shaping layer: chart payloads, SEO context, page numbers (no DB/session)
   models/             # ORM: Compra, Adjudicacion, Oferente (3 tables)
-  routes/             # HTTP layer — currently a single adjudications.py (9 routes)
-  services/           # adjudication_service.py (all SQLAlchemy queries) + query_cache.py
+  routes/             # HTTP layer split by resource: common.py, dashboard.py, organism.py,
+                      # company.py, about.py — aggregated into one router via routes/__init__.py
+  services/           # Domain modules: filters.py, listing.py, dashboard.py, company.py, catalog.py,
+                      # adjudication_service.py (compat/deprecation facade) + query_cache.py
   templates/          # pages/ (5) + partials/ (9): Jinja2 + HTMX fragments
 
 scraper/              # Worker pipeline: fetch → parse → enrich → normalize → persist
@@ -95,13 +98,13 @@ tests/
 
 ## HTTP Surface
 
-All routes live in `app/routes/adjudications.py` and are excluded from OpenAPI schema.
+All routes live in `app/routes/`, split by resource (`common.py`, `dashboard.py`, `organism.py`, `company.py`, `about.py`) and aggregated into one router via `app/routes/__init__.py`. Everything is excluded from OpenAPI schema.
 
 | Path | Handler | Purpose |
 |---|---|---|
 | `GET /` | `index` | Full dashboard page: filters, listing, KPI, trend, concentration, rankings |
 | `GET /adjudications` | `adjudications_partial` | HTMX partial for the results container; `partial=table` skips aggregates (pagination) |
-| `GET /adjudications/export` | `_stream_csv_response` | CSV export of the filtered listing |
+| `GET /adjudications/export` | `export_adjudications` | CSV export of the filtered listing (streaming via `_stream_csv_response` in `common.py`) |
 | `GET /organism/{name}` | `organism_detail` | Full organism profile page |
 | `GET /organism/{name}/partial` | `organism_detail_partial` | HTMX-swappable organism profile body |
 | `GET /company/{tipo_doc_prov}/{nro_doc_prov}` | `company_detail` | Full company profile page (summary, win rate, competitors, rankings) |
@@ -123,7 +126,7 @@ Child rows link via `compra_id` FK with `ON DELETE CASCADE`. The unique constrai
 
 ## Key Patterns
 
-- **Layered web app**: routes parse/validate params → call service → shape view-model → render. Services own every SQLAlchemy query; routes never touch the ORM. Templates read display DTOs (`AdjudicationRow` frozen dataclass), never ORM models.
+- **Layered web app**: routes parse/validate params → call service → shape view-model → render. Services own every SQLAlchemy query; routes never touch the ORM. View-model composers stay in the route modules; pure view shaping (Chart.js payloads, SEO context, pagination numbers) lives in `app/presenters.py` (no DB/session access). Templates read display DTOs (`AdjudicationRow` frozen dataclass), never ORM models.
 - **App factory** (`create_app()`): no import-time side effects; templates on `app.state` (tests can swap the Jinja environment); `lifespan` fails fast on bad config and warms the engine.
 - **Lazy engine/session**: `get_engine()`/`get_session_factory()` build once per process; `pool_pre_ping` guards stale connections; `expire_on_commit=False`; `get_db` yields and closes a request-scoped session.
 - **Idempotent ingestion**: `ON CONFLICT DO NOTHING` on the natural key of all three tables (compra first, then resolve PKs, then children). `run_scrape` batches with `flush_size` (1000) / `flush_interval` (7 days) thresholds and drains the buffer in `finally`.
@@ -134,7 +137,7 @@ Child rows link via `compra_id` FK with `ON DELETE CASCADE`. The unique constrai
 - **Aggregate cache** (`query_cache.py`): process-local TTL/LRU over a **whitelist** of aggregate names; normalized JSON keys (limit only for limit-aware aggregates); `RLock`; TTL is 0 (disabled) or 300–900s; LRU eviction at `cache_max_entries`. Cache is TTL-only — no invalidation on scrape.
 - **HTMX partials**: full-page routes render the same data as their `/partial` counterparts; `partial=table` skips the expensive aggregates for pagination requests; `HX-Request` is logged for tracing.
 - **Validation**: `validate_date_params` raises `DateValidationError` (unparseable, reversed range, >5 years); full-page routes render 422 with the user's input preserved; out-of-bounds page numbers redirect (302) to the last valid page instead of 4xx.
-- **SEO**: per-route `_build_seo_context` (meta + OG), sitemap.xml, robots.txt, canonical paths.
+- **SEO**: per-route `_build_seo_context` (meta + OG, in `app/presenters.py`), sitemap.xml, robots.txt, canonical paths.
 - **es-UY formatting**: `app/formatting.py` implements thousands/decimal/percent formatting as Jinja filters because the deploy image lacks the `es_UY` locale.
 - **Config safety**: Pydantic Settings validators enforce HTTPS and a host allowlist (`comprasestatales.gub.uy`, `cotizaciones.bcu.gub.uy`); test mode (via `PYTEST_CURRENT_TEST`) permits `example.test` hosts; credentials are stripped from log lines.
 
