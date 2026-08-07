@@ -26,7 +26,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from app.config import get_settings
 from app.database import get_db, get_engine
 from app.formatting import format_count, format_percent, format_uyu
-from app.routes.adjudications import router as adjudications_router
+from app.routes import router
 from app.services.adjudication_service import all_companies, all_organisms
 
 logger = logging.getLogger(__name__)
@@ -186,7 +186,7 @@ def create_app() -> FastAPI:
         )
         return Response(content=body, media_type="application/xml")
 
-    app.include_router(adjudications_router)
+    app.include_router(router)
 
     return app
 

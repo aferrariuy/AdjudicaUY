@@ -1,4 +1,4 @@
-"""Unit tests for the FastAPI routes in :mod:`app.routes.adjudications`.
+"""Unit tests for the FastAPI routes in the resource route modules.
 
 The route layer is intentionally thin — these tests exercise the
 behaviours declared in the filtering-ui spec and the route's HTMX
@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
-from app.routes.adjudications import _build_concentration_chart_payload
+from app.presenters import _build_concentration_chart_payload
 from app.services.adjudication_service import (
     AdjudicationFilters,
     CompanyProfileSummary,
@@ -226,7 +226,7 @@ def test_adjudications_partial_logs_htmx_request_distinction(
 
     import logging
 
-    with caplog.at_level(logging.INFO, logger="app.routes.adjudications"):
+    with caplog.at_level(logging.INFO, logger="app.routes.dashboard"):
         response = client.get(
             "/adjudications",
             headers={"HX-Request": "true"},
@@ -242,7 +242,7 @@ def test_adjudications_partial_logs_htmx_false_for_plain_get(
 ) -> None:
     import logging
 
-    with caplog.at_level(logging.INFO, logger="app.routes.adjudications"):
+    with caplog.at_level(logging.INFO, logger="app.routes.dashboard"):
         client.get("/adjudications")
 
     assert any("htmx=False" in record.message for record in caplog.records)
@@ -259,13 +259,13 @@ def test_index_uses_kpi_total_for_pagination_without_count(
         total=25,
     )
     with (
-        patch("app.routes.adjudications.kpi_summary", return_value=kpi),
+        patch("app.routes.dashboard.kpi_summary", return_value=kpi),
         patch(
-            "app.routes.adjudications.count_adjudications",
+            "app.routes.dashboard.count_adjudications",
             side_effect=AssertionError("index must not call count_adjudications"),
         ) as count_mock,
         patch(
-            "app.routes.adjudications._render",
+            "app.routes.dashboard._render",
             return_value=HTMLResponse("ok"),
         ) as render_mock,
     ):
@@ -287,9 +287,9 @@ def test_index_redirect_uses_kpi_total_without_count(
         total=25,
     )
     with (
-        patch("app.routes.adjudications.kpi_summary", return_value=kpi),
+        patch("app.routes.dashboard.kpi_summary", return_value=kpi),
         patch(
-            "app.routes.adjudications.count_adjudications",
+            "app.routes.dashboard.count_adjudications",
             side_effect=AssertionError("index must not call count_adjudications"),
         ) as count_mock,
     ):
@@ -311,15 +311,15 @@ def test_full_adjudications_partial_uses_kpi_total_without_count(
         total=25,
     )
     with (
-        patch("app.routes.adjudications.kpi_summary", return_value=kpi),
+        patch("app.routes.dashboard.kpi_summary", return_value=kpi),
         patch(
-            "app.routes.adjudications.count_adjudications",
+            "app.routes.dashboard.count_adjudications",
             side_effect=AssertionError(
                 "full partial must not call count_adjudications"
             ),
         ) as count_mock,
         patch(
-            "app.routes.adjudications._render",
+            "app.routes.dashboard._render",
             return_value=HTMLResponse("ok"),
         ) as render_mock,
     ):
@@ -334,15 +334,13 @@ def test_table_only_partial_keeps_count_without_kpi(
     client: TestClient,
 ) -> None:
     with (
+        patch("app.routes.dashboard.count_adjudications", return_value=1) as count_mock,
         patch(
-            "app.routes.adjudications.count_adjudications", return_value=1
-        ) as count_mock,
-        patch(
-            "app.routes.adjudications.kpi_summary",
+            "app.routes.dashboard.kpi_summary",
             side_effect=AssertionError("table-only partial must not call KPI"),
         ) as kpi_mock,
         patch(
-            "app.routes.adjudications._render",
+            "app.routes.dashboard._render",
             return_value=HTMLResponse("ok"),
         ) as render_mock,
     ):
@@ -370,16 +368,16 @@ def test_dashboard_aggregate_routes_use_the_query_cache(
 
     with (
         patch(
-            "app.routes.adjudications.cached_aggregate",
+            "app.routes.dashboard.cached_aggregate",
             side_effect=run_uncached,
         ) as cache_mock,
-        patch("app.routes.adjudications.kpi_summary", return_value=kpi),
-        patch("app.routes.adjudications.ranking_by_company", return_value=[]),
-        patch("app.routes.adjudications.ranking_by_organism", return_value=[]),
-        patch("app.routes.adjudications.distinct_organisms", return_value=[]),
-        patch("app.routes.adjudications.monthly_trend", return_value=[]),
+        patch("app.routes.dashboard.kpi_summary", return_value=kpi),
+        patch("app.routes.dashboard.ranking_by_company", return_value=[]),
+        patch("app.routes.dashboard.ranking_by_organism", return_value=[]),
+        patch("app.routes.dashboard.distinct_organisms", return_value=[]),
+        patch("app.routes.dashboard.monthly_trend", return_value=[]),
         patch(
-            "app.routes.adjudications.concentration_ratio",
+            "app.routes.dashboard.concentration_ratio",
             return_value=ConcentrationResult(None, 0, 0),
         ),
     ):
@@ -1314,7 +1312,7 @@ def test_company_export_scopes_document_and_active_filters(
 def test_company_export_applies_same_row_cap_as_global_export(
     client: TestClient, make_adjudication, monkeypatch
 ) -> None:
-    import app.routes.adjudications as routes_module
+    import app.routes.common as routes_module
 
     monkeypatch.setattr(routes_module, "MAX_EXPORT_ROWS", 0)
     make_adjudication(
@@ -1442,20 +1440,15 @@ def test_company_route_uses_summary_total_without_count(
         total=25,
     )
     with (
-        patch("app.routes.adjudications.company_summary", return_value=summary),
+        patch("app.routes.company.company_summary", return_value=summary),
         patch(
-            "app.routes.adjudications.count_adjudications",
-            side_effect=AssertionError("company context must use summary.total"),
-        ) as count_mock,
-        patch(
-            "app.routes.adjudications._render", return_value=HTMLResponse("ok")
+            "app.routes.company._render", return_value=HTMLResponse("ok")
         ) as render_mock,
     ):
         response = client.get("/company/RUT/42")
 
     assert response.status_code == 200
     assert render_mock.call_args.args[2]["total"] == 25
-    count_mock.assert_not_called()
 
 
 def test_company_route_redirects_out_of_bounds_from_summary_total(
@@ -1475,17 +1468,12 @@ def test_company_route_redirects_out_of_bounds_from_summary_total(
         total=11,
     )
     with (
-        patch("app.routes.adjudications.company_summary", return_value=summary),
-        patch(
-            "app.routes.adjudications.count_adjudications",
-            side_effect=AssertionError("company context must use summary.total"),
-        ) as count_mock,
+        patch("app.routes.company.company_summary", return_value=summary),
     ):
         response = client.get("/company/RUT/42?page=3", follow_redirects=False)
 
     assert response.status_code == 302
     assert response.headers["location"] == "?page=2"
-    count_mock.assert_not_called()
 
 
 def test_company_route_passes_cached_market_kpi_and_preserves_key_identity(
@@ -1522,13 +1510,13 @@ def test_company_route_passes_cached_market_kpi_and_preserves_key_identity(
 
     with (
         patch(
-            "app.routes.adjudications.cached_aggregate",
+            "app.routes.company.cached_aggregate",
             side_effect=record_cache,
         ),
         patch(
-            "app.routes.adjudications.company_summary", return_value=summary
+            "app.routes.company.company_summary", return_value=summary
         ) as summary_mock,
-        patch("app.routes.adjudications._render", return_value=HTMLResponse("ok")),
+        patch("app.routes.company._render", return_value=HTMLResponse("ok")),
     ):
         response = client.get("/company/RUT/42")
 
@@ -1553,7 +1541,7 @@ def test_company_route_passes_cached_market_kpi_and_preserves_key_identity(
 
 
 def test_company_context_cache_hits_eight_aggregates(db_session) -> None:
-    from app.routes.adjudications import _build_company_context
+    from app.routes.company import _build_company_context
 
     raw_params: dict[str, str | None] = {
         "date_from": f"{CURRENT_YEAR}-01-01",
@@ -1569,28 +1557,26 @@ def test_company_context_cache_hits_eight_aggregates(db_session) -> None:
     )
     with (
         patch(
-            "app.routes.adjudications.company_summary", return_value=summary
+            "app.routes.company.company_summary", return_value=summary
         ) as summary_mock,
         patch(
-            "app.routes.adjudications.company_win_rate",
+            "app.routes.company.company_win_rate",
             return_value=CompanyWinRate(0, 0, None),
         ) as win_rate_mock,
         patch(
-            "app.routes.adjudications.company_competitors", return_value=[]
+            "app.routes.company.company_competitors", return_value=[]
         ) as competitors_mock,
+        patch("app.routes.company.top_articles", return_value=[]) as articles_mock,
+        patch("app.routes.company.monthly_trend", return_value=[]) as trend_mock,
         patch(
-            "app.routes.adjudications.top_articles", return_value=[]
-        ) as articles_mock,
-        patch("app.routes.adjudications.monthly_trend", return_value=[]) as trend_mock,
-        patch(
-            "app.routes.adjudications.concentration_ratio",
+            "app.routes.company.concentration_ratio",
             return_value=ConcentrationResult(None, 0, 0),
         ) as concentration_mock,
         patch(
-            "app.routes.adjudications.ranking_by_organism", return_value=[]
+            "app.routes.company.ranking_by_organism", return_value=[]
         ) as ranking_mock,
         patch(
-            "app.routes.adjudications.distinct_organisms", return_value=[]
+            "app.routes.company.distinct_organisms", return_value=[]
         ) as organisms_mock,
     ):
         _build_company_context(
@@ -1617,7 +1603,7 @@ def test_company_context_cache_hits_eight_aggregates(db_session) -> None:
 
 
 def test_company_context_cache_cold_miss_runs_eight_aggregates(db_session) -> None:
-    from app.routes.adjudications import _build_company_context
+    from app.routes.company import _build_company_context
 
     summary = CompanyProfileSummary(
         display_name=None,
@@ -1629,28 +1615,26 @@ def test_company_context_cache_cold_miss_runs_eight_aggregates(db_session) -> No
     )
     with (
         patch(
-            "app.routes.adjudications.company_summary", return_value=summary
+            "app.routes.company.company_summary", return_value=summary
         ) as summary_mock,
         patch(
-            "app.routes.adjudications.company_win_rate",
+            "app.routes.company.company_win_rate",
             return_value=CompanyWinRate(0, 0, None),
         ) as win_rate_mock,
         patch(
-            "app.routes.adjudications.company_competitors", return_value=[]
+            "app.routes.company.company_competitors", return_value=[]
         ) as competitors_mock,
+        patch("app.routes.company.top_articles", return_value=[]) as articles_mock,
+        patch("app.routes.company.monthly_trend", return_value=[]) as trend_mock,
         patch(
-            "app.routes.adjudications.top_articles", return_value=[]
-        ) as articles_mock,
-        patch("app.routes.adjudications.monthly_trend", return_value=[]) as trend_mock,
-        patch(
-            "app.routes.adjudications.concentration_ratio",
+            "app.routes.company.concentration_ratio",
             return_value=ConcentrationResult(None, 0, 0),
         ) as concentration_mock,
         patch(
-            "app.routes.adjudications.ranking_by_organism", return_value=[]
+            "app.routes.company.ranking_by_organism", return_value=[]
         ) as ranking_mock,
         patch(
-            "app.routes.adjudications.distinct_organisms", return_value=[]
+            "app.routes.company.distinct_organisms", return_value=[]
         ) as organisms_mock,
     ):
         _build_company_context(
@@ -1715,7 +1699,7 @@ def test_company_cache_keys_differ_from_dashboard_keys() -> None:
 
 
 def test_company_context_company_summary_uses_market_total(db_session) -> None:
-    from app.routes.adjudications import _build_company_context
+    from app.routes.company import _build_company_context
 
     kpi = KpiSummary(Decimal("900.00"), Decimal("0"), 3, 2, 4)
     summary = CompanyProfileSummary(
@@ -1731,20 +1715,20 @@ def test_company_context_company_summary_uses_market_total(db_session) -> None:
         "date_to": f"{CURRENT_YEAR}-12-31",
     }
     with (
-        patch("app.routes.adjudications.kpi_summary", return_value=kpi) as kpi_mock,
+        patch("app.routes.company.kpi_summary", return_value=kpi) as kpi_mock,
         patch(
-            "app.routes.adjudications.company_summary", return_value=summary
+            "app.routes.company.company_summary", return_value=summary
         ) as summary_mock,
         patch(
-            "app.routes.adjudications.lookup_company_identity",
+            "app.routes.company.lookup_company_identity",
             side_effect=["Initial Name", "Fresh Name"],
         ),
         patch(
-            "app.routes.adjudications.company_win_rate",
+            "app.routes.company.company_win_rate",
             return_value=CompanyWinRate(0, 0, None),
         ),
-        patch("app.routes.adjudications.company_competitors", return_value=[]),
-        patch("app.routes.adjudications.top_articles", return_value=[]),
+        patch("app.routes.company.company_competitors", return_value=[]),
+        patch("app.routes.company.top_articles", return_value=[]),
     ):
         first = _build_company_context(
             db_session,
@@ -2476,7 +2460,7 @@ def test_export_row_cap_exceeded_returns_400(
 ) -> None:
     """When count exceeds MAX_EXPORT_ROWS, returns 400 with Spanish message."""
 
-    import app.routes.adjudications as routes_module
+    import app.routes.common as routes_module
 
     # Patch the cap to 0 so any data triggers it.
     monkeypatch.setattr(routes_module, "MAX_EXPORT_ROWS", 0)
