@@ -15,7 +15,7 @@ from app.config import get_settings
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
-    from app.services.adjudication_service import AdjudicationFilters
+    from app.services.filters import AdjudicationFilters
 
 T = TypeVar("T")
 AggregateFn = Callable[..., T]
