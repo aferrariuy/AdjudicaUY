@@ -1391,6 +1391,7 @@ def test_company_export_decodes_identity_and_matches_global_csv_shape(
         company_document_type="RUT X",
         company_document="00 123",
         date=date(CURRENT_YEAR, 3, 1),
+        compra_overrides={"id_compra": "company-purchase-42"},
     )
 
     response = client.get("/company/RUT%20X/00%20123/export")
@@ -1402,7 +1403,13 @@ def test_company_export_decodes_identity_and_matches_global_csv_shape(
         == 'attachment; filename="adjudicaciones.csv"'
     )
     assert response.content.startswith(b"\xef\xbb\xbf")
-    assert "CSV-ENCODED-COMPANY" in response.content.decode("utf-8-sig")
+    text = response.content.decode("utf-8-sig")
+    assert "CSV-ENCODED-COMPANY" in text
+    assert "company-purchase-42" in text
+    assert (
+        "https://www.comprasestatales.gub.uy/consultas/detalle/id/company-purchase-42"
+        in text
+    )
 
 
 def test_company_export_link_preserves_active_filters(
@@ -2426,7 +2433,8 @@ def test_export_csv_header_row_matches_spec(
 
     assert first_line == (
         "fecha,organismo,empresa_adjudicataria,articulo,monto,moneda,"
-        "monto_uyu,tipo_compra,documento_empresa,tipo_documento,id_articulo"
+        "monto_uyu,tipo_compra,documento_empresa,tipo_documento,id_articulo,"
+        "id_compra,link_licitacion"
     )
 
 
@@ -2442,6 +2450,7 @@ def test_export_csv_data_row_contains_raw_values(
         amount=Decimal("1234567.89"),
         amount_uyu=Decimal("1234567.89"),
         date=date(2024, 3, 15),
+        compra_overrides={"id_compra": "raw-purchase-42"},
     )
 
     response = client.get(
@@ -2458,6 +2467,11 @@ def test_export_csv_data_row_contains_raw_values(
     assert "1234567.89" in data_line
     # Company name is present.
     assert "RAW-EXPORT-CO" in data_line
+    assert "raw-purchase-42" in data_line
+    assert (
+        "https://www.comprasestatales.gub.uy/consultas/detalle/id/raw-purchase-42"
+        in data_line
+    )
 
 
 def test_export_csv_uses_crlf_line_endings(

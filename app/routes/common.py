@@ -197,6 +197,8 @@ _CSV_COLUMNS = [
     "documento_empresa",
     "tipo_documento",
     "id_articulo",
+    "id_compra",
+    "link_licitacion",
 ]
 
 
@@ -219,6 +221,8 @@ def _row_to_csv_fields(row: Any) -> list[str]:
         row.company_document or "",
         row.company_document_type or "",
         row.article_id or "",
+        row.id_compra or "",
+        row.license_link or "",
     ]
 
 

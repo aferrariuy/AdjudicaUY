@@ -43,6 +43,7 @@ class AdjudicationRow:
     company_document_type: str | None
     license_link: str
     article_id: str | None = None
+    id_compra: str | None = None
 
     @property
     def company_profile_url(self) -> str | None:
@@ -169,4 +170,5 @@ def _row_to_adjudication_row(row: Any) -> AdjudicationRow:
         company_document_type=row.company_document_type,
         license_link=build_license_link(row.id_compra),
         article_id=getattr(row, "article_id", None),
+        id_compra=getattr(row, "id_compra", None),
     )
