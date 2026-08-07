@@ -669,10 +669,11 @@ def resolve_organism(id_inciso: int | None, id_ue: int | None) -> str:
     The function is a pure read — no I/O, no cache invalidation, no
     side effects beyond logging. The contract is intentionally
     forgiving: an unmapped combination is a *log event* plus a
-    placeholder string, never an exception. The pipeline must always
-    produce a record to insert; a missing organism name would otherwise
-    violate the ``organism`` ``NOT NULL`` constraint on the
-    ``adjudications`` table.
+    placeholder string, never an exception. Because ``Compra.organismo``
+    is nullable, an unmapped pair uses the
+    ``"Desconocido ({id_inciso}-{id_ue})"`` fallback, so the ``compra`` row
+    is never stored with a ``NULL`` organismo. The pipeline must always
+    produce a record.
     """
 
     key = (
