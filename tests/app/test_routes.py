@@ -95,6 +95,39 @@ def test_index_renders_results_table_when_data_exists(
     assert "INDEX-ARTICLE-Laptop" in body
 
 
+def test_index_trend_payload_preserves_partial_flag_in_serialized_chart(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(date=date.today())
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert _chart_payload(response.text, "line")["partial"] is True
+
+
+def test_all_trend_chart_blocks_disclose_partial_month(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        organism="PARTIAL-ORG",
+        winning_company="PARTIAL-COMPANY",
+        company_document_type="RUT",
+        company_document="PARTIAL-42",
+        date=date.today(),
+    )
+
+    responses = [
+        client.get("/").text,
+        client.get("/organism/PARTIAL-ORG").text,
+        client.get("/company/RUT/PARTIAL-42").text,
+    ]
+
+    for body in responses:
+        assert body.count("borderDash = [6, 4]") == 1
+        assert "(mes en curso)" in body
+
+
 def test_index_renders_no_results_message_when_db_is_empty(
     client: TestClient,
 ) -> None:
