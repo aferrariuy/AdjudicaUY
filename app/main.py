@@ -19,6 +19,7 @@ from urllib.parse import quote
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import Response
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
@@ -31,7 +32,6 @@ from app.formatting import (
     format_percent_adaptive,
     format_uyu,
 )
-from app.routes import router
 from app.services.adjudication_service import all_companies, all_organisms
 
 logger = logging.getLogger(__name__)
@@ -42,6 +42,32 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 # under ``app/templates/static`` so the Tailwind build output and any
 # other compiled bundles have a stable, framework-agnostic home.
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class HeadAwareAPIRoute(APIRoute):
+    """Make every GET route accept HEAD without duplicating decorators."""
+
+    def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        methods = kwargs.get("methods")
+        if methods and "GET" in methods:
+            kwargs["methods"] = set(methods) | {"HEAD"}
+        super().__init__(*args, **kwargs)
+
+    def get_route_handler(self):  # noqa: ANN201
+        handler = super().get_route_handler()
+
+        async def route_handler(request):  # noqa: ANN001
+            response = await handler(request)
+            if "GET" in self.methods:
+                response.headers["Allow"] = ", ".join(sorted(self.methods))
+            return response
+
+        return route_handler
+
+
+# Imported after ``HeadAwareAPIRoute`` is defined so the aggregate router can
+# use the same class without a circular import during app startup.
+from app.routes import router  # noqa: E402
 
 
 def _validate_environment() -> None:
@@ -99,6 +125,9 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    # FastAPI's APIRoute does not inherit Starlette's automatic GET → HEAD
+    # behavior, so install the route class before registering app-level routes.
+    app.router.route_class = HeadAwareAPIRoute
 
     # Templates are attached to ``app.state`` so the route handlers can
     # resolve them via ``request.app.state.templates``. This indirection

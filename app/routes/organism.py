@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from app.database import get_db
+from app.main import HeadAwareAPIRoute
 from app.presenters import (
     _build_concentration_chart_payload,
     _build_seo_context,
@@ -39,7 +40,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(route_class=HeadAwareAPIRoute)
 
 
 def _build_organism_context(
