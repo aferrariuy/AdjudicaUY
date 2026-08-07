@@ -96,7 +96,7 @@ def validate_date_params(params: dict[str, str | None]) -> None:
     and ``date_from > date_to``.
 
     Silent on missing/empty params — that is the route layer's
-    default-injection job (see ``app.routes.adjudications``). Validating
+    default-injection job (see ``app.routes.common``). Validating
     raw strings (instead of the parsed ``AdjudicationFilters``) lets us
     distinguish "user typed garbage" from "user typed nothing", which the
     parsed form collapses into ``None``.

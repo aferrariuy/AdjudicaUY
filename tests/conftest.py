@@ -190,7 +190,7 @@ def client(db_session: Session) -> Generator[TestClient]:
     )
     with (
         patch(
-            "app.routes.adjudications.get_session_factory",
+            "app.routes.common.get_session_factory",
             return_value=test_session_factory,
         ),
         TestClient(app) as test_client,
