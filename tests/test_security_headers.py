@@ -10,6 +10,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 
 
@@ -147,3 +148,80 @@ def test_security_headers_still_present_in_debug(db_session: Any) -> None:
     assert response.headers.get("X-Content-Type-Options") == "nosniff"
     assert response.headers.get("X-Frame-Options") == "DENY"
     client.close()
+
+
+def test_html_responses_include_exact_nonce_csp_and_inline_coverage(
+    client: TestClient,
+) -> None:
+    paths = ["/", "/about", "/organism/SECURITY-ORG", "/company/RUT/42"]
+    executable_blocks: set[tuple[str, str]] = set()
+
+    for path in paths:
+        response = client.get(path)
+        policy = response.headers["content-security-policy"]
+        nonce = policy.split("'nonce-", 1)[1].split("'", 1)[0]
+        expected = (
+            "default-src 'self'; "
+            f"script-src 'self' 'nonce-{nonce}'; "
+            f"style-src 'self' 'nonce-{nonce}'; "
+            "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+            "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+            "form-action 'self'; upgrade-insecure-requests"
+        )
+        assert policy == expected
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        for style in soup.find_all("style"):
+            assert style.get("nonce") == nonce
+            executable_blocks.add(("style", style.get_text()))
+        for script in soup.find_all("script"):
+            if script.get("type") == "application/ld+json":
+                assert script.get("nonce") is None
+                continue
+            if script.get("src"):
+                continue
+            assert script.get("nonce") == nonce
+            executable_blocks.add(("script", script.get_text()))
+
+    # The index and organism chart blocks intentionally share identical source
+    # today, so the six template blocks produce five unique rendered bodies.
+    assert len(executable_blocks) == 5
+
+
+def test_csp_nonce_varies_and_exists_on_error_html(client: TestClient) -> None:
+    first = client.get("/")
+    second = client.get("/")
+    not_found = client.get("/missing-security-page")
+    invalid = client.get("/?date_from=not-a-date")
+
+    def nonce(response: Any) -> str:
+        policy = response.headers["content-security-policy"]
+        return policy.split("'nonce-", 1)[1].split("'", 1)[0]
+
+    assert nonce(first) != nonce(second)
+    assert not_found.status_code == 404
+    assert invalid.status_code == 422
+    assert nonce(not_found)
+    assert nonce(invalid)
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/adjudications",
+        "/organism/SECURITY-ORG/partial",
+        "/company/RUT/42/partial",
+    ],
+)
+def test_rendered_partials_have_no_inline_scripts(
+    client: TestClient, path: str
+) -> None:
+    response = client.get(path)
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    inline_scripts = [
+        script
+        for script in soup.find_all("script")
+        if not script.get("src") and script.get("type") != "application/ld+json"
+    ]
+    assert inline_scripts == []

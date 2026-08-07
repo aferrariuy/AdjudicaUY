@@ -77,7 +77,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
   // Chart.js wiring — only loaded on pages with chart canvases.
   // Saves ~68KB on pages without charts (e.g. /about).
   (function () {

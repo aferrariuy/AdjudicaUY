@@ -13,6 +13,7 @@ and for the ``Dockerfile``'s ``uvicorn`` command.
 from __future__ import annotations
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
@@ -162,9 +163,19 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def add_security_headers(request, call_next):  # noqa: ANN001, ANN202
+        nonce = secrets.token_urlsafe(16)
+        request.state.csp_nonce = nonce
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            f"script-src 'self' 'nonce-{nonce}'; "
+            f"style-src 'self' 'nonce-{nonce}'; "
+            "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+            "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+            "form-action 'self'; upgrade-insecure-requests"
+        )
         if not settings.debug:
             response.headers["Strict-Transport-Security"] = (
                 "max-age=31536000; includeSubDomains"

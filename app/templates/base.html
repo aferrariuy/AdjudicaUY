@@ -54,7 +54,7 @@
      Self-hosted to eliminate external DNS lookup. #}
   <script src="/static/vendor/htmx.min.js" defer></script>
 
-  <style>
+  <style nonce="{{ request.state.csp_nonce }}">
     /* Disable transitions on Tailwind utility toggles to keep HTMX swaps snappy. */
     .htmx-swapping { opacity: 0; transition: opacity 100ms ease-out; }
     .htmx-settling { opacity: 1; transition: opacity 100ms ease-out; }
@@ -68,7 +68,7 @@
   {# Anti-FOUC bootstrap. Runs synchronously before any content renders,
      so the ``.dark`` class is present on ``<html>`` when CSS applies.
      Placed in <body> (not <head>) so it doesn't block first paint. #}
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
     (function() {
       try {
         var t = localStorage.getItem('theme');
@@ -112,7 +112,7 @@
     </div>
   </footer>
 
-  <script>
+  <script nonce="{{ request.state.csp_nonce }}">
     // Base page scripts: HTMX error handling, accessibility, filter reset,
     // and theme toggle. Chart.js wiring lives in the child templates'
     // scripts block on pages that render charts (index, organism_detail).

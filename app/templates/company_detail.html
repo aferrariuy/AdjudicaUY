@@ -62,7 +62,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
   (function () {
     var LIGHT_PALETTE = ['#1B2A4A','#B23B2E','#15803d','#a16207','#7c3aed','#0e7490','#be185d','#365314','#9333ea','#0f766e'];
     var DARK_PALETTE = ['#D4D8E1','#CC5546','#58A696','#E8B84B','#7C93EE','#4DB8C8','#D45D7A','#7FA858','#A973E8','#4FABA6'];
