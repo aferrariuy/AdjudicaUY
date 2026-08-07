@@ -13,20 +13,26 @@ and for the ``Dockerfile``'s ``uvicorn`` command.
 from __future__ import annotations
 
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import Response
+from fastapi.routing import APIRoute
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
 
 from app.config import get_settings
 from app.database import get_db, get_engine
-from app.formatting import format_count, format_percent, format_uyu
-from app.routes import router
+from app.formatting import (
+    format_count,
+    format_percent,
+    format_percent_adaptive,
+    format_uyu,
+)
 from app.services.adjudication_service import all_companies, all_organisms
 
 logger = logging.getLogger(__name__)
@@ -37,6 +43,32 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 # under ``app/templates/static`` so the Tailwind build output and any
 # other compiled bundles have a stable, framework-agnostic home.
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+class HeadAwareAPIRoute(APIRoute):
+    """Make every GET route accept HEAD without duplicating decorators."""
+
+    def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+        methods = kwargs.get("methods")
+        if methods and "GET" in methods:
+            kwargs["methods"] = set(methods) | {"HEAD"}
+        super().__init__(*args, **kwargs)
+
+    def get_route_handler(self):  # noqa: ANN201
+        handler = super().get_route_handler()
+
+        async def route_handler(request):  # noqa: ANN001
+            response = await handler(request)
+            if "GET" in self.methods:
+                response.headers["Allow"] = ", ".join(sorted(self.methods))
+            return response
+
+        return route_handler
+
+
+# Imported after ``HeadAwareAPIRoute`` is defined so the aggregate router can
+# use the same class without a circular import during app startup.
+from app.routes import router  # noqa: E402
 
 
 def _validate_environment() -> None:
@@ -94,6 +126,9 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+    # FastAPI's APIRoute does not inherit Starlette's automatic GET → HEAD
+    # behavior, so install the route class before registering app-level routes.
+    app.router.route_class = HeadAwareAPIRoute
 
     # Templates are attached to ``app.state`` so the route handlers can
     # resolve them via ``request.app.state.templates``. This indirection
@@ -108,6 +143,7 @@ def create_app() -> FastAPI:
     app.state.templates.env.filters["uyu"] = format_uyu
     app.state.templates.env.filters["count_uy"] = format_count
     app.state.templates.env.filters["pct_uy"] = format_percent
+    app.state.templates.env.filters["pct_adaptive"] = format_percent_adaptive
 
     # Optional static dir — created on demand by the first deployer.
     # Mounting a missing directory crashes uvicorn, so we only mount if
@@ -127,9 +163,19 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def add_security_headers(request, call_next):  # noqa: ANN001, ANN202
+        nonce = secrets.token_urlsafe(16)
+        request.state.csp_nonce = nonce
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            f"script-src 'self' 'nonce-{nonce}'; "
+            f"style-src 'self' 'nonce-{nonce}'; "
+            "img-src 'self' data:; font-src 'self'; connect-src 'self'; "
+            "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+            "form-action 'self'; upgrade-insecure-requests"
+        )
         if not settings.debug:
             response.headers["Strict-Transport-Security"] = (
                 "max-age=31536000; includeSubDomains"

@@ -62,7 +62,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
   (function () {
     var LIGHT_PALETTE = ['#1B2A4A','#B23B2E','#15803d','#a16207','#7c3aed','#0e7490','#be185d','#365314','#9333ea','#0f766e'];
     var DARK_PALETTE = ['#D4D8E1','#CC5546','#58A696','#E8B84B','#7C93EE','#4DB8C8','#D45D7A','#7FA858','#A973E8','#4FABA6'];
@@ -91,6 +91,15 @@
               } else {
                 if (!ds.backgroundColor) ds.backgroundColor = palette[i % palette.length];
                 if (!ds.borderColor) ds.borderColor = ds.backgroundColor;
+              }
+              if (spec.partial && datasetType === 'line' && Array.isArray(ds.data) && ds.data.length) {
+                var lastPoint = ds.data.length - 1;
+                ds.borderDash = [6, 4];
+                ds.pointStyle = ds.data.map(function () { return 'circle'; });
+                ds.pointRadius = ds.data.map(function (_, pointIndex) { return pointIndex === lastPoint ? 5 : 3; });
+                ds.pointBackgroundColor = ds.data.map(function (_, pointIndex) { return pointIndex === lastPoint ? 'transparent' : ds.backgroundColor; });
+                ds.pointBorderColor = ds.data.map(function () { return ds.borderColor; });
+                ds.pointBorderWidth = ds.data.map(function (_, pointIndex) { return pointIndex === lastPoint ? 2 : 1; });
               }
               return ds;
             })
@@ -155,7 +164,11 @@
                       var count = (ctx.parsed === null || ctx.parsed === undefined) ? 0 : ctx.parsed;
                       return 'Compras ' + (ctx.label || '') + ': ' + count.toLocaleString('es-UY');
                     }
-                    return Chart.defaults.plugins.tooltip.callbacks.label(ctx);
+                    var label = Chart.defaults.plugins.tooltip.callbacks.label(ctx);
+                    if (spec.partial && ctx.dataIndex === spec.labels.length - 1) {
+                      label += ' (mes en curso)';
+                    }
+                    return label;
                   }
                 }
               }

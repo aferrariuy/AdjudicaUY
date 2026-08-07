@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from app.config import get_settings
@@ -14,6 +15,8 @@ if TYPE_CHECKING:
 
 def _build_trend_chart_payload(
     rows: list[tuple[str, Decimal]],
+    *,
+    today: date | None = None,
 ) -> dict[str, Any]:
     """Shape monthly trend rows for a Chart.js line/area chart.
 
@@ -31,7 +34,7 @@ def _build_trend_chart_payload(
       charts on the page.
     """
 
-    return {
+    payload: dict[str, Any] = {
         "type": "line",
         "labels": [label for label, _total in rows],
         "datasets": [
@@ -49,6 +52,9 @@ def _build_trend_chart_payload(
             "currency": "UYU",
         },
     }
+    if rows and rows[-1][0] == (today or date.today()).strftime("%Y-%m"):
+        payload["partial"] = True
+    return payload
 
 
 def _build_concentration_chart_payload(

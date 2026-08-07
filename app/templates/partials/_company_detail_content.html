@@ -22,7 +22,7 @@
       </div>
       <div class="rounded-md border border-linea p-4">
         <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Participación del total</dt>
-        <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">{{ (company_summary.share_of_total * 100) | round(1) }} %</dd>
+        <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">{{ company_summary.share_of_total | pct_adaptive }}</dd>
       </div>
     </dl>
   </section>
@@ -33,7 +33,7 @@
   {% if company_win_rate.rate is not none %}
     <section aria-labelledby="company-win-rate-heading" class="bg-folio border border-linea p-4 sm:p-6">
       <h2 id="company-win-rate-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Tasa de éxito</h2>
-      <p class="text-3xl font-semibold tabular-nums text-ink">{{ (company_win_rate.rate * 100) | round(1) }} %</p>
+      <p class="text-3xl font-semibold tabular-nums text-ink">{{ company_win_rate.rate | pct_adaptive }}</p>
       <p class="mt-3 text-sm text-texto-sec"><strong>Ganadas:</strong> {{ company_win_rate.wins | count_uy }} · <strong>Participaciones:</strong> {{ company_win_rate.participations | count_uy }}</p>
     </section>
   {% endif %}

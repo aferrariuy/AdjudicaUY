@@ -95,6 +95,39 @@ def test_index_renders_results_table_when_data_exists(
     assert "INDEX-ARTICLE-Laptop" in body
 
 
+def test_index_trend_payload_preserves_partial_flag_in_serialized_chart(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(date=date.today())
+
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert _chart_payload(response.text, "line")["partial"] is True
+
+
+def test_all_trend_chart_blocks_disclose_partial_month(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        organism="PARTIAL-ORG",
+        winning_company="PARTIAL-COMPANY",
+        company_document_type="RUT",
+        company_document="PARTIAL-42",
+        date=date.today(),
+    )
+
+    responses = [
+        client.get("/").text,
+        client.get("/organism/PARTIAL-ORG").text,
+        client.get("/company/RUT/PARTIAL-42").text,
+    ]
+
+    for body in responses:
+        assert body.count("borderDash = [6, 4]") == 1
+        assert "(mes en curso)" in body
+
+
 def test_index_renders_no_results_message_when_db_is_empty(
     client: TestClient,
 ) -> None:
@@ -1098,6 +1131,28 @@ def test_company_profile_full_page_renders_identity_kpis_and_history(
     assert "No se encontró actividad" not in response.text
 
 
+def test_company_profile_renders_adaptive_tiny_share(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="TINY-SHARE",
+        company_document_type="RUT",
+        company_document="210000000012",
+        amount_uyu=Decimal("57"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    make_adjudication(
+        winning_company="LARGE-SHARE",
+        amount_uyu=Decimal("9943"),
+        date=date(CURRENT_YEAR, 3, 2),
+    )
+
+    response = client.get("/company/RUT/210000000012")
+
+    assert response.status_code == 200
+    assert "0,006 %" in response.text
+
+
 def test_concentration_labels_are_company_specific(
     client: TestClient, make_adjudication, db_session
 ) -> None:
@@ -1336,6 +1391,7 @@ def test_company_export_decodes_identity_and_matches_global_csv_shape(
         company_document_type="RUT X",
         company_document="00 123",
         date=date(CURRENT_YEAR, 3, 1),
+        compra_overrides={"id_compra": "company-purchase-42"},
     )
 
     response = client.get("/company/RUT%20X/00%20123/export")
@@ -1347,7 +1403,13 @@ def test_company_export_decodes_identity_and_matches_global_csv_shape(
         == 'attachment; filename="adjudicaciones.csv"'
     )
     assert response.content.startswith(b"\xef\xbb\xbf")
-    assert "CSV-ENCODED-COMPANY" in response.content.decode("utf-8-sig")
+    text = response.content.decode("utf-8-sig")
+    assert "CSV-ENCODED-COMPANY" in text
+    assert "company-purchase-42" in text
+    assert (
+        "https://www.comprasestatales.gub.uy/consultas/detalle/id/company-purchase-42"
+        in text
+    )
 
 
 def test_company_export_link_preserves_active_filters(
@@ -2371,7 +2433,8 @@ def test_export_csv_header_row_matches_spec(
 
     assert first_line == (
         "fecha,organismo,empresa_adjudicataria,articulo,monto,moneda,"
-        "monto_uyu,tipo_compra,documento_empresa,tipo_documento,id_articulo"
+        "monto_uyu,tipo_compra,documento_empresa,tipo_documento,id_articulo,"
+        "id_compra,link_licitacion"
     )
 
 
@@ -2387,6 +2450,7 @@ def test_export_csv_data_row_contains_raw_values(
         amount=Decimal("1234567.89"),
         amount_uyu=Decimal("1234567.89"),
         date=date(2024, 3, 15),
+        compra_overrides={"id_compra": "raw-purchase-42"},
     )
 
     response = client.get(
@@ -2403,6 +2467,11 @@ def test_export_csv_data_row_contains_raw_values(
     assert "1234567.89" in data_line
     # Company name is present.
     assert "RAW-EXPORT-CO" in data_line
+    assert "raw-purchase-42" in data_line
+    assert (
+        "https://www.comprasestatales.gub.uy/consultas/detalle/id/raw-purchase-42"
+        in data_line
+    )
 
 
 def test_export_csv_uses_crlf_line_endings(

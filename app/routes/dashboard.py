@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.database import get_db
+from app.main import HeadAwareAPIRoute
 from app.presenters import (
     _build_concentration_chart_payload,
     _build_page_numbers,
@@ -47,7 +48,7 @@ if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(route_class=HeadAwareAPIRoute)
 
 
 @router.get("/", response_class=HTMLResponse, include_in_schema=False)

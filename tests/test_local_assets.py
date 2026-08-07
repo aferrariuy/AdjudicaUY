@@ -91,7 +91,7 @@ def test_no_critical_css_inlined(client: Any) -> None:
     head_match = re.search(r"<head>(.*?)</head>", text, re.DOTALL)
     assert head_match, "<head> not found"
     head = head_match.group(1)
-    style_matches = re.findall(r"<style>(.*?)</style>", head, re.DOTALL)
+    style_matches = re.findall(r"<style[^>]*>(.*?)</style>", head, re.DOTALL)
     assert style_matches, "Inline <style> block not found in <head>"
     for style_content in style_matches:
         assert "box-sizing" not in style_content, (

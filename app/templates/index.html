@@ -58,7 +58,7 @@
 {% endblock %}
 
 {% block scripts %}
-<script>
+<script nonce="{{ request.state.csp_nonce }}">
   // Chart.js wiring — only loaded on pages with chart canvases.
   // Saves ~68KB on pages without charts (e.g. /about).
   (function () {
@@ -113,11 +113,20 @@
               if (datasetType === 'line') { ds.borderColor = DARK_LINE_BORDER; ds.backgroundColor = DARK_LINE_FILL; }
               else if (datasetType === 'doughnut' || datasetType === 'pie') { ds.backgroundColor = DARK_DOUGHNUT; ds.borderColor = DARK_DOUGHNUT; }
               else { var color = palette[i % palette.length]; ds.backgroundColor = color; ds.borderColor = color; }
-            } else {
-              if (!ds.backgroundColor) ds.backgroundColor = palette[i % palette.length];
-              if (!ds.borderColor) ds.borderColor = ds.backgroundColor;
-            }
-            return ds;
+             } else {
+               if (!ds.backgroundColor) ds.backgroundColor = palette[i % palette.length];
+               if (!ds.borderColor) ds.borderColor = ds.backgroundColor;
+             }
+             if (spec.partial && datasetType === 'line' && Array.isArray(ds.data) && ds.data.length) {
+               var lastPoint = ds.data.length - 1;
+               ds.borderDash = [6, 4];
+               ds.pointStyle = ds.data.map(function () { return 'circle'; });
+               ds.pointRadius = ds.data.map(function (_, pointIndex) { return pointIndex === lastPoint ? 5 : 3; });
+               ds.pointBackgroundColor = ds.data.map(function (_, pointIndex) { return pointIndex === lastPoint ? 'transparent' : ds.backgroundColor; });
+               ds.pointBorderColor = ds.data.map(function () { return ds.borderColor; });
+               ds.pointBorderWidth = ds.data.map(function (_, pointIndex) { return pointIndex === lastPoint ? 2 : 1; });
+             }
+             return ds;
           }),
         },
         options: {
@@ -129,7 +138,8 @@
               callbacks: { label: function (ctx) {
                 var label = ctx.label || ctx.dataset.label || '';
                 if (ctx.chart.config.type === 'doughnut' || ctx.chart.config.type === 'pie') return label + ': ' + (ctx.parsed || 0).toLocaleString('es-UY');
-                return label + ': ' + formatUYU(ctx.parsed.y || ctx.parsed);
+                var suffix = spec.partial && ctx.dataIndex === spec.labels.length - 1 ? ' (mes en curso)' : '';
+                return label + suffix + ': ' + formatUYU(ctx.parsed.y || ctx.parsed);
               }},
             },
           },
