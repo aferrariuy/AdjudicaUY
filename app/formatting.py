@@ -129,4 +129,34 @@ def format_percent(value: Number) -> str:
     return f"{sign}{text} %"
 
 
-__all__ = ["format_uyu", "format_count", "format_percent"]
+def format_percent_adaptive(value: Number) -> str:
+    """Format a ratio with extra precision for tiny KPI shares.
+
+    Ratios at or above one percent use one decimal place after scaling to a
+    percentage. Smaller ratios are kept visible with three decimal places.
+    The latter intentionally preserves the small ratio's displayed magnitude,
+    matching the company-profile KPI contract.
+    """
+
+    ratio = Decimal(str(value))
+    if abs(ratio) >= Decimal("0.01"):
+        percentage = ratio * 100
+        places = 1
+    else:
+        percentage = ratio
+        places = 3
+
+    quantized = percentage.quantize(
+        Decimal("1").scaleb(-places), rounding=ROUND_HALF_UP
+    )
+    sign = "-" if quantized < 0 else ""
+    text = f"{abs(quantized):.{places}f}".replace(".", ",")
+    return f"{sign}{text} %"
+
+
+__all__ = [
+    "format_uyu",
+    "format_count",
+    "format_percent",
+    "format_percent_adaptive",
+]

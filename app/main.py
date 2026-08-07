@@ -25,7 +25,12 @@ from starlette.middleware.gzip import GZipMiddleware
 
 from app.config import get_settings
 from app.database import get_db, get_engine
-from app.formatting import format_count, format_percent, format_uyu
+from app.formatting import (
+    format_count,
+    format_percent,
+    format_percent_adaptive,
+    format_uyu,
+)
 from app.routes import router
 from app.services.adjudication_service import all_companies, all_organisms
 
@@ -108,6 +113,7 @@ def create_app() -> FastAPI:
     app.state.templates.env.filters["uyu"] = format_uyu
     app.state.templates.env.filters["count_uy"] = format_count
     app.state.templates.env.filters["pct_uy"] = format_percent
+    app.state.templates.env.filters["pct_adaptive"] = format_percent_adaptive
 
     # Optional static dir — created on demand by the first deployer.
     # Mounting a missing directory crashes uvicorn, so we only mount if

@@ -1098,6 +1098,28 @@ def test_company_profile_full_page_renders_identity_kpis_and_history(
     assert "No se encontró actividad" not in response.text
 
 
+def test_company_profile_renders_adaptive_tiny_share(
+    client: TestClient, make_adjudication
+) -> None:
+    make_adjudication(
+        winning_company="TINY-SHARE",
+        company_document_type="RUT",
+        company_document="210000000012",
+        amount_uyu=Decimal("57"),
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+    make_adjudication(
+        winning_company="LARGE-SHARE",
+        amount_uyu=Decimal("9943"),
+        date=date(CURRENT_YEAR, 3, 2),
+    )
+
+    response = client.get("/company/RUT/210000000012")
+
+    assert response.status_code == 200
+    assert "0,006 %" in response.text
+
+
 def test_concentration_labels_are_company_specific(
     client: TestClient, make_adjudication, db_session
 ) -> None:
