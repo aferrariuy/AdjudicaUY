@@ -1665,3 +1665,305 @@ def test_ranking_by_company_uses_lexical_pair_as_final_tie_break(
     entry = ranking_by_company(db_session, AdjudicationFilters())[0]
 
     assert (entry.company_type, entry.company_number) == ("CI", "9")
+
+
+def _add_raw_ranking_adjudication(
+    db_session: Session,
+    compra: Compra,
+    *,
+    name: str,
+    company_type: str | None,
+    company_number: str | None,
+    amount: Decimal | None,
+    article: str,
+) -> Adjudicacion:
+    """Insert an unnormalized ranking row, including empty document values."""
+
+    adjudication = Adjudicacion(
+        compra_id=compra.id,
+        nombre_comercial=name,
+        tipo_doc_prov=company_type,
+        nro_doc_prov=company_number,
+        desc_articulo=article,
+        id_moneda=0,
+        precio_tot_imp=amount or Decimal("0.00"),
+        amount_uyu=amount,
+    )
+    db_session.add(adjudication)
+    db_session.flush()
+    return adjudication
+
+
+def _ranking_tuples(entries) -> list[tuple[str, Decimal, int, str | None, str | None]]:
+    return [
+        (
+            entry.name,
+            entry.total_amount_uyu,
+            entry.adjudication_count,
+            entry.company_type,
+            entry.company_number,
+        )
+        for entry in entries
+    ]
+
+
+def _semantic_ranking_oracle(
+    session: Session,
+    rows: list[Adjudicacion],
+    *,
+    limit: int,
+) -> list[tuple[str, Decimal, int, str | None, str | None]]:
+    """Compute ranking semantics in Python, independently of SQL shape."""
+
+    grouped = {}
+    for row in rows:
+        if row.amount_uyu is None:
+            continue
+        key = (row.nombre_comercial, row.tipo_doc_prov, row.nro_doc_prov)
+        compra = session.get(Compra, row.compra_id)
+        assert compra is not None
+        count, total, latest = grouped.get(
+            key, (0, Decimal("0.00"), compra.fecha_pub_adj)
+        )
+        grouped[key] = (
+            count + 1,
+            total + row.amount_uyu,
+            max(latest, compra.fecha_pub_adj),
+        )
+
+    by_name = {}
+    for (name, company_type, company_number), (count, total, latest) in grouped.items():
+        by_name.setdefault(name, []).append(
+            (company_type, company_number, count, total, latest)
+        )
+
+    results = []
+    for name, identity_groups in by_name.items():
+        winner = sorted(
+            (
+                group
+                for group in identity_groups
+                if group[0] not in (None, "") and group[1] not in (None, "")
+            ),
+            key=lambda group: (-group[2], -group[4].toordinal(), group[0], group[1]),
+        )
+        identity = winner[0] if winner else (None, None)
+        results.append(
+            (
+                name,
+                sum((group[3] for group in identity_groups), Decimal("0.00")),
+                sum(group[2] for group in identity_groups),
+                identity[0],
+                identity[1],
+            )
+        )
+    return sorted(results, key=lambda item: item[1], reverse=True)[:limit]
+
+
+def test_ranking_by_company_rolls_up_multiple_identities(
+    db_session, make_compra, add_adj
+) -> None:
+    first = make_compra(fecha_pub_adj=date(2024, 1, 1))
+    second = make_compra(fecha_pub_adj=date(2024, 1, 2))
+    add_adj(
+        first,
+        nombre_comercial="MULTI-ID",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="1",
+        amount_uyu=Decimal("1000.00"),
+    )
+    add_adj(
+        second,
+        nombre_comercial="MULTI-ID",
+        tipo_doc_prov="CI",
+        nro_doc_prov="2",
+        amount_uyu=Decimal("500.00"),
+    )
+
+    entry = ranking_by_company(db_session, AdjudicationFilters())[0]
+
+    assert _ranking_tuples([entry]) == [("MULTI-ID", Decimal("1500.00"), 2, "CI", "2")]
+
+
+def test_ranking_by_company_mixed_invalid_and_valid_documents_rolls_up_name(
+    db_session, make_compra, add_adj
+) -> None:
+    compra = make_compra()
+    _add_raw_ranking_adjudication(
+        db_session,
+        compra,
+        name="MIXED-CO",
+        company_type="",
+        company_number="",
+        amount=Decimal("1000.00"),
+        article="invalid",
+    )
+    add_adj(
+        compra,
+        nombre_comercial="MIXED-CO",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="99",
+        amount_uyu=Decimal("500.00"),
+    )
+
+    result = ranking_by_company(db_session, AdjudicationFilters())
+
+    assert _ranking_tuples(result) == [
+        ("MIXED-CO", Decimal("1500.00"), 2, "RUT", "99")
+    ]
+
+
+def test_ranking_by_company_empty_string_identity_is_unlinked(
+    db_session, make_compra
+) -> None:
+    _add_raw_ranking_adjudication(
+        db_session,
+        make_compra(),
+        name="EMPTY-DOC",
+        company_type="",
+        company_number="",
+        amount=Decimal("250.00"),
+        article="empty",
+    )
+
+    result = ranking_by_company(db_session, AdjudicationFilters())
+
+    assert _ranking_tuples(result) == [
+        ("EMPTY-DOC", Decimal("250.00"), 1, None, None)
+    ]
+
+
+def test_ranking_by_company_identity_is_ranked_inside_filtered_set(
+    db_session, make_compra, add_adj
+) -> None:
+    for index in range(3):
+        add_adj(
+            make_compra(organismo="OUTSIDE", fecha_pub_adj=date(2024, 3, index + 1)),
+            nombre_comercial="FILTERED-ID",
+            tipo_doc_prov="CI",
+            nro_doc_prov="9",
+            amount_uyu=Decimal("100.00"),
+        )
+    add_adj(
+        make_compra(organismo="INSIDE", fecha_pub_adj=date(2024, 2, 1)),
+        nombre_comercial="FILTERED-ID",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="1",
+        amount_uyu=Decimal("100.00"),
+    )
+
+    result = ranking_by_company(
+        db_session,
+        AdjudicationFilters(organism_exact="INSIDE"),
+    )
+
+    assert _ranking_tuples(result) == [
+        ("FILTERED-ID", Decimal("100.00"), 1, "RUT", "1")
+    ]
+
+
+def test_ranking_by_company_excludes_null_amounts_from_total_and_count(
+    db_session, make_compra, add_adj
+) -> None:
+    compra = make_compra()
+    add_adj(
+        compra,
+        nombre_comercial="NULL-AMOUNT",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="7",
+        amount_uyu=Decimal("300.00"),
+    )
+    add_adj(
+        compra,
+        nombre_comercial="NULL-AMOUNT",
+        tipo_doc_prov="RUT",
+        nro_doc_prov="7",
+        desc_articulo="unpriced",
+        amount_uyu=None,
+    )
+
+    result = ranking_by_company(db_session, AdjudicationFilters())
+
+    assert _ranking_tuples(result) == [
+        ("NULL-AMOUNT", Decimal("300.00"), 1, "RUT", "7")
+    ]
+
+
+def test_ranking_by_company_limits_to_ten_names(
+    db_session, make_compra, add_adj
+) -> None:
+    for index in range(12):
+        add_adj(
+            make_compra(),
+            nombre_comercial=f"COMPANY-{index:02d}",
+            tipo_doc_prov="RUT",
+            nro_doc_prov=str(index),
+            amount_uyu=Decimal(index + 1),
+        )
+
+    result = ranking_by_company(db_session, AdjudicationFilters(), limit=10)
+
+    assert len(result) == 10
+    assert [entry.name for entry in result] == [
+        f"COMPANY-{index:02d}" for index in range(11, 1, -1)
+    ]
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [
+            ("RUT", "1", Decimal("1000.00")),
+            ("", "", Decimal("500.00")),
+            ("CI", "2", None),
+        ],
+        [
+            ("CI", "9", Decimal("75.00")),
+            (None, None, Decimal("25.00")),
+        ],
+    ],
+)
+def test_ranking_by_company_matches_semantic_oracle(
+    db_session, make_compra, add_adj, rows
+) -> None:
+    inserted = []
+    for index, (company_type, company_number, amount) in enumerate(rows):
+        compra = make_compra(fecha_pub_adj=date(2024, 1, index + 1))
+        if (
+            company_type in (None, "")
+            or company_number in (None, "")
+        ):
+            row = _add_raw_ranking_adjudication(
+                db_session,
+                compra,
+                name="ORACLE-CO",
+                company_type=company_type,
+                company_number=company_number,
+                amount=amount,
+                article=f"oracle-{index}",
+            )
+        else:
+            row = add_adj(
+                compra,
+                nombre_comercial="ORACLE-CO",
+                tipo_doc_prov=company_type,
+                nro_doc_prov=company_number,
+                amount_uyu=amount,
+            )
+        inserted.append(row)
+
+    expected = _semantic_ranking_oracle(db_session, inserted, limit=10)
+
+    assert (
+        _ranking_tuples(ranking_by_company(db_session, AdjudicationFilters()))
+        == expected
+    )
+
+
+def test_ranking_by_company_docstring_describes_name_rollup() -> None:
+    docstring = ranking_by_company.__doc__ or ""
+
+    assert "grouped" in docstring.lower()
+    assert "identity" in docstring.lower()
+    assert "rollup" in docstring.lower()
+    assert "correlated" not in docstring.lower()
