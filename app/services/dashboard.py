@@ -452,45 +452,44 @@ def concentration_ratio(
     BOTH the numerator and the denominator (the metric is undefined
     for them, see the market-concentration spec).
 
-    The per-compra oferente count is computed via a correlated
-    subquery (``scalar_subquery`` on ``Oferente.compra_id``). This
-    keeps the whole aggregate to a single SQL trip, and the
-    correlated-subquery form is portable to SQLite — the test
-    database — as well as PostgreSQL.
+    Oferentes are grouped once by ``compra_id`` in a derived table, then
+    inner-joined to the distinct compras whose adjudicaciones match the
+    active filters. This keeps zero-oferente compras and compras without a
+    matching adjudicacion out of both buckets while remaining portable to
+    SQLite and PostgreSQL.
 
     ``ratio`` is ``None`` when no compras in the filtered set have
     any oferentes at all (denominator is zero). The route / template
     treats that as the empty state and skips the donut chart.
     """
 
-    oferente_count = (
-        select(func.count(Oferente.id))
-        .where(Oferente.compra_id == Compra.id)
-        .correlate(Compra)
-        .scalar_subquery()
+    of_counts = (
+        select(
+            Oferente.compra_id.label("compra_id"),
+            func.count(Oferente.id).label("of_count"),
+        )
+        .group_by(Oferente.compra_id)
+        .subquery("of_counts")
     )
 
-    # Comprehensively apply the same filters as the listing: a Compra
-    # is in scope when at least one of its Adjudicaciones matches the
-    # filter (organism / company / article / article_id / date range).
-    # We resolve the matching Compra IDs in a subquery, then bucket
-    # them by their oferente count.
-    matching_compras = (
-        select(Compra.id)
+    # A Compra is in scope when at least one of its Adjudicaciones matches
+    # the filter (organism / company / article / article_id / date range).
+    matching = (
+        select(Compra.id.label("id"))
         .join(Adjudicacion, Adjudicacion.compra_id == Compra.id)
         .distinct()
     )
-    matching_compras = _apply_filters(matching_compras, filters).subquery()
+    matching = _apply_filters(matching, filters).subquery("matching")
 
     single_expr = func.coalesce(
-        func.sum(case((oferente_count == 1, 1), else_=0)), 0
+        func.sum(case((of_counts.c.of_count == 1, 1), else_=0)), 0
     ).label("single")
     multi_expr = func.coalesce(
-        func.sum(case((oferente_count >= 2, 1), else_=0)), 0
+        func.sum(case((of_counts.c.of_count >= 2, 1), else_=0)), 0
     ).label("multi")
 
-    stmt = select(single_expr, multi_expr).where(
-        Compra.id.in_(select(matching_compras))
+    stmt = select(single_expr, multi_expr).select_from(of_counts).join(
+        matching, matching.c.id == of_counts.c.compra_id
     )
 
     row = session.execute(stmt).one()
