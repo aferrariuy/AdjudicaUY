@@ -886,6 +886,81 @@ class TestConcentrationRatio:
         assert result.multi_bidder_count == 0
         assert result.ratio == Decimal("1")
 
+    def test_purchase_with_off_filter_adjudication_is_excluded(
+        self, db_session, make_compra, add_adj, add_oferente
+    ) -> None:
+        matching = make_compra()
+        outside_scope = make_compra()
+        add_adj(matching, nombre_comercial="Target company")
+        add_adj(outside_scope, nombre_comercial="Other company")
+        add_oferente(matching)
+        add_oferente(outside_scope)
+        add_oferente(outside_scope, nombre_comercial="Second bidder")
+
+        result = concentration_ratio(
+            db_session, AdjudicationFilters(company="Target company")
+        )
+
+        assert result.single_bidder_count == 1
+        assert result.multi_bidder_count == 0
+        assert result.ratio == Decimal("1")
+
+    def test_null_amount_matching_adjudication_still_classifies_purchase(
+        self, db_session, make_compra, add_adj, add_oferente
+    ) -> None:
+        compra = make_compra()
+        add_adj(compra, amount_uyu=None)
+        add_oferente(compra)
+        add_oferente(compra, nombre_comercial="Second bidder")
+
+        result = concentration_ratio(db_session, AdjudicationFilters())
+
+        assert result.single_bidder_count == 0
+        assert result.multi_bidder_count == 1
+        assert result.ratio == Decimal("0")
+
+    def test_date_range_scopes_concentration_to_matching_purchases(
+        self, db_session, make_compra, add_adj, add_oferente
+    ) -> None:
+        in_range = make_compra(fecha_pub_adj=date(2026, 6, 15))
+        outside_range = make_compra(fecha_pub_adj=date(2025, 12, 31))
+        add_adj(in_range)
+        add_adj(outside_range)
+        add_oferente(in_range)
+        add_oferente(outside_range)
+        add_oferente(outside_range, nombre_comercial="Second bidder")
+
+        result = concentration_ratio(
+            db_session,
+            AdjudicationFilters(
+                date_from=date(2026, 1, 1), date_to=date(2026, 12, 31)
+            ),
+        )
+
+        assert result.single_bidder_count == 1
+        assert result.multi_bidder_count == 0
+        assert result.ratio == Decimal("1")
+
+    def test_company_document_exact_scopes_concentration(
+        self, db_session, make_compra, add_adj, add_oferente
+    ) -> None:
+        matching = make_compra()
+        outside_scope = make_compra()
+        add_adj(matching, tipo_doc_prov="RUT", nro_doc_prov="111")
+        add_adj(outside_scope, tipo_doc_prov="RUT", nro_doc_prov="222")
+        add_oferente(matching)
+        add_oferente(outside_scope)
+        add_oferente(outside_scope, nombre_comercial="Second bidder")
+
+        result = concentration_ratio(
+            db_session,
+            AdjudicationFilters(company_doc_exact=("RUT", "111")),
+        )
+
+        assert result.single_bidder_count == 1
+        assert result.multi_bidder_count == 0
+        assert result.ratio == Decimal("1")
+
     def test_empty_db_returns_none_ratio(self, db_session) -> None:
         result = concentration_ratio(db_session, AdjudicationFilters())
         assert result.single_bidder_count == 0
