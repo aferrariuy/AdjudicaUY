@@ -137,12 +137,12 @@ def ranking_by_company(
     """Return the top companies by total adjudicated amount in UYU.
 
     A set-based grouped scan first computes each company's document-identity
-    counts, amounts, and latest award date. A window selects the dominant
-    valid identity, while a separate name rollup combines every identity's
-    non-NULL amount and count. This preserves the rule that invalid or empty
-    document rows contribute to the company total but never become its
-    attached identity. Rows with NULL ``amount_uyu`` are excluded from both
-    the SUM and the count.
+    counts, amounts, and latest award date. Window functions select the
+    dominant valid identity and perform a windowed name rollup of every
+    identity's non-NULL amount and count by name. This preserves the rule
+    that invalid or empty document rows contribute to the company total but
+    never become its attached identity. Rows with NULL ``amount_uyu`` are
+    excluded from both the SUM and the count.
 
     The ranking MUST reflect the same filters as the listing (see
     ranking-visualization spec, "Ranking reflects active filters"
@@ -180,7 +180,7 @@ def ranking_by_company(
         )
     )
     grouped = _apply_filters(grouped_stmt, filters).subquery("grouped")
-    ranked = select(
+    windowed = select(
         grouped,
         func.row_number()
         .over(
@@ -194,33 +194,25 @@ def ranking_by_company(
             ),
         )
         .label("rn"),
-    ).subquery("ranked")
-    name_totals = (
-        select(
-            grouped.c.name,
-            func.sum(grouped.c.total).label("name_total"),
-            func.sum(grouped.c.cnt).label("name_cnt"),
-        )
-        .group_by(grouped.c.name)
-        .subquery("name_totals")
-    )
+        func.sum(grouped.c.total).over(partition_by=grouped.c.name).label("name_total"),
+        func.sum(grouped.c.cnt).over(partition_by=grouped.c.name).label("name_cnt"),
+    ).subquery("windowed")
 
     stmt = (
         select(
-            ranked.c.name,
-            name_totals.c.name_total.label("total_amount_uyu"),
-            name_totals.c.name_cnt.label("adjudication_count"),
-            case((ranked.c.valid == 1, ranked.c.company_type), else_=None).label(
+            windowed.c.name,
+            windowed.c.name_total.label("total_amount_uyu"),
+            windowed.c.name_cnt.label("adjudication_count"),
+            case((windowed.c.valid == 1, windowed.c.company_type), else_=None).label(
                 "company_type"
             ),
-            case((ranked.c.valid == 1, ranked.c.company_number), else_=None).label(
+            case((windowed.c.valid == 1, windowed.c.company_number), else_=None).label(
                 "company_number"
             ),
         )
-        .select_from(ranked)
-        .join(name_totals, name_totals.c.name == ranked.c.name)
-        .where(ranked.c.rn == 1)
-        .order_by(name_totals.c.name_total.desc())
+        .select_from(windowed)
+        .where(windowed.c.rn == 1)
+        .order_by(windowed.c.name_total.desc())
         .limit(limit)
     )
     return [
