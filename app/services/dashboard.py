@@ -136,83 +136,85 @@ def ranking_by_company(
 ) -> list[RankingEntry]:
     """Return the top companies by total adjudicated amount in UYU.
 
-    Each :class:`RankingEntry` carries the company name, the SUM of
-    ``Adjudicacion.amount_uyu`` for that company, and the count of
-    adjudicated line items the company contributed. Rows with NULL
-    ``amount_uyu`` (non-convertible currencies) are excluded from
-    both the SUM and the count so they do not skew the totals.
+    A set-based grouped scan first computes each company's document-identity
+    counts, amounts, and latest award date. Window functions select the
+    dominant valid identity and perform a windowed name rollup of every
+    identity's non-NULL amount and count by name. This preserves the rule
+    that invalid or empty document rows contribute to the company total but
+    never become its attached identity. Rows with NULL ``amount_uyu`` are
+    excluded from both the SUM and the count.
 
     The ranking MUST reflect the same filters as the listing (see
     ranking-visualization spec, "Ranking reflects active filters"
     scenario).
     """
 
-    pair_count = func.count(Adjudicacion.id)
-    latest_date = func.max(Compra.fecha_pub_adj)
-    identity_stmt = (
+    valid = case(
+        (
+            and_(
+                Adjudicacion.tipo_doc_prov.is_not(None),
+                Adjudicacion.tipo_doc_prov != "",
+                Adjudicacion.nro_doc_prov.is_not(None),
+                Adjudicacion.nro_doc_prov != "",
+            ),
+            1,
+        ),
+        else_=0,
+    ).label("valid")
+    grouped_stmt = (
         select(
             Adjudicacion.nombre_comercial.label("name"),
             Adjudicacion.tipo_doc_prov.label("company_type"),
             Adjudicacion.nro_doc_prov.label("company_number"),
-            pair_count.label("pair_count"),
-            latest_date.label("latest_date"),
+            func.count(Adjudicacion.id).label("cnt"),
+            func.sum(Adjudicacion.amount_uyu).label("total"),
+            func.max(Compra.fecha_pub_adj).label("latest_date"),
+            valid,
         )
         .join(Compra, Compra.id == Adjudicacion.compra_id)
-        .where(
-            Adjudicacion.amount_uyu.is_not(None),
-            Adjudicacion.tipo_doc_prov.is_not(None),
-            Adjudicacion.nro_doc_prov.is_not(None),
-            Adjudicacion.tipo_doc_prov != "",
-            Adjudicacion.nro_doc_prov != "",
-        )
+        .where(Adjudicacion.amount_uyu.is_not(None))
         .group_by(
             Adjudicacion.nombre_comercial,
             Adjudicacion.tipo_doc_prov,
             Adjudicacion.nro_doc_prov,
         )
     )
-    identity_stmt = _apply_filters(identity_stmt, filters)
-    identity_rows = identity_stmt.subquery("company_identity_counts")
-    identity_ranked = select(
-        identity_rows,
+    grouped = _apply_filters(grouped_stmt, filters).subquery("grouped")
+    windowed = select(
+        grouped,
         func.row_number()
         .over(
-            partition_by=identity_rows.c.name,
+            partition_by=grouped.c.name,
             order_by=(
-                identity_rows.c.pair_count.desc(),
-                identity_rows.c.latest_date.desc(),
-                identity_rows.c.company_type.asc(),
-                identity_rows.c.company_number.asc(),
+                grouped.c.valid.desc(),
+                grouped.c.cnt.desc(),
+                grouped.c.latest_date.desc(),
+                grouped.c.company_type.asc(),
+                grouped.c.company_number.asc(),
             ),
         )
-        .label("identity_rank"),
-    ).subquery("company_identity_ranked")
+        .label("rn"),
+        func.sum(grouped.c.total).over(partition_by=grouped.c.name).label("name_total"),
+        func.sum(grouped.c.cnt).over(partition_by=grouped.c.name).label("name_cnt"),
+    ).subquery("windowed")
 
     stmt = (
         select(
-            Adjudicacion.nombre_comercial.label("name"),
-            func.coalesce(func.sum(Adjudicacion.amount_uyu), 0).label(
-                "total_amount_uyu"
+            windowed.c.name,
+            windowed.c.name_total.label("total_amount_uyu"),
+            windowed.c.name_cnt.label("adjudication_count"),
+            case((windowed.c.valid == 1, windowed.c.company_type), else_=None).label(
+                "company_type"
             ),
-            func.count(Adjudicacion.id).label("adjudication_count"),
-            identity_ranked.c.company_type,
-            identity_ranked.c.company_number,
-        )
-        .join(Compra, Compra.id == Adjudicacion.compra_id)
-        .outerjoin(
-            identity_ranked,
-            and_(
-                identity_ranked.c.name == Adjudicacion.nombre_comercial,
-                identity_ranked.c.identity_rank == 1,
+            case((windowed.c.valid == 1, windowed.c.company_number), else_=None).label(
+                "company_number"
             ),
         )
-        .where(Adjudicacion.amount_uyu.is_not(None))
-        .group_by(Adjudicacion.nombre_comercial)
-        .group_by(identity_ranked.c.company_type, identity_ranked.c.company_number)
-        .order_by(func.sum(Adjudicacion.amount_uyu).desc())
+        .select_from(windowed)
+        .where(windowed.c.rn == 1)
+        .order_by(windowed.c.name_total.desc())
         .limit(limit)
     )
-    stmt = _apply_filters(stmt, filters)
     return [
         RankingEntry(
             name=row.name,
@@ -488,8 +490,10 @@ def concentration_ratio(
         func.sum(case((of_counts.c.of_count >= 2, 1), else_=0)), 0
     ).label("multi")
 
-    stmt = select(single_expr, multi_expr).select_from(of_counts).join(
-        matching, matching.c.id == of_counts.c.compra_id
+    stmt = (
+        select(single_expr, multi_expr)
+        .select_from(of_counts)
+        .join(matching, matching.c.id == of_counts.c.compra_id)
     )
 
     row = session.execute(stmt).one()
