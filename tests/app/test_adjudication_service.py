@@ -932,9 +932,7 @@ class TestConcentrationRatio:
 
         result = concentration_ratio(
             db_session,
-            AdjudicationFilters(
-                date_from=date(2026, 1, 1), date_to=date(2026, 12, 31)
-            ),
+            AdjudicationFilters(date_from=date(2026, 1, 1), date_to=date(2026, 12, 31)),
         )
 
         assert result.single_bidder_count == 1
@@ -974,8 +972,8 @@ class TestConcentrationRatio:
 
         A Compra can have multiple line items (one Adjudicacion per
         article) but it has a single set of oferentes. We must
-        deduplicate the Compra before bucketing — otherwise the
-        correlated subquery would over-count the oferentes.
+        deduplicate the Compra before bucketing — otherwise counting
+        through each Adjudicacion would over-count the oferentes.
         """
 
         c1 = make_compra()
@@ -1715,23 +1713,27 @@ def _semantic_ranking_oracle(
 ) -> list[tuple[str, Decimal, int, str | None, str | None]]:
     """Compute ranking semantics in Python, independently of SQL shape."""
 
-    grouped = {}
+    grouped: dict[tuple[str, str | None, str | None], tuple[int, Decimal, date]] = {}
     for row in rows:
-        if row.amount_uyu is None:
+        amount = cast("Decimal | None", row.amount_uyu)
+        if amount is None:
             continue
-        key = (row.nombre_comercial, row.tipo_doc_prov, row.nro_doc_prov)
+        key = (
+            cast("str", row.nombre_comercial),
+            cast("str | None", row.tipo_doc_prov),
+            cast("str | None", row.nro_doc_prov),
+        )
         compra = session.get(Compra, row.compra_id)
         assert compra is not None
-        count, total, latest = grouped.get(
-            key, (0, Decimal("0.00"), compra.fecha_pub_adj)
-        )
+        compra_date = cast("date", compra.fecha_pub_adj)
+        count, total, latest = grouped.get(key, (0, Decimal("0.00"), compra_date))
         grouped[key] = (
             count + 1,
-            total + row.amount_uyu,
-            max(latest, compra.fecha_pub_adj),
+            total + amount,
+            max(latest, compra_date),
         )
 
-    by_name = {}
+    by_name: dict[str, list[tuple[str | None, str | None, int, Decimal, date]]] = {}
     for (name, company_type, company_number), (count, total, latest) in grouped.items():
         by_name.setdefault(name, []).append(
             (company_type, company_number, count, total, latest)
@@ -1808,9 +1810,7 @@ def test_ranking_by_company_mixed_invalid_and_valid_documents_rolls_up_name(
 
     result = ranking_by_company(db_session, AdjudicationFilters())
 
-    assert _ranking_tuples(result) == [
-        ("MIXED-CO", Decimal("1500.00"), 2, "RUT", "99")
-    ]
+    assert _ranking_tuples(result) == [("MIXED-CO", Decimal("1500.00"), 2, "RUT", "99")]
 
 
 def test_ranking_by_company_empty_string_identity_is_unlinked(
@@ -1828,9 +1828,7 @@ def test_ranking_by_company_empty_string_identity_is_unlinked(
 
     result = ranking_by_company(db_session, AdjudicationFilters())
 
-    assert _ranking_tuples(result) == [
-        ("EMPTY-DOC", Decimal("250.00"), 1, None, None)
-    ]
+    assert _ranking_tuples(result) == [("EMPTY-DOC", Decimal("250.00"), 1, None, None)]
 
 
 def test_ranking_by_company_identity_is_ranked_inside_filtered_set(
@@ -1929,10 +1927,7 @@ def test_ranking_by_company_matches_semantic_oracle(
     inserted = []
     for index, (company_type, company_number, amount) in enumerate(rows):
         compra = make_compra(fecha_pub_adj=date(2024, 1, index + 1))
-        if (
-            company_type in (None, "")
-            or company_number in (None, "")
-        ):
+        if company_type in (None, "") or company_number in (None, ""):
             row = _add_raw_ranking_adjudication(
                 db_session,
                 compra,

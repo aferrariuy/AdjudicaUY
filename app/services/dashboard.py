@@ -498,8 +498,10 @@ def concentration_ratio(
         func.sum(case((of_counts.c.of_count >= 2, 1), else_=0)), 0
     ).label("multi")
 
-    stmt = select(single_expr, multi_expr).select_from(of_counts).join(
-        matching, matching.c.id == of_counts.c.compra_id
+    stmt = (
+        select(single_expr, multi_expr)
+        .select_from(of_counts)
+        .join(matching, matching.c.id == of_counts.c.compra_id)
     )
 
     row = session.execute(stmt).one()
