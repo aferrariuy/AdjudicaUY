@@ -40,16 +40,16 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import get_settings
 from app.database import get_session_factory
+from app.formatting import build_license_link
 from scraper.bcu_client import BcuClient, BcuError
 from scraper.normalizer import (
     CompraEnrichment,
     CompraRow,
     NormalizationError,
-    build_license_link,
     normalize_compra,
 )
 from scraper.organism_lookup import UNKNOWN_ORGANISM_PREFIX, resolve_organism
-from scraper.persistence import _bulk_insert
+from scraper.persistence import bulk_insert
 from scraper.ucc_lookup import resolve_ucc_organism
 from scraper.xml_report import (
     XmlCompra,
@@ -139,7 +139,7 @@ def enrich_xml_compra(
 # ---------------------------------------------------------------------------
 # Persistence helpers
 # ---------------------------------------------------------------------------
-# The dict projections and ``_bulk_insert`` live in
+# The dict projections and ``bulk_insert`` live in
 # :mod:`scraper.persistence` — imported at the top. They were
 # historically duplicated between this module and
 # ``scripts/scrape_day_by_day.py``; the canonical home is the
@@ -309,7 +309,7 @@ def run_scrape(
     in-memory buffer and committed when either threshold is hit, then a
     final flush drains the buffer in the ``finally`` block. This shrinks
     commit overhead from ``O(days)`` to ``O(days / flush_interval)``.
-    The ``ON CONFLICT DO NOTHING`` clause in :func:`_bulk_insert` keeps
+    The ``ON CONFLICT DO NOTHING`` clause in :func:`bulk_insert` keeps
     a re-run after a crash mid-batch idempotent.
     """
 
@@ -383,7 +383,7 @@ def run_scrape(
                     len(buffer) >= flush_size or days_since_flush >= flush_interval
                 ):
                     try:
-                        inserted = _bulk_insert(db, buffer)
+                        inserted = bulk_insert(db, buffer)
                         total_inserted += inserted
                         log.info(
                             "Flushed %d records (%d total)",
@@ -403,7 +403,7 @@ def run_scrape(
 
         if buffer:
             try:
-                inserted = _bulk_insert(db, buffer)
+                inserted = bulk_insert(db, buffer)
                 total_inserted += inserted
                 log.info(
                     "Final flush: %d records (%d total)",

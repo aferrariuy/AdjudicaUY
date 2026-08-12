@@ -8,10 +8,10 @@ from urllib.parse import quote
 
 from sqlalchemy import func, select
 
+from app.formatting import build_license_link, display_currency
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
 from app.services.filters import AdjudicationFilters, _apply_filters
-from scraper.normalizer import build_license_link, display_currency
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -147,10 +147,10 @@ def _row_to_adjudication_row(row: Any) -> AdjudicationRow:
     """Map a SQLAlchemy row to a display-shaped :class:`AdjudicationRow`.
 
     The ``currency`` field is derived at query time from
-    ``id_moneda`` (see :func:`scraper.normalizer.display_currency`); the database does
-    not store the display code, and the per-line-item conversion
-    tables live in :mod:`scraper.normalizer`. Unknown codes fall back
-    to ``"N/D"`` so the template never renders a blank currency.
+        ``id_moneda`` (see :func:`app.formatting.display_currency`); the database does
+        not store the display code, and the per-line-item conversion
+        tables live in :mod:`app.formatting`. Unknown codes fall back
+        to ``"N/D"`` so the template never renders a blank currency.
     """
 
     id_moneda = getattr(row, "id_moneda", None)

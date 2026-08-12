@@ -45,7 +45,7 @@ def test_head_csv_export_returns_empty_success(
 def test_post_only_request_does_not_gain_head() -> None:
     from fastapi import APIRouter, FastAPI
 
-    from app.main import HeadAwareAPIRoute
+    from app.routes._base import HeadAwareAPIRoute
 
     app = FastAPI()
     router = APIRouter(route_class=HeadAwareAPIRoute)

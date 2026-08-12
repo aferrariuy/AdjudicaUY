@@ -1,4 +1,4 @@
-"""Tests for :func:`app.services.adjudication_service.all_organisms`.
+"""Tests for :func:`app.services.catalog.all_organisms`.
 
 The ``all_organisms`` query returns every distinct organism name in the
 database without a LIMIT clause — it feeds the sitemap.xml route, which
@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
-from app.services.adjudication_service import all_organisms
+from app.services.catalog import all_organisms
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session

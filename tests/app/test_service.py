@@ -10,11 +10,8 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from app.services.adjudication_service import (
-    AdjudicationFilters,
-    AdjudicationRow,
-    iter_adjudications,
-)
+from app.services.filters import AdjudicationFilters
+from app.services.listing import AdjudicationRow, iter_adjudications
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session

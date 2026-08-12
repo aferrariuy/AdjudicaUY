@@ -10,13 +10,13 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.database import get_db
-from app.main import HeadAwareAPIRoute
 from app.presenters import (
     _build_concentration_chart_payload,
     _build_page_numbers,
     _build_seo_context,
     _build_trend_chart_payload,
 )
+from app.routes._base import HeadAwareAPIRoute
 from app.routes.common import (
     ORGANISM_SUGGEST_LIMIT,
     PAGE_SIZE,

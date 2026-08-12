@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
-from app.services.adjudication_service import all_companies
+from app.services.catalog import all_companies
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session

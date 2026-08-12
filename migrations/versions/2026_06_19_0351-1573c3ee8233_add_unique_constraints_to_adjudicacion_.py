@@ -5,7 +5,7 @@ Revises: 007_add_id_ucc
 Create Date: 2026-06-19 03:51:05.777039+00:00
 
 Adds the natural-key unique constraints that back the
-``ON CONFLICT DO NOTHING`` clause in :func:`scraper.persistence._bulk_insert`:
+``ON CONFLICT DO NOTHING`` clause in :func:`scraper.persistence.bulk_insert`:
 
 * ``adjudicacion`` — one awarded line item per (compra, company, article).
   The triple is the natural key in the upstream XML report; a second

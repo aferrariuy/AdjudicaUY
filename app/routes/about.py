@@ -5,8 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse
 
-from app.main import HeadAwareAPIRoute
 from app.presenters import _build_seo_context
+from app.routes._base import HeadAwareAPIRoute
 from app.routes.common import _render
 
 router = APIRouter(route_class=HeadAwareAPIRoute)

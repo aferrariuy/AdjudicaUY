@@ -10,7 +10,7 @@ provides:
   onto the ``adjudicacion`` table row (carries the parent FK).
 * :func:`_oferente_dict` — project an :class:`OferenteRow` onto
   the ``oferente`` table row (carries the parent FK).
-* :func:`_bulk_insert` — insert a batch of :class:`CompraRow`
+* :func:`bulk_insert` — insert a batch of :class:`CompraRow`
   records, idempotently on ``compra.id_compra`` (re-runs of the
   scraper on the same data are a no-op at the parent level).
 
@@ -42,9 +42,9 @@ from scraper.normalizer import (
 )
 from scraper.persistence import (
     _adjudicacion_dict,
-    _bulk_insert,
     _compra_dict,
     _oferente_dict,
+    bulk_insert,
 )
 
 # ---------------------------------------------------------------------------
@@ -289,14 +289,14 @@ def test_oferente_dict_handles_optional_nones() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _bulk_insert
+# bulk_insert
 # ---------------------------------------------------------------------------
 
 
 def test_bulk_insert_empty_rows_returns_zero(db_session) -> None:
-    """``_bulk_insert`` on an empty list is a no-op (returns 0)."""
+    """``bulk_insert`` on an empty list is a no-op (returns 0)."""
 
-    result = _bulk_insert(db_session, [])
+    result = bulk_insert(db_session, [])
 
     assert result == 0
     # No rows were inserted
@@ -305,7 +305,7 @@ def test_bulk_insert_empty_rows_returns_zero(db_session) -> None:
 
 
 def test_bulk_insert_persists_one_compra_with_children(db_session) -> None:
-    """``_bulk_insert`` writes the compra, the adjud, and the oferente.
+    """``bulk_insert`` writes the compra, the adjud, and the oferente.
 
     End-to-end check: the parent lands, the children attach to the
     parent's primary key, and the function returns the number of
@@ -316,7 +316,7 @@ def test_bulk_insert_persists_one_compra_with_children(db_session) -> None:
     compra.adjudicaciones.append(_adjudicacion_row())
     compra.oferentes.append(_oferente_row())
 
-    result = _bulk_insert(db_session, [compra])
+    result = bulk_insert(db_session, [compra])
 
     assert result == 1
 
@@ -342,7 +342,7 @@ def test_bulk_insert_persists_one_compra_with_children(db_session) -> None:
 
 
 def test_bulk_insert_parent_idempotent_on_id_compra(db_session) -> None:
-    """Re-running ``_bulk_insert`` on the same data inserts nothing.
+    """Re-running ``bulk_insert`` on the same data inserts nothing.
 
     The parent ``compra`` AND its child ``adjudicacion`` /
     ``oferente`` rows are all guarded by unique constraints with
@@ -363,8 +363,8 @@ def test_bulk_insert_parent_idempotent_on_id_compra(db_session) -> None:
     compra.adjudicaciones.extend([adj1, adj2, adj3])
     compra.oferentes.extend([ofe1, ofe2])
 
-    first = _bulk_insert(db_session, [compra])
-    second = _bulk_insert(db_session, [compra])
+    first = bulk_insert(db_session, [compra])
+    second = bulk_insert(db_session, [compra])
 
     assert first == 1
     assert second == 1  # Returns input length, not actually-inserted count
@@ -385,7 +385,7 @@ def test_bulk_insert_child_idempotent_on_rerun(db_session) -> None:
 
     Focused regression test for the child-duplication bug: even a
     single Compra with 2 adjudicaciones and 1 oferente must keep
-    its child counts stable across a second ``_bulk_insert`` call.
+    its child counts stable across a second ``bulk_insert`` call.
     """
 
     compra = _compra_row(id_compra="BULK-CHILD")
@@ -395,8 +395,8 @@ def test_bulk_insert_child_idempotent_on_rerun(db_session) -> None:
     )
     compra.oferentes.append(_oferente_row())
 
-    _bulk_insert(db_session, [compra])
-    _bulk_insert(db_session, [compra])
+    bulk_insert(db_session, [compra])
+    bulk_insert(db_session, [compra])
 
     # Exactly the children from one Compra — no duplicates.
     assert db_session.scalar(select(func.count()).select_from(Adjudicacion)) == 2
@@ -404,7 +404,7 @@ def test_bulk_insert_child_idempotent_on_rerun(db_session) -> None:
 
 
 def test_bulk_insert_persists_multiple_compras(db_session) -> None:
-    """``_bulk_insert`` handles a batch of N compras in one call.
+    """``bulk_insert`` handles a batch of N compras in one call.
 
     Verifies the loop body, the FK resolution, and the return
     value (input length, not inserted count).
@@ -417,7 +417,7 @@ def test_bulk_insert_persists_multiple_compras(db_session) -> None:
         r.adjudicaciones.append(_adjudicacion_row())
         r.oferentes.append(_oferente_row())
 
-    result = _bulk_insert(db_session, rows)
+    result = bulk_insert(db_session, rows)
 
     assert result == 3
 
@@ -426,7 +426,7 @@ def test_bulk_insert_persists_multiple_compras(db_session) -> None:
 
 
 def test_bulk_insert_propagates_sqlalchemy_error(db_session) -> None:
-    """``_bulk_insert`` lets ``SQLAlchemyError`` propagate (fail-hard).
+    """``bulk_insert`` lets ``SQLAlchemyError`` propagate (fail-hard).
 
     The canonical worker relies on this — a DB error must surface
     so the orchestrating cron / Dokploy job can see it. The script
@@ -446,4 +446,4 @@ def test_bulk_insert_propagates_sqlalchemy_error(db_session) -> None:
             pass
 
     with pytest.raises(SQLAlchemyError, match="simulated DB failure"):
-        _bulk_insert(cast("Session", _AlwaysFailSession()), [_compra_row()])
+        bulk_insert(cast("Session", _AlwaysFailSession()), [_compra_row()])
