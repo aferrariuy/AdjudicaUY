@@ -469,8 +469,7 @@ def test_normalize_unknown_currency_skips_line_and_retains_parent(caplog) -> Non
     warning_messages = [
         record.message
         for record in caplog.records
-        if record.levelno == logging.WARNING
-        and record.name == "scraper.normalizer"
+        if record.levelno == logging.WARNING and record.name == "scraper.normalizer"
     ]
     assert len(warning_messages) == 1
     msg = warning_messages[0]
@@ -586,8 +585,7 @@ def test_normalize_negative_amount_skips_line_and_retains_parent(caplog) -> None
     warning_messages = [
         record.message
         for record in caplog.records
-        if record.levelno == logging.WARNING
-        and record.name == "scraper.normalizer"
+        if record.levelno == logging.WARNING and record.name == "scraper.normalizer"
     ]
     assert len(warning_messages) == 1
     assert "invalid precio_tot_imp" in warning_messages[0]
@@ -637,8 +635,7 @@ def test_normalize_non_finite_amount_skips_line_and_retains_parent(
     warning_messages = [
         record.message
         for record in caplog.records
-        if record.levelno == logging.WARNING
-        and record.name == "scraper.normalizer"
+        if record.levelno == logging.WARNING and record.name == "scraper.normalizer"
     ]
     assert len(warning_messages) == 1
     assert "invalid precio_tot_imp" in warning_messages[0]
@@ -692,8 +689,7 @@ def test_normalize_bcu_failure_from_monedas_lookup_isolates_line_and_retains_par
     warning_messages = [
         record.message
         for record in caplog.records
-        if record.levelno == logging.WARNING
-        and record.name == "scraper.normalizer"
+        if record.levelno == logging.WARNING and record.name == "scraper.normalizer"
     ]
     assert len(warning_messages) == 1
     assert "id_compra=1319278" in warning_messages[0]
@@ -760,8 +756,7 @@ def test_normalize_mixed_valid_invalid_siblings_keeps_only_valid_line(
     warning_messages = [
         record.message
         for record in caplog.records
-        if record.levelno == logging.WARNING
-        and record.name == "scraper.normalizer"
+        if record.levelno == logging.WARNING and record.name == "scraper.normalizer"
     ]
     assert len(warning_messages) == 1
     assert "id_compra=1319278" in warning_messages[0]
@@ -852,8 +847,7 @@ def test_normalize_all_invalid_children_retains_parent_with_oferentes(
     warning_messages = [
         record.message
         for record in caplog.records
-        if record.levelno == logging.WARNING
-        and record.name == "scraper.normalizer"
+        if record.levelno == logging.WARNING and record.name == "scraper.normalizer"
     ]
     assert len(warning_messages) == 2
     assert any("invalid precio_tot_imp" in msg for msg in warning_messages)
@@ -913,8 +907,7 @@ def test_normalize_monto_adj_verbatim_when_it_differs_from_surviving_totals(
     warning_messages = [
         record.message
         for record in caplog.records
-        if record.levelno == logging.WARNING
-        and record.name == "scraper.normalizer"
+        if record.levelno == logging.WARNING and record.name == "scraper.normalizer"
     ]
     assert len(warning_messages) == 1
 
