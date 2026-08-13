@@ -10,8 +10,10 @@ default (02:00) with one logged error instead of crashing the worker.
 The daily job is registered with an explicit UTC timezone.
 
 Configuration (environment variables):
-    SCRAPE_HOUR   — Hour of day to run (0-23, default: 2)
-    SCRAPE_MINUTE — Minute of the hour (0-59, default: 0)
+    SCRAPE_HOUR           — Hour of day to run (0-23, default: 2)
+    SCRAPE_MINUTE         — Minute of the hour (0-59, default: 0)
+    WORKER_HEARTBEAT_FILE — Heartbeat path (default: /tmp/worker.heartbeat)
+    WORKER_LAST_RUN_FILE  — Last-run marker path (default: /tmp/worker.last-run.json)
 
 Usage::
 
@@ -20,16 +22,25 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
+import tempfile
 import time
+from datetime import datetime, timezone
 
 import schedule
 
 from scraper.main import _configure_logging, run_scrape
 
 logger = logging.getLogger(__name__)
+
+# Default marker paths — pinned by the docker-compose worker contract; both
+# live under the container's writable /tmp tmpfs (read_only: true). The /tmp
+# literals are deliberate: they ARE the pinned defaults.
+_HEARTBEAT_FILE_DEFAULT = "/tmp/worker.heartbeat"  # noqa: S108  # nosec B108
+_LAST_RUN_FILE_DEFAULT = "/tmp/worker.last-run.json"  # noqa: S108  # nosec B108
 
 # Graceful shutdown flag — set by SIGTERM/SIGINT handlers so the main
 # loop can exit cleanly when Docker stops the container.
@@ -40,6 +51,53 @@ def _handle_signal(signum: int, _frame: object) -> None:
     global _shutdown  # noqa: PLW0603
     logger.info("Received signal %d, shutting down…", signum)
     _shutdown = True
+
+
+def _heartbeat_path() -> str:
+    return os.environ.get("WORKER_HEARTBEAT_FILE", _HEARTBEAT_FILE_DEFAULT)
+
+
+def _last_run_path() -> str:
+    return os.environ.get("WORKER_LAST_RUN_FILE", _LAST_RUN_FILE_DEFAULT)
+
+
+def _touch_heartbeat(path: str) -> None:
+    with open(path, "a", encoding="utf-8"):
+        pass
+    os.utime(path, None)
+
+
+def _heartbeat_is_fresh(path: str, threshold: float = 300.0) -> bool:
+    try:
+        return os.path.isfile(path) and time.time() - os.path.getmtime(path) < threshold
+    except OSError:
+        return False
+
+
+def _write_last_run(path: str, count: int) -> None:
+    """Atomically replace the last-run marker with a successful scrape record."""
+    parent = os.path.dirname(path) or "."
+    prefix = f".{os.path.basename(path)}."
+    payload = {
+        "completed_at": datetime.now(timezone.utc)  # noqa: UP017 — pinned contract uses timezone.utc
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z"),
+        "record_count": count,
+    }
+    fd, tmp_path = tempfile.mkstemp(prefix=prefix, dir=parent, text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, separators=(",", ":"))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+        tmp_path = ""
+    finally:
+        if tmp_path:
+            try:  # noqa: SIM105 — pinned cleanup contract unlinks the leftover temp file
+                os.unlink(tmp_path)
+            except FileNotFoundError:
+                pass
 
 
 def _parse_schedule_component(
@@ -89,12 +147,19 @@ def _parse_schedule_component(
 
 
 def _run() -> None:
-    """Wrapper around :func:`run_scrape` that catches exceptions."""
+    """Run one scheduled scrape, recording a last-run marker on success."""
     try:
         inserted = run_scrape()
-        logger.info("Scheduled scrape completed: %d records", inserted)
     except Exception:
         logger.exception("Scheduled scrape failed")
+        return
+
+    logger.info("Scheduled scrape completed: %d records", inserted)
+    path = _last_run_path()
+    try:
+        _write_last_run(path, inserted)
+    except Exception:
+        logger.exception("Last-run marker write failed at %s", path)
 
 
 def main() -> None:
@@ -118,6 +183,11 @@ def main() -> None:
     )
 
     while not _shutdown:
+        path = _heartbeat_path()
+        try:
+            _touch_heartbeat(path)
+        except Exception:
+            logger.exception("Heartbeat touch failed at %s", path)
         schedule.run_pending()
         time.sleep(30)  # check every 30 seconds
 
