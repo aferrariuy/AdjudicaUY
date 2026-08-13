@@ -37,6 +37,7 @@ from app.services.company import (
     CompanyCompetitor,
     CompanyProfileSummary,
     CompanyWinRate,
+    _without_company_identity,
     company_competitors,
     company_summary,
     company_win_rate,
@@ -120,6 +121,45 @@ def _build_company_context(
     _inject_default_year_params(raw_params)
     validate_date_params(raw_params)
     filters = _company_filters(raw_type, raw_number, raw_params)
+    page = max(_coerce_page(raw_params.get("page")), 1)
+
+    # One guard for the incomplete-identity path: no identity lookup,
+    # listing, aggregate, or cache work happens for an empty decoded
+    # document type or number.
+    if not decoded_type or not decoded_number:
+        return {
+            "filters": filters,
+            "company_type": decoded_type,
+            "company_number": decoded_number,
+            "company_name": None,
+            "company_summary": CompanyProfileSummary(
+                display_name=None,
+                total_amount=Decimal("0"),
+                total=0,
+                purchase_count=0,
+                organism_count=0,
+                share_of_total=Decimal("0"),
+            ),
+            "results": [],
+            "total": 0,
+            "shown": 0,
+            "page_size": PAGE_SIZE,
+            "page": page,
+            "total_pages": 1,
+            "page_numbers": _build_page_numbers(page, 1),
+            "ranking_rows": [],
+            "top_article_rows": [],
+            "organisms": [],
+            "trend_rows": [],
+            "trend_payload": _build_trend_chart_payload([]),
+            "has_trend_data": False,
+            "concentration": ConcentrationResult(None, 0, 0),
+            "concentration_payload": None,
+            "has_concentration_data": False,
+            "company_win_rate": CompanyWinRate(0, 0, None),
+            "company_competitors": [],
+            "company_variant": True,
+        }
 
     def win_rate_adapter(
         session: Session,
@@ -145,96 +185,67 @@ def _build_company_context(
             limit=selected_limit,
         )
 
-    summary = CompanyProfileSummary(
-        display_name=None,
-        total_amount=Decimal("0"),
-        total=0,
-        purchase_count=0,
-        organism_count=0,
-        share_of_total=Decimal("0"),
+    identity_name = lookup_company_identity(db, decoded_type, decoded_number)
+    market_filters = _without_company_identity(filters)
+    market = cached_aggregate("kpi_summary", kpi_summary, db, market_filters)
+    summary = replace(
+        cached_aggregate(
+            "company_summary",
+            lambda s, f: company_summary(s, f, market_total=market.total_amount),
+            db,
+            filters,
+        ),
+        display_name=identity_name,
     )
-    identity_name: str | None = None
-    if decoded_type and decoded_number:
-        identity_name = lookup_company_identity(db, decoded_type, decoded_number)
-        market_filters = replace(filters, company_doc_exact=None)
-        market = cached_aggregate("kpi_summary", kpi_summary, db, market_filters)
-        summary = replace(
-            cached_aggregate(
-                "company_summary",
-                lambda s, f: company_summary(s, f, market_total=market.total_amount),
-                db,
-                filters,
-            ),
-            display_name=identity_name,
-        )
 
-    page = max(_coerce_page(raw_params.get("page")), 1)
-    total = 0 if not decoded_type or not decoded_number else summary.total
+    total = summary.total
     total_pages = max(1, math.ceil(total / PAGE_SIZE)) if total > 0 else 1
-    results = (
-        []
-        if not decoded_type or not decoded_number
-        else list_adjudications(
-            db,
-            filters,
-            limit=PAGE_SIZE,
-            offset=(page - 1) * PAGE_SIZE,
-        )
+    results = list_adjudications(
+        db,
+        filters,
+        limit=PAGE_SIZE,
+        offset=(page - 1) * PAGE_SIZE,
     )
-    trend_rows = (
-        []
-        if not decoded_type or not decoded_number
-        else cached_aggregate("monthly_trend", monthly_trend, db, filters)
+    trend_rows = cached_aggregate("monthly_trend", monthly_trend, db, filters)
+    concentration = cached_aggregate(
+        "concentration_ratio", concentration_ratio, db, filters
     )
-    concentration = (
-        ConcentrationResult(None, 0, 0)
-        if not decoded_type or not decoded_number
-        else cached_aggregate("concentration_ratio", concentration_ratio, db, filters)
+    win_rate = cached_aggregate(
+        "company_win_rate",
+        win_rate_adapter,
+        db,
+        filters,
+        limit=RANKING_LIMIT,
     )
-    win_rate = (
-        CompanyWinRate(0, 0, None)
-        if not decoded_type or not decoded_number
-        else cached_aggregate(
-            "company_win_rate",
-            win_rate_adapter,
-            db,
-            filters,
-            limit=RANKING_LIMIT,
-        )
+    competitors = cached_aggregate(
+        "company_competitors",
+        competitor_adapter,
+        db,
+        filters,
+        limit=COMPETITOR_LIMIT,
     )
-    competitors = (
-        []
-        if not decoded_type or not decoded_number
-        else cached_aggregate(
-            "company_competitors",
-            competitor_adapter,
-            db,
-            filters,
-            limit=COMPETITOR_LIMIT,
-        )
+    ranking_rows = cached_aggregate(
+        "ranking_by_organism",
+        ranking_by_organism,
+        db,
+        filters,
+        limit=RANKING_LIMIT,
     )
-    ranking_rows = (
-        []
-        if not decoded_type or not decoded_number
-        else cached_aggregate(
-            "ranking_by_organism",
-            ranking_by_organism,
-            db,
-            filters,
-            limit=RANKING_LIMIT,
-        )
+    top_article_rows = cached_aggregate(
+        "top_articles",
+        top_articles,
+        db,
+        filters,
+        limit=RANKING_LIMIT,
     )
-    top_article_rows = (
-        []
-        if not decoded_type or not decoded_number
-        else cached_aggregate(
-            "top_articles",
-            top_articles,
-            db,
-            filters,
-            limit=RANKING_LIMIT,
-        )
+    organisms = cached_aggregate(
+        "distinct_organisms",
+        distinct_organisms,
+        db,
+        filters,
+        limit=ORGANISM_SUGGEST_LIMIT,
     )
+    page_numbers = _build_page_numbers(page, total_pages)
 
     return {
         "filters": filters,
@@ -248,20 +259,10 @@ def _build_company_context(
         "page_size": PAGE_SIZE,
         "page": page,
         "total_pages": total_pages,
-        "page_numbers": _build_page_numbers(page, total_pages),
+        "page_numbers": page_numbers,
         "ranking_rows": ranking_rows,
         "top_article_rows": top_article_rows,
-        "organisms": (
-            []
-            if not decoded_type or not decoded_number
-            else cached_aggregate(
-                "distinct_organisms",
-                distinct_organisms,
-                db,
-                filters,
-                limit=ORGANISM_SUGGEST_LIMIT,
-            )
-        ),
+        "organisms": organisms,
         "trend_rows": trend_rows,
         "trend_payload": _build_trend_chart_payload(trend_rows),
         "has_trend_data": bool(trend_rows),
