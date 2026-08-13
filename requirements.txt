@@ -24,3 +24,4 @@ lxml==6.1.0
 
 # Worker scheduler
 schedule==1.2.2
+pytz==2024.1  # schedule.Job.at(tz=...) imports pytz lazily
