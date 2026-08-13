@@ -21,7 +21,10 @@ from typing import Any
 
 import httpx
 import pytest
+from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
+from app.models.compra import Compra
 from scraper.bcu_client import BcuClient
 from scraper.main import _run_scrape_for_day, enrich_xml_compra
 from scraper.normalizer import CompraRow
@@ -209,13 +212,14 @@ def test_enrich_xml_compra_preserves_source_url() -> None:
 
 def _compra_row(
     *,
+    id_compra: str = "1319278",
     id_ucc: int | None = None,
     organismo: str = "Desconocido",
 ) -> CompraRow:
     """Build a minimal :class:`CompraRow` for the dict-projection test."""
 
     return CompraRow(
-        id_compra="1319278",
+        id_compra=id_compra,
         fecha_pub_adj=date(2024, 1, 15),
         id_tipocompra="CD",
         id_moneda_monto_adj=0,
@@ -409,3 +413,264 @@ def test_run_scrape_for_day_retains_parent_row_when_adjudication_invalid(
     assert not any(
         "Normalization failed" in msg and "BAD" in msg for msg in warning_messages
     )
+
+
+# ---------------------------------------------------------------------------
+# run_scrape — cleanup drain and exception precedence
+# ---------------------------------------------------------------------------
+
+
+class _RecordingClient:
+    """``httpx.Client`` stand-in that records ``close()`` without networking."""
+
+    def __init__(self, events: list[Any], *args: Any, **kwargs: Any) -> None:
+        self._events = events
+
+    def close(self) -> None:
+        self._events.append("client.close")
+
+
+class _RecordingSession:
+    """Session stand-in that records ``rollback()`` / ``close()`` calls."""
+
+    def __init__(self, events: list[Any]) -> None:
+        self._events = events
+
+    def rollback(self) -> None:
+        self._events.append("rollback")
+
+    def close(self) -> None:
+        self._events.append("session.close")
+
+
+def test_run_scrape_crash_drains_pending_buffer_before_resource_close(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Day-loop exception: the pending buffer is still drained first.
+
+    Day 1 buffers one row; day 2 raises. The pending row MUST reach
+    ``bulk_insert`` before the shared HTTP client / owned session are
+    closed, and the caller MUST observe the original day-loop exception.
+    """
+
+    import scraper.main as scraper_main
+
+    events: list[Any] = []
+    pending_row = _compra_row(id_compra="PENDING-1")
+
+    def _fake_day(target_day: date, **_kwargs: Any) -> list[CompraRow]:
+        if target_day == date(2024, 1, 15):
+            return [pending_row]
+        raise RuntimeError("day-loop boom")
+
+    def _fake_bulk_insert(_session: Any, rows: list[CompraRow]) -> int:
+        events.append(("bulk_insert", list(rows)))
+        return len(rows)
+
+    monkeypatch.setattr(scraper_main, "_run_scrape_for_day", _fake_day)
+    monkeypatch.setattr(scraper_main, "bulk_insert", _fake_bulk_insert)
+    monkeypatch.setattr(
+        scraper_main.httpx,
+        "Client",
+        lambda *args, **kwargs: _RecordingClient(events),
+    )
+    monkeypatch.setattr(
+        scraper_main,
+        "get_session_factory",
+        lambda: lambda: _RecordingSession(events),
+    )
+
+    with (
+        caplog.at_level(logging.INFO),
+        pytest.raises(RuntimeError, match="day-loop boom"),
+    ):
+        scraper_main.run_scrape(
+            start_date=date(2024, 1, 15),
+            end_date=date(2024, 1, 16),
+        )
+
+    drain_events = [event for event in events if event[0] == "bulk_insert"]
+    assert drain_events, "pending buffer was never drained before resource close"
+    assert drain_events[0][1] == [pending_row]
+    assert events.index("client.close") > events.index(drain_events[0])
+    assert events.index("session.close") > events.index("client.close")
+    assert any(
+        "Error-path cleanup flush" in record.message for record in caplog.records
+    )
+
+
+def test_run_scrape_cleanup_failure_preserves_original_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    db_session: Any,
+) -> None:
+    """A cleanup drain failure MUST NOT mask the original run exception.
+
+    Day 2 raises AND the error-path drain hits a ``SQLAlchemyError``.
+    The original exception propagates, rollback is attempted, and the
+    cleanup failure is logged with the exact context string.
+    """
+
+    import scraper.main as scraper_main
+
+    events: list[Any] = []
+
+    def _fake_day(target_day: date, **_kwargs: Any) -> list[CompraRow]:
+        if target_day == date(2024, 1, 15):
+            return [_compra_row(id_compra="PENDING-2")]
+        raise RuntimeError("day-loop boom")
+
+    def _failing_bulk_insert(_session: Any, _rows: list[CompraRow]) -> int:
+        raise SQLAlchemyError("cleanup db failure")
+
+    monkeypatch.setattr(scraper_main, "_run_scrape_for_day", _fake_day)
+    monkeypatch.setattr(scraper_main, "bulk_insert", _failing_bulk_insert)
+    monkeypatch.setattr(db_session, "rollback", lambda: events.append("rollback"))
+
+    with (
+        caplog.at_level(logging.ERROR),
+        pytest.raises(RuntimeError, match="day-loop boom"),
+    ):
+        scraper_main.run_scrape(
+            session=db_session,
+            start_date=date(2024, 1, 15),
+            end_date=date(2024, 1, 16),
+        )
+
+    assert "rollback" in events
+    assert any(
+        "Final buffer drain failed during error-path cleanup; "
+        "preserving original run exception" in record.message
+        for record in caplog.records
+    )
+
+
+def test_run_scrape_normal_pending_drain_counts_cleanup_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    db_session: Any,
+) -> None:
+    """Rows still buffered at the end of a normal run are drained and counted.
+
+    With neither flush threshold reached, the pending rows MUST be
+    inserted during cleanup and included in the returned total.
+    """
+
+    import scraper.main as scraper_main
+
+    events: list[Any] = []
+    rows_by_day = {
+        date(2024, 1, 15): _compra_row(id_compra="PENDING-15"),
+        date(2024, 1, 16): _compra_row(id_compra="PENDING-16"),
+        date(2024, 1, 17): _compra_row(id_compra="PENDING-17"),
+    }
+
+    def _fake_day(target_day: date, **_kwargs: Any) -> list[CompraRow]:
+        return [rows_by_day[target_day]]
+
+    monkeypatch.setattr(scraper_main, "_run_scrape_for_day", _fake_day)
+    monkeypatch.setattr(
+        scraper_main.httpx,
+        "Client",
+        lambda *args, **kwargs: _RecordingClient(events),
+    )
+
+    with caplog.at_level(logging.INFO):
+        inserted = scraper_main.run_scrape(
+            session=db_session,
+            start_date=date(2024, 1, 15),
+            end_date=date(2024, 1, 17),
+        )
+
+    assert inserted == 3
+    assert db_session.scalar(select(func.count()).select_from(Compra)) == 3
+    assert "client.close" in events
+    assert any("Final cleanup flush" in record.message for record in caplog.records)
+
+
+def test_run_scrape_cleanup_db_error_rolls_back_and_fails_hard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cleanup ``SQLAlchemyError`` after normal completion fails the run.
+
+    The drain failure MUST roll back and propagate (fail-hard: a
+    successful scrape must not be reported), and the owned resources
+    MUST still be closed after error handling.
+    """
+
+    import scraper.main as scraper_main
+
+    events: list[Any] = []
+
+    def _fake_day(target_day: date, **_kwargs: Any) -> list[CompraRow]:
+        return [_compra_row(id_compra="FAILHARD-1")]
+
+    def _failing_bulk_insert(_session: Any, _rows: list[CompraRow]) -> int:
+        raise SQLAlchemyError("cleanup db failure")
+
+    monkeypatch.setattr(scraper_main, "_run_scrape_for_day", _fake_day)
+    monkeypatch.setattr(scraper_main, "bulk_insert", _failing_bulk_insert)
+    monkeypatch.setattr(
+        scraper_main.httpx,
+        "Client",
+        lambda *args, **kwargs: _RecordingClient(events),
+    )
+    monkeypatch.setattr(
+        scraper_main,
+        "get_session_factory",
+        lambda: lambda: _RecordingSession(events),
+    )
+
+    with pytest.raises(SQLAlchemyError, match="cleanup db failure"):
+        scraper_main.run_scrape(
+            start_date=date(2024, 1, 15),
+            end_date=date(2024, 1, 15),
+        )
+
+    assert "rollback" in events
+    assert "client.close" in events
+    assert "session.close" in events
+
+
+def test_run_scrape_intermediate_flush_failure_rolls_back_and_fails_hard(
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Any,
+) -> None:
+    """An intermediate flush ``SQLAlchemyError`` still fails hard.
+
+    The buffer crosses ``flush_size`` mid-run; the flush MUST roll back
+    and propagate (unchanged intermediate-threshold behavior), the
+    error-path cleanup drain must not mask it, and the owned resources
+    MUST still be closed.
+    """
+
+    import scraper.main as scraper_main
+
+    events: list[Any] = []
+
+    def _fake_day(target_day: date, **_kwargs: Any) -> list[CompraRow]:
+        return [_compra_row(id_compra=f"FLUSH-{target_day.day}")]
+
+    def _failing_bulk_insert(_session: Any, _rows: list[CompraRow]) -> int:
+        raise SQLAlchemyError("intermediate flush db failure")
+
+    monkeypatch.setattr(scraper_main, "_run_scrape_for_day", _fake_day)
+    monkeypatch.setattr(scraper_main, "bulk_insert", _failing_bulk_insert)
+    monkeypatch.setattr(db_session, "rollback", lambda: events.append("rollback"))
+    monkeypatch.setattr(
+        scraper_main.httpx,
+        "Client",
+        lambda *args, **kwargs: _RecordingClient(events),
+    )
+
+    with pytest.raises(SQLAlchemyError, match="intermediate flush db failure"):
+        scraper_main.run_scrape(
+            session=db_session,
+            start_date=date(2024, 1, 15),
+            end_date=date(2024, 1, 15),
+            flush_size=1,
+        )
+
+    assert "rollback" in events
+    assert "client.close" in events
