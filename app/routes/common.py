@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 PAGE_SIZE = 10
 RANKING_LIMIT = 10
 ORGANISM_SUGGEST_LIMIT = 200
+COMPETITOR_LIMIT = 5
 
 _ERROR_FRAGMENT_TEMPLATE = (
     '<div class="bg-red-50 border border-red-300 rounded-lg p-4" role="alert">'
@@ -285,6 +286,7 @@ def _stream_csv_response(filters: AdjudicationFilters) -> Response:
 
 
 __all__ = [
+    "COMPETITOR_LIMIT",
     "ORGANISM_SUGGEST_LIMIT",
     "PAGE_SIZE",
     "RANKING_LIMIT",

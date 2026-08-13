@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 from app.presenters import _build_concentration_chart_payload
+from app.routes.common import COMPETITOR_LIMIT, RANKING_LIMIT
 from app.services.company import CompanyProfileSummary, CompanyWinRate
 from app.services.dashboard import ConcentrationResult, KpiSummary
 from app.services.filters import AdjudicationFilters, filters_from_query_params
@@ -1657,6 +1658,11 @@ def test_company_context_cache_hits_eight_aggregates(db_session) -> None:
     assert win_rate_mock.call_count == 1
     assert competitors_mock.call_count == 1
     assert articles_mock.call_count == 1
+    # The route wrappers forward explicit limits through the cache boundary;
+    # the win-rate adapter consumes the cache-key limit and never forwards it
+    # into the service math.
+    assert competitors_mock.call_args.kwargs["limit"] == COMPETITOR_LIMIT
+    assert "limit" not in win_rate_mock.call_args.kwargs
 
 
 def test_company_context_cache_cold_miss_runs_eight_aggregates(db_session) -> None:
@@ -1712,6 +1718,11 @@ def test_company_context_cache_cold_miss_runs_eight_aggregates(db_session) -> No
     assert win_rate_mock.call_count == 1
     assert competitors_mock.call_count == 1
     assert articles_mock.call_count == 1
+    # The route wrappers forward explicit limits through the cache boundary;
+    # the win-rate adapter consumes the cache-key limit and never forwards it
+    # into the service math.
+    assert competitors_mock.call_args.kwargs["limit"] == COMPETITOR_LIMIT
+    assert "limit" not in win_rate_mock.call_args.kwargs
 
 
 def test_company_cache_keys_differ_from_dashboard_keys() -> None:
@@ -1738,7 +1749,9 @@ def test_company_cache_keys_differ_from_dashboard_keys() -> None:
     ):
         limit = (
             10
-            if name in {"ranking_by_organism", "top_articles"}
+            if name in {"ranking_by_organism", "top_articles", "company_win_rate"}
+            else 5
+            if name == "company_competitors"
             else 200
             if name == "distinct_organisms"
             else None
@@ -1753,6 +1766,117 @@ def test_company_cache_keys_differ_from_dashboard_keys() -> None:
     assert build_cache_key("distinct_organisms", company_filters, limit=100) != (
         build_cache_key("distinct_organisms", company_filters, limit=200)
     )
+    # Same filters with different explicit limits must never share a key for
+    # the two newly limit-aware company aggregates.
+    assert build_cache_key("company_win_rate", company_filters, limit=10) != (
+        build_cache_key("company_win_rate", company_filters, limit=5)
+    )
+    assert build_cache_key("company_competitors", company_filters, limit=5) != (
+        build_cache_key("company_competitors", company_filters, limit=10)
+    )
+
+
+def test_company_route_forwards_explicit_limits_to_cache_and_adapters(
+    db_session,
+) -> None:
+    """The company route passes explicit limits to cached_aggregate and the adapters.
+
+    ``company_win_rate`` must be cached with ``limit=RANKING_LIMIT`` and
+    ``company_competitors`` with ``limit=COMPETITOR_LIMIT``; the competitor
+    adapter must receive that explicit display limit.
+    """
+
+    from app.routes import company as company_route
+    from app.routes.company import _build_company_context
+
+    raw_params: dict[str, str | None] = {
+        "date_from": f"{CURRENT_YEAR}-01-01",
+        "date_to": f"{CURRENT_YEAR}-12-31",
+    }
+    cache_limits: dict[str, int | None] = {}
+    real_cached_aggregate = company_route.cached_aggregate
+
+    def recording_cached_aggregate(name, aggregate, session, filters, **kwargs):
+        if name in ("company_win_rate", "company_competitors"):
+            cache_limits[name] = kwargs.get("limit")
+        return real_cached_aggregate(name, aggregate, session, filters, **kwargs)
+
+    adapter_limits: list[int | None] = []
+
+    def fake_competitors(session, decoded_type, decoded_number, filters, limit):
+        adapter_limits.append(limit)
+        return []
+
+    with (
+        patch(
+            "app.routes.company.cached_aggregate",
+            side_effect=recording_cached_aggregate,
+        ),
+        patch(
+            "app.routes.company.company_win_rate",
+            return_value=CompanyWinRate(0, 0, None),
+        ),
+        patch(
+            "app.routes.company.company_competitors",
+            side_effect=fake_competitors,
+        ),
+    ):
+        _build_company_context(
+            db_session,
+            raw_type="RUT",
+            raw_number="42",
+            raw_params=raw_params.copy(),
+        )
+
+    assert cache_limits["company_win_rate"] == RANKING_LIMIT
+    assert cache_limits["company_competitors"] == COMPETITOR_LIMIT
+    assert adapter_limits == [COMPETITOR_LIMIT]
+
+
+def test_company_route_forwards_limits_when_cache_disabled(
+    db_session, monkeypatch
+) -> None:
+    """TTL zero still forwards explicit limits through both adapters.
+
+    With caching disabled each context build must evaluate the aggregates
+    again, and the limit forwarding contract must hold on every call: the
+    win-rate service is invoked without the cache-key limit and the
+    competitor service always receives the display limit.
+    """
+
+    from app.routes.company import _build_company_context
+
+    monkeypatch.setenv("CACHE_TTL_SECONDS", "0")
+    raw_params: dict[str, str | None] = {
+        "date_from": f"{CURRENT_YEAR}-01-01",
+        "date_to": f"{CURRENT_YEAR}-12-31",
+    }
+    with (
+        patch(
+            "app.routes.company.company_win_rate",
+            return_value=CompanyWinRate(0, 0, None),
+        ) as win_rate_mock,
+        patch(
+            "app.routes.company.company_competitors", return_value=[]
+        ) as competitors_mock,
+    ):
+        _build_company_context(
+            db_session,
+            raw_type="RUT",
+            raw_number="42",
+            raw_params=raw_params.copy(),
+        )
+        _build_company_context(
+            db_session,
+            raw_type="RUT",
+            raw_number="42",
+            raw_params=raw_params.copy(),
+        )
+
+    assert win_rate_mock.call_count == 2
+    assert competitors_mock.call_count == 2
+    assert competitors_mock.call_args.kwargs["limit"] == COMPETITOR_LIMIT
+    assert "limit" not in win_rate_mock.call_args.kwargs
 
 
 def test_company_context_company_summary_uses_market_total(db_session) -> None:
