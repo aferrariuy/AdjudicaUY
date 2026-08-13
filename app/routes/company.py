@@ -21,6 +21,7 @@ from app.presenters import (
 )
 from app.routes._base import HeadAwareAPIRoute
 from app.routes.common import (
+    COMPETITOR_LIMIT,
     ORGANISM_SUGGEST_LIMIT,
     PAGE_SIZE,
     RANKING_LIMIT,
@@ -32,6 +33,7 @@ from app.routes.common import (
     _validation_error_response,
 )
 from app.services.company import (
+    CompanyCompetitor,
     CompanyProfileSummary,
     CompanyWinRate,
     company_competitors,
@@ -94,6 +96,30 @@ def _build_company_context(
     validate_date_params(raw_params)
     filters = _company_filters(raw_type, raw_number, raw_params)
 
+    def win_rate_adapter(
+        session: Session,
+        selected_filters: AdjudicationFilters,
+        *,
+        limit: int | None = None,
+    ) -> CompanyWinRate:
+        del limit  # cache-key dimension only; never changes win-rate math
+        return company_win_rate(session, decoded_type, decoded_number, selected_filters)
+
+    def competitor_adapter(
+        session: Session,
+        selected_filters: AdjudicationFilters,
+        *,
+        limit: int | None = None,
+    ) -> list[CompanyCompetitor]:
+        selected_limit = COMPETITOR_LIMIT if limit is None else limit
+        return company_competitors(
+            session,
+            decoded_type,
+            decoded_number,
+            selected_filters,
+            limit=selected_limit,
+        )
+
     summary = CompanyProfileSummary(
         display_name=None,
         total_amount=Decimal("0"),
@@ -145,9 +171,10 @@ def _build_company_context(
         if not decoded_type or not decoded_number
         else cached_aggregate(
             "company_win_rate",
-            lambda s, f: company_win_rate(s, decoded_type, decoded_number, f),
+            win_rate_adapter,
             db,
             filters,
+            limit=RANKING_LIMIT,
         )
     )
     competitors = (
@@ -155,9 +182,10 @@ def _build_company_context(
         if not decoded_type or not decoded_number
         else cached_aggregate(
             "company_competitors",
-            lambda s, f: company_competitors(s, decoded_type, decoded_number, f),
+            competitor_adapter,
             db,
             filters,
+            limit=COMPETITOR_LIMIT,
         )
     )
     ranking_rows = (
