@@ -16,6 +16,7 @@ import logging
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from fastapi import Depends, FastAPI
@@ -35,6 +36,11 @@ from app.formatting import (
 from app.routes import router
 from app.routes._base import HeadAwareAPIRoute
 from app.services.catalog import all_companies, all_organisms
+from app.services.filters import AdjudicationFilters
+from app.services.query_cache import cached_aggregate
+
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +90,34 @@ async def lifespan(app: FastAPI):
     logger.info("Application startup complete")
     yield
     logger.info("Application shutdown")
+
+
+def _build_sitemap_body(session: Session, site_url: str) -> str:
+    """Build the complete sitemap XML body from the unfiltered catalogs.
+
+    The body is cached as a complete XML string via the whitelisted
+    ``sitemap_xml`` aggregate so a warm response is byte-identical and
+    performs no catalog queries. The URL set, order, quoting, XML
+    declaration, namespace, and indentation mirror the original route.
+    """
+
+    organisms = all_organisms(session)
+    companies = all_companies(session)
+    urls = [f"{site_url}/"]
+    for name in organisms:
+        urls.append(f"{site_url}/organism/{quote(name, safe='')}")
+    for company_type, company_number in companies:
+        urls.append(
+            f"{site_url}/company/{quote(company_type, safe='')}/"
+            f"{quote(company_number, safe='')}"
+        )
+    url_entries = "\n".join(f"  <url><loc>{url}</loc></url>" for url in urls)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        f"{url_entries}\n"
+        "</urlset>"
+    )
 
 
 def create_app() -> FastAPI:
@@ -187,25 +221,19 @@ def create_app() -> FastAPI:
     async def sitemap_xml(db=Depends(get_db)) -> Response:  # noqa: ANN001
         """Serve a sitemap.xml listing index, organisms, and companies."""
 
-        organisms = all_organisms(db)
-        companies = all_companies(db)
-        urls = [f"{settings.site_url}/"]
-        for name in organisms:
-            encoded = quote(name, safe="")
-            urls.append(f"{settings.site_url}/organism/{encoded}")
-        for company_type, company_number in companies:
-            encoded_type = quote(company_type, safe="")
-            encoded_number = quote(company_number, safe="")
-            urls.append(f"{settings.site_url}/company/{encoded_type}/{encoded_number}")
-
-        url_entries = "\n".join(f"  <url><loc>{url}</loc></url>" for url in urls)
-        body = (
-            '<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-            f"{url_entries}\n"
-            "</urlset>"
+        body = cached_aggregate(
+            "sitemap_xml",
+            lambda session, _filters: _build_sitemap_body(session, settings.site_url),
+            db,
+            AdjudicationFilters(),
         )
-        return Response(content=body, media_type="application/xml")
+        return Response(
+            content=body,
+            media_type="application/xml",
+            headers={
+                "Cache-Control": f"public, max-age={settings.cache_ttl_seconds}",
+            },
+        )
 
     app.include_router(router)
 
