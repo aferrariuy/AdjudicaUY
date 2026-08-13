@@ -305,12 +305,16 @@ def run_scrape(
     The :class:`BcuClient` is constructed once per call and shared across
     every day in the range so its in-memory rate cache is reused.
 
-    Persistence is **batched**: per-day records are accumulated into an
-    in-memory buffer and committed when either threshold is hit, then a
-    final flush drains the buffer in the ``finally`` block. This shrinks
-    commit overhead from ``O(days)`` to ``O(days / flush_interval)``.
-    The ``ON CONFLICT DO NOTHING`` clause in :func:`bulk_insert` keeps
-    a re-run after a crash mid-batch idempotent.
+    ``run_scrape`` accumulates normalized rows in memory and flushes when
+    either ``flush_size`` records or ``flush_interval`` data-bearing days
+    is reached. Any remaining rows are drained during cleanup/finally
+    handling before the HTTP client and an owned SQLAlchemy session are
+    closed. The cleanup drain bounds graceful/exception-path loss to the
+    pending buffer; it does not protect against violent process
+    termination. Database errors remain fail-hard and the original run
+    exception is preserved if a secondary cleanup drain fails. The
+    ``ON CONFLICT DO NOTHING`` clause in :func:`bulk_insert` keeps a
+    re-run after a crash mid-batch idempotent.
     """
 
     settings = get_settings()
@@ -361,74 +365,104 @@ def run_scrape(
     buffer: list[CompraRow] = []
     days_since_flush = 0
     db: Session = cast("Session", session)
+    # ``completed_normally`` distinguishes a drain that runs after a
+    # successful day loop from one that runs while an earlier exception
+    # is propagating. ``bcu_client`` is initialized here so cleanup can
+    # close it safely even when its construction fails.
+    completed_normally = False
+    bcu_client: BcuClient | None = None
     try:
         bcu_client = BcuClient(settings.bcu_api_url, client=client)
-        try:
-            current = start_date
-            while current <= end_date:
-                normalized = _run_scrape_for_day(
-                    target_day=current,
-                    source_a_base_url=settings.source_a_base_url,
-                    session=db,
-                    bcu_client=bcu_client,
-                    client=client,
-                    start_hour=start_hour,
-                    end_hour=end_hour,
-                )
-                if normalized:
-                    buffer.extend(normalized)
-                    days_since_flush += 1
+        current = start_date
+        while current <= end_date:
+            normalized = _run_scrape_for_day(
+                target_day=current,
+                source_a_base_url=settings.source_a_base_url,
+                session=db,
+                bcu_client=bcu_client,
+                client=client,
+                start_hour=start_hour,
+                end_hour=end_hour,
+            )
+            if normalized:
+                buffer.extend(normalized)
+                days_since_flush += 1
 
-                if buffer and (
-                    len(buffer) >= flush_size or days_since_flush >= flush_interval
-                ):
-                    try:
-                        inserted = bulk_insert(db, buffer)
-                        total_inserted += inserted
-                        log.info(
-                            "Flushed %d records (%d total)",
-                            inserted,
-                            total_inserted,
-                        )
-                        buffer.clear()
-                        days_since_flush = 0
-                    except SQLAlchemyError as exc:
-                        log.error("Database insert failed: %s", exc)
-                        db.rollback()
-                        raise
+            if buffer and (
+                len(buffer) >= flush_size or days_since_flush >= flush_interval
+            ):
+                try:
+                    inserted = bulk_insert(db, buffer)
+                    total_inserted += inserted
+                    log.info(
+                        "Flushed %d records (%d total)",
+                        inserted,
+                        total_inserted,
+                    )
+                    buffer.clear()
+                    days_since_flush = 0
+                except SQLAlchemyError as exc:
+                    log.error("Database insert failed: %s", exc)
+                    db.rollback()
+                    raise
 
-                current += timedelta(days=1)
-        finally:
-            bcu_client.close()
+            current += timedelta(days=1)
 
-        if buffer:
-            try:
-                inserted = bulk_insert(db, buffer)
-                total_inserted += inserted
-                log.info(
-                    "Final flush: %d records (%d total)",
-                    inserted,
-                    total_inserted,
-                )
-                buffer.clear()
-                days_since_flush = 0
-            except SQLAlchemyError as exc:
-                log.error("Database insert failed: %s", exc)
-                db.rollback()
-                raise
-
-        log.info(
-            "Scraper run complete: %d records submitted to DB across %s..%s",
-            total_inserted,
-            start_date,
-            end_date,
-        )
-        return total_inserted
-
+        completed_normally = True
     finally:
-        client.close()
-        if owns_session and session is not None:
-            session.close()
+        # Drain any pending rows BEFORE closing the shared HTTP client
+        # and the owned session. On the exception path this bounds loss
+        # to the pending buffer while the original run exception wins.
+        try:
+            if buffer:
+                try:
+                    inserted = bulk_insert(db, buffer)
+                    total_inserted += inserted
+                    log.info(
+                        "%s: %d records (%d total)",
+                        (
+                            "Final cleanup flush"
+                            if completed_normally
+                            else "Error-path cleanup flush"
+                        ),
+                        inserted,
+                        total_inserted,
+                    )
+                    buffer.clear()
+                    days_since_flush = 0
+                except Exception as cleanup_exc:
+                    # Exception precedence: roll back a failed drain, but
+                    # never let the cleanup failure mask the run outcome.
+                    if isinstance(cleanup_exc, SQLAlchemyError):
+                        try:
+                            db.rollback()
+                        except Exception as rollback_exc:
+                            log.error(
+                                "Secondary rollback failure during cleanup drain: %s",
+                                rollback_exc,
+                            )
+                    if completed_normally:
+                        # Fail-hard: never report success after a DB error.
+                        raise
+                    log.error(
+                        "Final buffer drain failed during error-path cleanup; "
+                        "preserving original run exception",
+                        exc_info=True,
+                    )
+        finally:
+            if bcu_client is not None:
+                bcu_client.close()
+            client.close()
+            if owns_session and session is not None:
+                session.close()
+
+    log.info(
+        "Scraper run complete: %d records submitted to DB across %s..%s",
+        total_inserted,
+        start_date,
+        end_date,
+    )
+    return total_inserted
 
 
 def _configure_logging() -> None:
