@@ -90,6 +90,8 @@ services:
       SITE_URL: ${SITE_URL:-http://localhost:8000}
       SCRAPE_HOUR: ${SCRAPE_HOUR:-2}
       SCRAPE_MINUTE: ${SCRAPE_MINUTE:-0}
+      WORKER_HEARTBEAT_FILE: ${WORKER_HEARTBEAT_FILE:-/tmp/worker.heartbeat}
+      WORKER_LAST_RUN_FILE: ${WORKER_LAST_RUN_FILE:-/tmp/worker.last-run.json}
     read_only: true
     cap_drop:
       - ALL
@@ -97,6 +99,12 @@ services:
       - no-new-privileges:true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; from scraper.scheduler import _heartbeat_is_fresh; raise SystemExit(0 if _heartbeat_is_fresh(os.environ['WORKER_HEARTBEAT_FILE'], 300) else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     # Long-running scheduler — runs the scraper once daily at the
     # configured time. Dokploy needs a running container for its
     # Scheduled Jobs feature (docker exec).
