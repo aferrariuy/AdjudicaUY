@@ -19,6 +19,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, cast
+from unittest.mock import Mock
 
 import pytest
 import sqlalchemy as sa
@@ -1634,6 +1635,180 @@ def test_company_competitors_transparent_to_composite_index(
         assert with_index == without_index
     finally:
         index.drop(bind=db_session.get_bind())
+
+
+def test_company_competitors_runs_two_executes_with_candidates(
+    db_session, make_compra, add_adj, make_oferente
+) -> None:
+    target = _seed_company_competitor_edges(make_compra, add_adj, make_oferente)
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    class ExecuteCountingSession:
+        def __init__(self, wrapped: Session) -> None:
+            self.wrapped = wrapped
+            self.execute_calls = 0
+
+        def execute(self, *args, **kwargs):
+            self.execute_calls += 1
+            return self.wrapped.execute(*args, **kwargs)
+
+    counted_session = ExecuteCountingSession(db_session)
+    result = company_competitors(
+        cast("Session", counted_session), *target, filters, limit=5
+    )
+
+    assert [row.company_number for row in result] == ["COMP-A", "COMP-B", "COMP-F"]
+    assert counted_session.execute_calls == 2
+
+
+def test_company_competitors_non_positive_limit_skips_execute(db_session) -> None:
+    class ExecuteCountingSession:
+        def __init__(self, wrapped: Session) -> None:
+            self.wrapped = wrapped
+            self.execute_calls = 0
+
+        def execute(self, *args, **kwargs):
+            self.execute_calls += 1
+            return self.wrapped.execute(*args, **kwargs)
+
+    for limit in (0, -3):
+        counted_session = ExecuteCountingSession(db_session)
+        result = company_competitors(
+            cast("Session", counted_session),
+            "RUT",
+            "TARGET",
+            AdjudicationFilters(),
+            limit=limit,
+        )
+        assert result == []
+        assert counted_session.execute_calls == 0
+
+
+def test_company_competitors_positive_limit_without_candidates_runs_one_execute(
+    db_session, make_compra, make_oferente, monkeypatch
+) -> None:
+    target = ("RUT", "TARGET-ALONE")
+    compra = make_compra(fecha_pub_adj=date(2024, 2, 1))
+    make_oferente(compra.id, tipo_doc_prov=target[0], nro_doc_prov=target[1])
+
+    class ExecuteCountingSession:
+        def __init__(self, wrapped: Session) -> None:
+            self.wrapped = wrapped
+            self.execute_calls = 0
+
+        def execute(self, *args, **kwargs):
+            self.execute_calls += 1
+            return self.wrapped.execute(*args, **kwargs)
+
+    identity_mock = Mock(return_value={})
+    monkeypatch.setattr("app.services.company.lookup_company_identities", identity_mock)
+
+    counted_session = ExecuteCountingSession(db_session)
+    result = company_competitors(
+        cast("Session", counted_session),
+        *target,
+        AdjudicationFilters(date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)),
+        limit=5,
+    )
+
+    assert result == []
+    assert counted_session.execute_calls == 1
+    # The identity helper receives the empty candidate list and returns {}.
+    # No identity SQL executes, so the exact execute count stays one.
+    identity_mock.assert_called_once_with(counted_session, [])
+
+
+def test_company_competitors_candidate_statement_bounded_and_ordered(
+    db_session, make_compra, add_adj, make_oferente, monkeypatch
+) -> None:
+    from sqlalchemy.dialects import postgresql, sqlite
+
+    target = _seed_company_competitor_edges(make_compra, add_adj, make_oferente)
+    filters = AdjudicationFilters(
+        date_from=date(2024, 1, 1), date_to=date(2024, 12, 31)
+    )
+
+    captured: list = []
+    identity_pairs: list = []
+
+    class CapturingSession:
+        def __init__(self, wrapped: Session) -> None:
+            self.wrapped = wrapped
+
+        def execute(self, stmt, *args, **kwargs):
+            captured.append(stmt)
+            return self.wrapped.execute(stmt, *args, **kwargs)
+
+    def fake_identity(session, pairs):
+        identity_pairs.append(pairs)
+        return {}
+
+    monkeypatch.setattr("app.services.company.lookup_company_identities", fake_identity)
+
+    result = company_competitors(
+        cast("Session", CapturingSession(db_session)), *target, filters, limit=5
+    )
+
+    assert len(result) == 3
+    assert len(captured) == 1
+    stmt = captured[0]
+    compiled_pg = str(
+        stmt.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    compiled_sqlite = str(
+        stmt.compile(
+            dialect=sqlite.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    ordered_by = (
+        "ORDER BY purchase_count DESC, awarded_amount_uyu DESC, "
+        "coalesce(max(bids.fallback_name), '') ASC, "
+        "bids.company_type ASC, bids.company_number ASC"
+    )
+    assert ordered_by in compiled_pg
+    assert ordered_by in compiled_sqlite
+    assert " LIMIT 15" in compiled_pg
+    assert " LIMIT 15" in compiled_sqlite
+    assert "DISTINCT ON" not in compiled_pg.upper()
+    assert "DISTINCT ON" not in compiled_sqlite.upper()
+    assert len(identity_pairs) == 1
+    assert len(identity_pairs[0]) <= 15
+
+
+def test_company_competitors_bounds_tied_candidates_to_headroom(
+    db_session, make_compra, make_oferente
+) -> None:
+    """The ``limit * 3`` headroom omits tied candidates deterministically.
+
+    Eight co-bidders are exactly tied on purchase count (1), awarded amount
+    (0), and fallback name ordering; with ``limit=2`` only the six candidate
+    rows inside the headroom are materialized and the final slice keeps two.
+    The two candidates beyond the headroom are the accepted query-efficiency
+    edge documented by the design — revisit the single ``* 3`` constant if
+    production tie groups drift.
+    """
+
+    target = ("RUT", "TARGET-TIE")
+    for number in range(8):
+        compra = make_compra(fecha_pub_adj=date(2024, 1, 1))
+        make_oferente(compra.id, tipo_doc_prov=target[0], nro_doc_prov=target[1])
+        make_oferente(
+            compra.id,
+            nombre_comercial=f"Tie {number}",
+            tipo_doc_prov="RUT",
+            nro_doc_prov=f"TIE-{number}",
+        )
+
+    result = company_competitors(db_session, *target, AdjudicationFilters(), limit=2)
+
+    assert len(result) == 2
+    assert [row.company_number for row in result] == ["TIE-0", "TIE-1"]
 
 
 def test_company_widgets_and_listing_are_scoped_by_document(

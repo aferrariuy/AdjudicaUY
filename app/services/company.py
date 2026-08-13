@@ -206,7 +206,18 @@ def company_competitors(
     *,
     limit: int = 5,
 ) -> list[CompanyCompetitor]:
-    """Return deterministic co-bidder rankings for the target company."""
+    """Return deterministic co-bidder rankings for the target company.
+
+    Candidate rows are bounded in SQL to ``limit * 3`` (the accepted
+    headroom factor) before name resolution; the final Python sort and
+    top-N slice still determine the displayed ordering. A candidate
+    beyond the headroom may be omitted in a pathological exact tie —
+    revisit the single ``* 3`` constant if production tie groups drift.
+    """
+
+    if limit <= 0:
+        return []
+    candidate_limit = limit * 3
 
     scoped = _scoped_compra_ids(session, filters).subquery("company_scope")
     target = (
@@ -260,15 +271,18 @@ def company_competitors(
         )
         .cte("awards")
     )
+    fallback_name = func.max(bids.c.fallback_name).label("fallback_name")
+    purchase_count = func.count(func.distinct(bids.c.compra_id)).label("purchase_count")
+    awarded_amount = func.coalesce(func.sum(awards.c.awarded_amount_uyu), 0).label(
+        "awarded_amount_uyu"
+    )
     stmt = (
         select(
             bids.c.company_type,
             bids.c.company_number,
-            func.max(bids.c.fallback_name).label("fallback_name"),
-            func.count(func.distinct(bids.c.compra_id)).label("purchase_count"),
-            func.coalesce(func.sum(awards.c.awarded_amount_uyu), 0).label(
-                "awarded_amount_uyu"
-            ),
+            fallback_name,
+            purchase_count,
+            awarded_amount,
         )
         .select_from(bids)
         .outerjoin(
@@ -280,6 +294,14 @@ def company_competitors(
             ),
         )
         .group_by(bids.c.company_type, bids.c.company_number)
+        .order_by(
+            purchase_count.desc(),
+            awarded_amount.desc(),
+            func.coalesce(fallback_name, "").asc(),
+            bids.c.company_type.asc(),
+            bids.c.company_number.asc(),
+        )
+        .limit(candidate_limit)
     )
     rows = list(session.execute(stmt))
     pairs = [(row.company_type, row.company_number) for row in rows]
