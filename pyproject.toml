@@ -26,7 +26,7 @@ python_version = "3.13"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
-files = ["app", "scraper", "tests"]
+files = ["app", "scraper", "scripts", "tests"]
 exclude = ["migrations/", ".venv/"]
 
 # ---------------------------------------------------------------------------
@@ -36,5 +36,3 @@ exclude = ["migrations/", ".venv/"]
 # B104: uvicorn host="0.0.0.0" is required for the Docker container (app/main.py)
 # B311: random.uniform jitter in retry backoff is not security-sensitive (scraper/retry.py)
 skips = ["B104", "B311"]
-
-

@@ -10,6 +10,16 @@ repos:
     rev: v1.16.0
     hooks:
       - id: mypy
-        additional_dependencies: [types-requests]
-
-
+        args: [--config-file=pyproject.toml]
+        additional_dependencies:
+          - types-requests
+          - sqlalchemy
+          - fastapi
+          - httpx
+          - lxml
+          - pydantic-settings
+          - schedule
+          - pytz
+          - jinja2
+          - alembic
+          - psycopg2-binary

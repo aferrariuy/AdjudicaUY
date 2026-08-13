@@ -114,10 +114,11 @@ def main() -> None:
             skipped = 0
 
             for row in rows:
-                if row.id_compra not in lookup:
+                id_compra = str(row.id_compra)
+                if id_compra not in lookup:
                     skipped += 1
                     continue
-                id_inciso, id_ue = lookup[row.id_compra]
+                id_inciso, id_ue = lookup[id_compra]
                 if id_inciso is None or id_ue is None:
                     skipped += 1
                     continue
