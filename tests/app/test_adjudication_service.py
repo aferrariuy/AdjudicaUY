@@ -1101,6 +1101,85 @@ def test_lookup_company_identity_uses_latest_date_then_id(
     assert lookup_company_identity(db_session, "RUT", "missing") is None
 
 
+def test_lookup_company_identities_returns_newest_row_per_pair(
+    db_session, make_compra, add_adj
+) -> None:
+    older = make_compra(fecha_pub_adj=date(2024, 1, 1))
+    newer = make_compra(fecha_pub_adj=date(2024, 2, 1))
+    tied = make_compra(fecha_pub_adj=date(2024, 2, 1))
+    add_adj(older, nombre_comercial="Old", tipo_doc_prov="RUT", nro_doc_prov="42")
+    add_adj(
+        newer, nombre_comercial="New by date", tipo_doc_prov="RUT", nro_doc_prov="42"
+    )
+    add_adj(tied, nombre_comercial="New by id", tipo_doc_prov="RUT", nro_doc_prov="42")
+    add_adj(older, nombre_comercial="Other pair", tipo_doc_prov="CI", nro_doc_prov="7")
+
+    result = lookup_company_identities(
+        db_session,
+        [("RUT", "42"), ("RUT", "42"), ("CI", "7"), ("RUT", "missing")],
+    )
+
+    assert result == {
+        ("RUT", "42"): "New by id",
+        ("CI", "7"): "Other pair",
+    }
+
+
+def test_lookup_company_identities_empty_input_skips_execute(db_session) -> None:
+    class ExecuteCountingSession:
+        def __init__(self, wrapped: Session) -> None:
+            self.wrapped = wrapped
+            self.execute_calls = 0
+
+        def execute(self, *args, **kwargs):
+            self.execute_calls += 1
+            return self.wrapped.execute(*args, **kwargs)
+
+    counted_session = ExecuteCountingSession(db_session)
+
+    assert lookup_company_identities(cast("Session", counted_session), []) == {}
+    assert counted_session.execute_calls == 0
+
+
+def test_lookup_company_identities_uses_portable_window_statement(
+    db_session, make_compra, add_adj
+) -> None:
+    from sqlalchemy.dialects import postgresql
+
+    compra = make_compra(fecha_pub_adj=date(2024, 1, 1))
+    add_adj(compra, nombre_comercial="Portable", tipo_doc_prov="RUT", nro_doc_prov="42")
+
+    captured: list = []
+
+    class CapturingSession:
+        def __init__(self, wrapped: Session) -> None:
+            self.wrapped = wrapped
+
+        def execute(self, stmt, *args, **kwargs):
+            captured.append(stmt)
+            return self.wrapped.execute(stmt, *args, **kwargs)
+
+    result = lookup_company_identities(
+        cast("Session", CapturingSession(db_session)), [("RUT", "42")]
+    )
+
+    assert result == {("RUT", "42"): "Portable"}
+    assert len(captured) == 1
+    compiled_pg = str(
+        captured[0].compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert (
+        "row_number() OVER (PARTITION BY adjudicacion.tipo_doc_prov, "
+        "adjudicacion.nro_doc_prov ORDER BY CASE WHEN (compra.fecha_pub_adj IS NULL)"
+    ) in compiled_pg
+    assert "compra.fecha_pub_adj DESC, adjudicacion.id DESC" in compiled_pg
+    assert "ranked_company_identities.rn = 1" in compiled_pg
+    assert "DISTINCT ON" not in compiled_pg.upper()
+
+
 def test_company_summary_counts_distinct_purchases_and_excludes_null_amounts(
     db_session, make_compra, add_adj
 ) -> None:

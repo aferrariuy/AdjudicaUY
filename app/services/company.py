@@ -7,7 +7,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
@@ -83,25 +83,45 @@ def lookup_company_identities(
         )
         for company_type, company_number in set(company_pairs)
     ]
-    stmt = (
+    null_date_rank = case(
+        (Compra.fecha_pub_adj.is_(None), 1),
+        else_=0,
+    )
+    row_number = (
+        func.row_number()
+        .over(
+            partition_by=(
+                Adjudicacion.tipo_doc_prov,
+                Adjudicacion.nro_doc_prov,
+            ),
+            order_by=(
+                null_date_rank.asc(),
+                Compra.fecha_pub_adj.desc(),
+                Adjudicacion.id.desc(),
+            ),
+        )
+        .label("rn")
+    )
+    ranked = (
         select(
-            Adjudicacion.tipo_doc_prov,
-            Adjudicacion.nro_doc_prov,
-            Adjudicacion.nombre_comercial,
+            Adjudicacion.tipo_doc_prov.label("company_type"),
+            Adjudicacion.nro_doc_prov.label("company_number"),
+            Adjudicacion.nombre_comercial.label("commercial_name"),
+            row_number,
         )
         .join(Compra, Compra.id == Adjudicacion.compra_id)
         .where(or_(*predicates))
-        .order_by(
-            Adjudicacion.tipo_doc_prov,
-            Adjudicacion.nro_doc_prov,
-            Compra.fecha_pub_adj.desc(),
-            Adjudicacion.id.desc(),
-        )
+        .subquery("ranked_company_identities")
     )
-    identities: dict[tuple[str, str], str | None] = {}
-    for row in session.execute(stmt):
-        identities.setdefault((row[0], row[1]), row[2])
-    return identities
+    stmt = select(
+        ranked.c.company_type,
+        ranked.c.company_number,
+        ranked.c.commercial_name,
+    ).where(ranked.c.rn == 1)
+    return {
+        (row.company_type, row.company_number): row.commercial_name
+        for row in session.execute(stmt)
+    }
 
 
 def _without_company_identity(filters: AdjudicationFilters) -> AdjudicationFilters:
