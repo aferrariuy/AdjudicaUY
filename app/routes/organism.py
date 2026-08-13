@@ -18,6 +18,7 @@ from app.presenters import (
 from app.routes._base import HeadAwareAPIRoute
 from app.routes.common import (
     RANKING_LIMIT,
+    _enforce_identity_length,
     _full_page_validation_error,
     _inject_default_year_params,
     _render,
@@ -42,6 +43,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 router = APIRouter(route_class=HeadAwareAPIRoute)
+
+# Matches ``Compra.organismo`` ``String(255)`` — decoded route identities
+# longer than this are rejected as missing resources before any query.
+MAX_ORGANISM_LENGTH = 255
 
 
 def _build_organism_context(
@@ -137,7 +142,9 @@ def organism_detail(
     "Organism Profile Route" requirement.
     """
 
-    decoded_name = unquote(name).strip()
+    decoded_name = _enforce_identity_length(
+        unquote(name).strip(), maximum=MAX_ORGANISM_LENGTH
+    )
     raw_params = cast("dict[str, str | None]", dict(request.query_params))
     try:
         context = _build_organism_context(
@@ -185,7 +192,9 @@ def organism_detail_partial(
     changes.
     """
 
-    decoded_name = unquote(name).strip()
+    decoded_name = _enforce_identity_length(
+        unquote(name).strip(), maximum=MAX_ORGANISM_LENGTH
+    )
     raw_params = cast("dict[str, str | None]", dict(request.query_params))
     try:
         context = _build_organism_context(

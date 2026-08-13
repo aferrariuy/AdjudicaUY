@@ -2983,3 +2983,180 @@ def test_export_button_preserves_query_params(
     assert "date_from=2024-01-01" in body
     # The link is a plain <a> (not HTMX).
     assert "hx-get" not in body.split('href="/adjudications/export')[0].split("\n")[-1]
+
+
+# ---------------------------------------------------------------------------
+# Decoded route-identity length caps (255 / 10 / 50, measured post-decode)
+# ---------------------------------------------------------------------------
+
+
+def test_organism_detail_accepts_maximum_255_char_name(
+    client: TestClient,
+) -> None:
+    """A decoded 255-char organism name reaches the normal empty state."""
+
+    response = client.get(f"/organism/{'O' * 255}")
+
+    assert response.status_code == 200
+    assert "No hay datos" in response.text
+
+
+def test_organism_detail_partial_accepts_maximum_255_char_name(
+    client: TestClient,
+) -> None:
+    """The organism partial accepts a decoded 255-char name."""
+
+    response = client.get(f"/organism/{'O' * 255}/partial")
+    assert response.status_code == 200
+
+
+def test_organism_detail_rejects_256_char_name(client: TestClient) -> None:
+    """A decoded 256-char organism name is a 404, never a query."""
+
+    response = client.get(f"/organism/{'O' * 256}")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_organism_detail_partial_rejects_256_char_name(
+    client: TestClient,
+) -> None:
+    """The organism partial rejects a decoded 256-char name with 404."""
+
+    response = client.get(f"/organism/{'O' * 256}/partial")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_organism_detail_rejects_doubly_encoded_256_char_name(
+    client: TestClient,
+) -> None:
+    """A doubly-encoded 256-char name is 404, proving the cap is post-decode.
+
+    Each raw A%2521 decodes to A! after FastAPI’s path decode and
+    the route’s explicit unquote — 128 repetitions decode to 256
+    non-whitespace characters that survive the existing .strip().
+    """
+
+    response = client.get(f"/organism/{'A%2521' * 128}")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_organism_detail_accepts_doubly_encoded_255_char_name(
+    client: TestClient,
+) -> None:
+    """A doubly-encoded 255-char name is NOT rejected by the cap."""
+
+    response = client.get(f"/organism/{'A%2521' * 127}A")
+    assert response.status_code == 200
+
+
+def test_overlong_organism_404_skips_context_build(
+    client: TestClient, monkeypatch
+) -> None:
+    """Over-limit organism names exit before any context/query work."""
+
+    import app.routes.organism as organism_module
+
+    def _must_not_run(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("_build_organism_context must not be called")
+
+    monkeypatch.setattr(organism_module, "_build_organism_context", _must_not_run)
+
+    for path in (f"/organism/{'O' * 256}", f"/organism/{'O' * 256}/partial"):
+        response = client.get(path)
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Not Found"}
+
+
+def test_company_detail_accepts_maximum_identity_lengths(
+    client: TestClient,
+) -> None:
+    """A 10-char document type and 50-char number reach the empty state."""
+
+    response = client.get(f"/company/{'T' * 10}/{'N' * 50}")
+
+    assert response.status_code == 200
+    assert "No se encontró actividad registrada" in response.text
+
+
+def test_company_detail_partial_accepts_maximum_identity_lengths(
+    client: TestClient,
+) -> None:
+    """The company partial accepts a 10-char type and 50-char number."""
+
+    response = client.get(f"/company/{'T' * 10}/{'N' * 50}/partial")
+    assert response.status_code == 200
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [f"{'T' * 11}/42", f"RUT/{'N' * 51}"],
+)
+def test_company_detail_rejects_overlong_identity(
+    client: TestClient, identity: str
+) -> None:
+    """Over-limit decoded type or number returns 404 on the full page."""
+
+    response = client.get(f"/company/{identity}")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [f"{'T' * 11}/42", f"RUT/{'N' * 51}"],
+)
+def test_company_detail_partial_rejects_overlong_identity(
+    client: TestClient, identity: str
+) -> None:
+    """Over-limit decoded type or number returns 404 on the partial."""
+
+    response = client.get(f"/company/{identity}/partial")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_company_export_overlong_identity_returns_404_before_filters(
+    client: TestClient, monkeypatch
+) -> None:
+    """Over-limit export identities 404 before any filter/CSV work."""
+
+    import app.routes.company as company_module
+
+    def _must_not_run(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("_company_filters must not be called")
+
+    monkeypatch.setattr(company_module, "_company_filters", _must_not_run)
+
+    response = client.get(f"/company/{'T' * 11}/42/export")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Not Found"}
+
+
+def test_overlong_company_identity_404_skips_context_build(
+    client: TestClient, monkeypatch
+) -> None:
+    """Over-limit company identities exit before context construction."""
+
+    import app.routes.company as company_module
+
+    def _must_not_run(*args, **kwargs):  # noqa: ARG001
+        raise AssertionError("_build_company_context must not be called")
+
+    monkeypatch.setattr(company_module, "_build_company_context", _must_not_run)
+
+    for path in (
+        f"/company/{'T' * 11}/42",
+        f"/company/RUT/{'N' * 51}/partial",
+    ):
+        response = client.get(path)
+        assert response.status_code == 404
+        assert response.json() == {"detail": "Not Found"}
