@@ -8,9 +8,9 @@ metadata without touching the DB).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -35,12 +35,24 @@ def get_engine() -> Engine:
     global _engine
     if _engine is None:
         settings = get_settings()
-        # pool_pre_ping guards against stale connections after a Postgres restart.
-        _engine = create_engine(
-            settings.database_url,
-            pool_pre_ping=True,
-            future=True,
-        )
+        engine_kwargs: dict[str, Any] = {
+            "pool_pre_ping": True,
+            "future": True,
+        }
+        # Explicit pool settings for the production Postgres engine:
+        # pool_pre_ping guards against stale connections after a Postgres
+        # restart, pool_recycle bounds connection age, and pool_size /
+        # max_overflow cap the connection budget. Gated on the dialect
+        # because non-Postgres URLs (e.g. the in-memory SQLite test
+        # engine, whose SingletonThreadPool rejects max_overflow) must not
+        # receive Postgres-specific pool arguments.
+        if make_url(settings.database_url).get_backend_name() == "postgresql":
+            engine_kwargs.update(
+                pool_size=10,
+                max_overflow=20,
+                pool_recycle=1800,
+            )
+        _engine = create_engine(settings.database_url, **engine_kwargs)
     return _engine
 
 
@@ -62,8 +74,8 @@ def get_session_factory() -> sessionmaker[Session]:
 def get_db() -> Generator[Session]:
     """FastAPI dependency yielding a request-scoped ``Session``."""
 
-    db = get_session_factory()()
+    session = get_session_factory()()
     try:
-        yield db
+        yield session
     finally:
-        db.close()
+        session.close()
