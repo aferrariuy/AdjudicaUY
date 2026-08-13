@@ -24,8 +24,9 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from app.config import get_settings
+from app.config import get_settings, trusted_host_allowlist
 from app.database import get_db, get_engine
 from app.formatting import (
     format_count,
@@ -165,11 +166,22 @@ def create_app() -> FastAPI:
     # middlewares set headers.
     app.add_middleware(GZipMiddleware, minimum_size=500)
 
+    # Settings are read once here so GZip, TrustedHost, and the custom
+    # middlewares below share the same instance.
+    settings = get_settings()
+
+    # Reject untrusted Host headers before any route/database work. This
+    # is registered after GZip but before the custom ``@app.middleware``
+    # decorators, so a Host-400 response passes back through the security
+    # and cache-control middlewares and keeps every security header.
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=trusted_host_allowlist(settings),
+    )
+
     # Security headers middleware — adds X-Content-Type-Options and
     # X-Frame-Options on every response. HSTS is only added when not
     # in debug mode so local development is not affected.
-    settings = get_settings()
-
     @app.middleware("http")
     async def add_security_headers(request, call_next):  # noqa: ANN001, ANN202
         nonce = secrets.token_urlsafe(16)
@@ -177,6 +189,10 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = (
+            "geolocation=(), camera=(), microphone=()"
+        )
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             f"script-src 'self' 'nonce-{nonce}'; "
