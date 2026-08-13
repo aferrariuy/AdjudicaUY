@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 import scraper.retry as retry_module
-from scraper.bcu_client import BcuClient, BcuError
+from scraper.bcu_client import BcuClient, BcuError, BcuPermanentError
 
 # ---------------------------------------------------------------------------
 # Test doubles — in-memory httpx transports
@@ -368,3 +368,270 @@ def test_list_monedas_retries_on_503(monkeypatch) -> None:
 
     # 1 initial attempt + 3 retries = 4 calls before giving up.
     assert len(call_log) == 4
+
+
+# ---------------------------------------------------------------------------
+# Permanent failure classification — SOAP faults and malformed responses
+# ---------------------------------------------------------------------------
+
+
+def _soap_fault_response(*, namespaced: bool) -> bytes:
+    """Build a SOAP Fault body, namespaced or unnamespaced."""
+
+    if namespaced:
+        return (
+            b'<?xml version="1.0" encoding="UTF-8"?>'
+            b'<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">'
+            b"<soap:Body>"
+            b"<soap:Fault>"
+            b"<faultcode>soap:Server</faultcode>"
+            b"<faultstring>Currency data unavailable</faultstring>"
+            b"</soap:Fault>"
+            b"</soap:Body>"
+            b"</soap:Envelope>"
+        )
+    return (
+        b'<?xml version="1.0" encoding="UTF-8"?>'
+        b"<Envelope>"
+        b"<Body>"
+        b"<Fault>"
+        b"<faultcode>Server</faultcode>"
+        b"<faultstring>Currency data unavailable</faultstring>"
+        b"</Fault>"
+        b"</Body>"
+        b"</Envelope>"
+    )
+
+
+@pytest.mark.parametrize("namespaced", [True, False])
+def test_get_tcc_soap_fault_is_permanent_single_request_not_cached(
+    namespaced: bool,
+) -> None:
+    """A SOAP Fault is permanent: one request and never cached as no-rate.
+
+    The Fault must not be interpreted as a legitimate empty ``<datos>``
+    result, and the ``(bcu_code, date)`` cell must stay uncached so a later
+    call issues a brand-new request instead of returning a cached ``None``.
+    """
+
+    call_log: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        call_log.append(str(request.url))
+        return httpx.Response(200, content=_soap_fault_response(namespaced=namespaced))
+
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as http_client:
+        bcu = BcuClient("https://example.test/wsbcucotizaciones", client=http_client)
+
+        # Public ``BcuError`` compatibility: the permanent error is a subclass.
+        with pytest.raises(BcuError) as excinfo:
+            bcu.get_tcc(2224, date(2024, 1, 15), max_lookback_days=0)
+        assert isinstance(excinfo.value, BcuPermanentError)
+        assert "SOAP Fault" in str(excinfo.value)
+
+        # The cell was NOT cached as ``None``: the second lookup issues a new
+        # request and fails again instead of returning a cached no-rate result.
+        with pytest.raises(BcuError) as excinfo2:
+            bcu.get_tcc(2224, date(2024, 1, 15), max_lookback_days=0)
+        assert isinstance(excinfo2.value, BcuPermanentError)
+
+    # Exactly one request per lookup — permanent faults consume no retries.
+    assert len(call_log) == 2
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b"<root><TCC>38.5</root>",  # unclosed element
+        b"this is not xml at all",
+    ],
+)
+def test_get_tcc_malformed_xml_is_permanent_single_attempt(payload: bytes) -> None:
+    """Malformed XML is permanent — exactly one request, no retry consumed."""
+
+    call_log: list[int] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        call_log.append(len(call_log) + 1)
+        return httpx.Response(200, content=payload)
+
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as http_client:
+        bcu = BcuClient("https://example.test/wsbcucotizaciones", client=http_client)
+        with pytest.raises(BcuError) as excinfo:
+            bcu.get_tcc(2224, date(2024, 1, 15), max_lookback_days=0)
+        assert isinstance(excinfo.value, BcuPermanentError)
+
+    assert call_log == [1]
+
+
+@pytest.mark.parametrize("raw", ["abc", "NaN", "Infinity"])
+def test_get_tcc_non_numeric_tcc_is_permanent_single_attempt(raw: str) -> None:
+    """Non-numeric or non-finite TCC is permanent — one request, no retries."""
+
+    call_log: list[int] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        call_log.append(len(call_log) + 1)
+        body = (
+            '<?xml version="1.0" encoding="UTF-8"?>'
+            "<root><datos>"
+            f"<TCC>{raw}</TCC>"
+            "</datos></root>"
+        ).encode()
+        return httpx.Response(200, content=body)
+
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as http_client:
+        bcu = BcuClient("https://example.test/wsbcucotizaciones", client=http_client)
+        with pytest.raises(BcuError) as excinfo:
+            bcu.get_tcc(2224, date(2024, 1, 15), max_lookback_days=0)
+        assert isinstance(excinfo.value, BcuPermanentError)
+
+    assert call_log == [1]
+
+
+def test_get_tcc_missing_datos_and_tcc_is_permanent() -> None:
+    """A response with neither TCC nor <datos> is malformed, not no-rate."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        body = (
+            b'<?xml version="1.0" encoding="UTF-8"?>'
+            b"<root><something-else>1</something-else></root>"
+        )
+        return httpx.Response(200, content=body)
+
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as http_client:
+        bcu = BcuClient("https://example.test/wsbcucotizaciones", client=http_client)
+        with pytest.raises(BcuError) as excinfo:
+            bcu.get_tcc(2224, date(2024, 1, 15), max_lookback_days=0)
+        assert isinstance(excinfo.value, BcuPermanentError)
+
+
+def test_list_monedas_soap_fault_is_permanent_single_request() -> None:
+    """A SOAP Fault from the monedas servlet is permanent and not retried."""
+
+    call_log: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        call_log.append(str(request.url))
+        return httpx.Response(200, content=_soap_fault_response(namespaced=True))
+
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as http_client:
+        bcu = BcuClient("https://example.test/wsbcucotizaciones", client=http_client)
+        with pytest.raises(BcuError) as excinfo:
+            bcu.list_monedas()
+        assert isinstance(excinfo.value, BcuPermanentError)
+        assert "SOAP Fault" in str(excinfo.value)
+
+    assert len(call_log) == 1
+
+
+def test_list_monedas_malformed_entry_is_permanent_not_cached() -> None:
+    """A recognized malformed catalogue entry is permanent and not cached.
+
+    The first call fails on the malformed ``<moneda>`` entry; the failure is
+    not cached, so the second call issues a new request and succeeds.
+    """
+
+    call_log: list[int] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        call_log.append(len(call_log) + 1)
+        if len(call_log) == 1:
+            # Well-formed XML, but a recognized <moneda> entry with no fields.
+            body = (
+                b'<?xml version="1.0" encoding="UTF-8"?><root><moneda></moneda></root>'
+            )
+            return httpx.Response(200, content=body)
+        return httpx.Response(200, content=MONEDAS_PAYLOAD.encode("utf-8"))
+
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as http_client:
+        bcu = BcuClient(
+            "https://example.test/wscotizaciones/servlet/wsbcucotizaciones",
+            client=http_client,
+        )
+        with pytest.raises(BcuError) as excinfo:
+            bcu.list_monedas()
+        assert isinstance(excinfo.value, BcuPermanentError)
+
+        # The malformed result was not cached as a successful empty catalogue.
+        currencies = bcu.list_monedas()
+
+    assert call_log == [1, 2]
+    assert len(currencies) == 3
+
+
+def test_list_monedas_non_integer_code_is_permanent() -> None:
+    """A catalogue entry with a non-integer code is permanent, not skipped."""
+
+    def _handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        body = (
+            b'<?xml version="1.0" encoding="UTF-8"?>'
+            b"<root><moneda>"
+            b"<Codigo>ABC</Codigo>"
+            b"<Nombre>DOLAR USA</Nombre>"
+            b"</moneda></root>"
+        )
+        return httpx.Response(200, content=body)
+
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as http_client:
+        bcu = BcuClient("https://example.test/wsbcucotizaciones", client=http_client)
+        with pytest.raises(BcuError) as excinfo:
+            bcu.list_monedas()
+        assert isinstance(excinfo.value, BcuPermanentError)
+
+
+# ---------------------------------------------------------------------------
+# Currency catalogue caching
+# ---------------------------------------------------------------------------
+
+
+def test_list_monedas_caches_catalogue_for_client_lifetime() -> None:
+    """Repeated ``list_monedas()`` on one client makes exactly one request."""
+
+    call_log: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        call_log.append(str(request.url))
+        return httpx.Response(200, content=MONEDAS_PAYLOAD.encode("utf-8"))
+
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as http_client:
+        bcu = BcuClient(
+            "https://example.test/wscotizaciones/servlet/wsbcucotizaciones",
+            client=http_client,
+        )
+        first = bcu.list_monedas()
+        second = bcu.list_monedas()
+        third = bcu.list_monedas()
+
+    assert len(call_log) == 1
+    assert first == second == third
+    assert len(first) == 3
+
+
+def test_list_monedas_caches_well_formed_empty_catalogue() -> None:
+    """A well-formed empty catalogue is cached as ``[]`` — a valid result."""
+
+    call_log: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        call_log.append(str(request.url))
+        body = b'<?xml version="1.0" encoding="UTF-8"?><root></root>'
+        return httpx.Response(200, content=body)
+
+    transport = httpx.MockTransport(_handler)
+    with httpx.Client(transport=transport) as http_client:
+        bcu = BcuClient("https://example.test/wsbcucotizaciones", client=http_client)
+        first = bcu.list_monedas()
+        second = bcu.list_monedas()
+
+    assert first == []
+    assert second == []
+    assert len(call_log) == 1

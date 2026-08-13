@@ -8,9 +8,13 @@ This client wraps both endpoints with:
 
 * a **per-(bcu_code, date) in-memory cache** so a scraping run hitting
   thousands of adjudications for the same currency on the same date only
-  reaches the network once per cell,
+  reaches the network once per cell (confirmed-empty results cached as
+  ``None``; permanent failures never cached),
 * **exponential backoff retry** (1s → 3s → 9s) for transient transport or
-  HTTP-level failures, and
+  HTTP-level failures only — SOAP faults, malformed XML, and non-numeric
+  rates are permanent (:class:`BcuPermanentError`) and never retried,
+* a **per-client currency-catalogue cache** so repeated ``list_monedas()``
+  calls reuse one parsed catalogue, and
 * a **lookback window** so an adjudication date with no published rate
   (weekends, holidays) falls back to the previous business day, up to
   ``max_lookback_days``.
@@ -44,6 +48,16 @@ class BcuError(Exception):
     """Raised when the BCU endpoint returns a non-recoverable failure."""
 
 
+class BcuPermanentError(BcuError):
+    """A BCU response is permanently invalid or reports a SOAP fault.
+
+    Raised for malformed XML, non-numeric/non-finite rates, SOAP Fault
+    envelopes, and malformed catalogue entries. These failures are never
+    retried and never cached; callers catching :class:`BcuError` remain
+    compatible.
+    """
+
+
 @dataclass(frozen=True)
 class BcuCurrency:
     """One currency entry as returned by the ``awsbcumonedas`` endpoint."""
@@ -63,8 +77,11 @@ _BCU_BACKOFF_SCHEDULE: tuple[float, ...] = (1.0, 3.0, 9.0)
 # same time do not retry in lockstep against the BCU API.
 _BCU_BACKOFF_JITTER = 1.0
 
-# Exceptions treated as transient by the shared retry helper.
-_BCU_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (httpx.HTTPError, BcuError)
+# Exceptions treated as transient by the shared retry helper. Only
+# transport/HTTP errors are retried (4 total attempts with the schedule
+# below); permanent response failures (SOAP faults, parse errors) raise
+# immediately as :class:`BcuPermanentError` and consume no retries.
+_BCU_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (httpx.HTTPError,)
 
 _SOAP_NAMESPACE = "Cotiza"
 _SOAP_ACTION = "Cotizaaction/AWSBCUCOTIZACIONES.Execute"
@@ -119,35 +136,105 @@ def _first_text(root: etree._Element, suffix: str) -> str | None:
     return None
 
 
+# Upper bound on the SOAP Fault context included in error messages, so a
+# pathological fault body cannot bloat logs or exceptions.
+_MAX_FAULT_CONTEXT_CHARS = 512
+
+
+def _local_name(tag: str) -> str:
+    """Return the lower-cased local part of an lxml tag.
+
+    lxml uses Clark notation (``{uri}LocalName``) for namespaced elements;
+    unnamespaced tags are returned lower-cased unchanged.
+    """
+
+    return tag.rsplit("}", 1)[-1].lower()
+
+
+def _soap_fault_text(root: etree._Element) -> str | None:
+    """Return bounded fault context when the response contains a SOAP Fault.
+
+    Scans all descendants for a local name of ``fault`` (namespaced or
+    unnamespaced) and collects the non-empty ``itertext()`` of that
+    element, truncated to a safe length for error messages.
+    """
+
+    for element in root.iter():
+        if _local_name(element.tag) == "fault":
+            parts = [
+                text.strip()
+                for text in element.itertext()
+                if isinstance(text, str) and text.strip()
+            ]
+            return " ".join(parts)[:_MAX_FAULT_CONTEXT_CHARS]
+    return None
+
+
 def _parse_tcc(response_xml: bytes) -> Decimal | None:
     """Extract the first ``TCC`` value from a BCU response.
 
     Returns ``None`` when the response has no data series for the requested
     date (an empty ``<datos>`` block, which is the BCU's signal for "no
     publication for that day").
+
+    Raises
+    ------
+    BcuPermanentError
+        When the response is malformed XML, contains a SOAP Fault, carries
+        a non-numeric or non-finite ``TCC``, or omits both a ``TCC`` and a
+        ``<datos>`` element (a structurally invalid response).
     """
 
     try:
         root = etree.fromstring(response_xml, parser=_SAFE_PARSER)
     except etree.XMLSyntaxError as exc:
-        raise BcuError(f"Malformed BCU response: {exc}") from exc
+        raise BcuPermanentError(f"Malformed BCU response: {exc}") from exc
+
+    fault_text = _soap_fault_text(root)
+    if fault_text is not None:
+        raise BcuPermanentError(f"BCU SOAP Fault: {fault_text}")
 
     raw = _first_text(root, "TCC")
-    if raw is None:
-        return None
-    try:
-        return Decimal(raw)
-    except (InvalidOperation, ValueError) as exc:
-        raise BcuError(f"BCU returned non-numeric TCC={raw!r}") from exc
+    if raw is not None:
+        try:
+            value = Decimal(raw)
+        except (InvalidOperation, ValueError) as exc:
+            raise BcuPermanentError(f"BCU returned non-numeric TCC={raw!r}") from exc
+        if not value.is_finite():
+            raise BcuPermanentError(f"BCU returned non-finite TCC={raw!r}")
+        return value
+
+    # No TCC anywhere: this is the legitimate "no publication" signal only
+    # when the response carries a ``<datos>`` element. Anything else is a
+    # structurally invalid response, not a confirmed-empty result.
+    for element in root.iter():
+        if _local_name(element.tag) == "datos":
+            return None
+    raise BcuPermanentError("BCU response missing TCC and <datos> elements")
 
 
 def _parse_monedas_response(response_xml: bytes) -> list[BcuCurrency]:
-    """Extract the currency catalogue from a ``awsbcumonedas`` response."""
+    """Extract the currency catalogue from a ``awsbcumonedas`` response.
+
+    A well-formed response with no entries is a valid empty catalogue
+    (``[]``).
+
+    Raises
+    ------
+    BcuPermanentError
+        When the response is malformed XML, contains a SOAP Fault, a
+        recognized ``<moneda>``/``<item>`` entry is missing required
+        fields, or an entry code is not an integer.
+    """
 
     try:
         root = etree.fromstring(response_xml, parser=_SAFE_PARSER)
     except etree.XMLSyntaxError as exc:
-        raise BcuError(f"Malformed BCU monedas response: {exc}") from exc
+        raise BcuPermanentError(f"Malformed BCU monedas response: {exc}") from exc
+
+    fault_text = _soap_fault_text(root)
+    if fault_text is not None:
+        raise BcuPermanentError(f"BCU SOAP Fault: {fault_text}")
 
     currencies: list[BcuCurrency] = []
     for item in root.iter():
@@ -176,11 +263,15 @@ def _parse_monedas_response(response_xml: bytes) -> list[BcuCurrency]:
             elif tag.endswith("CodigoISO") or tag.endswith("ISO"):
                 codigo_iso = text
         if codigo_raw is None or nombre is None:
-            continue
+            raise BcuPermanentError(
+                "BCU monedas entry missing required code/nombre fields"
+            )
         try:
             codigo = int(codigo_raw)
-        except ValueError:
-            continue
+        except ValueError as exc:
+            raise BcuPermanentError(
+                f"BCU monedas entry has non-integer code {codigo_raw!r}"
+            ) from exc
         currencies.append(
             BcuCurrency(codigo=codigo, nombre=nombre, codigo_iso=codigo_iso)
         )
@@ -191,9 +282,12 @@ def _parse_monedas_response(response_xml: bytes) -> list[BcuCurrency]:
 def _bcu_retry(label: str, operation: Callable[[], T]) -> T:
     """Execute ``operation`` with BCU-specific retry and error wrapping.
 
-    Delegates to :func:`scraper.retry.retry_with_backoff` for the
-    backoff schedule, then wraps any final exception in :class:`BcuError`
-    to preserve the existing contract for callers.
+    Only transport/HTTP errors (``httpx.HTTPError``) are retried, using the
+    standard backoff schedule and jitter. Permanent response failures
+    (:class:`BcuPermanentError`) and other :class:`BcuError` propagate
+    immediately; a final exhausted transport exception is wrapped in the
+    base :class:`BcuError` message to preserve the public contract for
+    callers.
     """
 
     try:
@@ -232,7 +326,13 @@ class BcuClient:
         self._client = client
         # ``None`` value means "the BCU confirmed there is no data for this
         # (bcu_code, date) cell" — distinct from "we have not asked yet".
+        # Cells are only set after a response is successfully interpreted;
+        # permanent failures leave them absent so a later call can retry.
         self._cache: dict[tuple[int, date], Decimal | None] = {}
+        # ``None`` means "the catalogue has not been fetched yet"; ``[]``
+        # is a valid cached empty catalogue. Only successfully parsed
+        # results are stored here.
+        self._monedas_cache: list[BcuCurrency] | None = None
 
     @property
     def client(self) -> httpx.Client:
@@ -268,7 +368,9 @@ class BcuClient:
         the first non-null rate. Returns ``None`` if no rate is found within
         the window. Results are cached per ``(bcu_code, date)`` — both
         successful and confirmed-empty results are cached to avoid hammering
-        the BCU on weekends and holidays.
+        the BCU on weekends and holidays. Permanent failures (SOAP faults,
+        malformed responses) and exhausted transport errors are never cached,
+        so a later call can retry the BCU.
         """
 
         for days_back in range(max_lookback_days + 1):
@@ -293,11 +395,18 @@ class BcuClient:
         return None
 
     def list_monedas(self) -> list[BcuCurrency]:
-        """Fetch the full BCU currency catalogue.
+        """Fetch and cache the full BCU currency catalogue for this client.
 
-        Results are not cached because the catalogue is small and changes
-        rarely; the BCU's own caching upstream is what matters here.
+        The parsed catalogue is cached for the lifetime of this client
+        instance and reused by later calls (e.g. multiple normalizer lines
+        resolving unknown currencies). ``None`` means "not fetched yet",
+        while a well-formed empty catalogue is cached as ``[]``. Permanent
+        failures and exhausted transport errors leave the cache unset so a
+        later call can issue a new request.
         """
+
+        if self._monedas_cache is not None:
+            return self._monedas_cache
 
         # Replace the cotizaciones servlet name with the monedas servlet.
         # The base URL always ends in ``.../servlet/awsbcucotizaciones``.
@@ -314,14 +423,25 @@ class BcuClient:
                 body = _read_with_limit(response, _MAX_SOAP_SIZE_BYTES)
             return _parse_monedas_response(body)
 
-        return _bcu_retry("BCU monedas", _fetch)
+        catalogue = _bcu_retry("BCU monedas", _fetch)
+        # Assign only after the fetch+parse succeeded; exceptions above
+        # leave the cache as ``None`` so a later call can retry.
+        self._monedas_cache = catalogue
+        return catalogue
 
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
 
     def _rate_for_date(self, bcu_code: int, target_date: date) -> Decimal | None:
-        """Return the cached or freshly fetched rate for an exact date."""
+        """Return the cached or freshly fetched rate for an exact date.
+
+        The ``(bcu_code, date)`` cell is cached only after the response is
+        successfully interpreted: ``None`` is stored for a confirmed empty
+        result (no rate published), while SOAP faults, parse failures, and
+        exhausted transport errors leave the cell uncached so a later call
+        can retry.
+        """
 
         cache_key = (bcu_code, target_date)
         if cache_key in self._cache:
@@ -330,7 +450,8 @@ class BcuClient:
         rate = self._fetch_tcc_with_retry(bcu_code, target_date)
         # Cache both successful and confirmed-empty results. ``None`` here
         # means "BCU returned an empty <datos> block" — i.e. the date has
-        # no rate published.
+        # no rate published. Permanent failures raise above, so the cell
+        # stays absent (uncached) rather than being stored as ``None``.
         self._cache[cache_key] = rate
         return rate
 
@@ -359,4 +480,4 @@ class BcuClient:
         )
 
 
-__all__ = ["BcuClient", "BcuCurrency", "BcuError"]
+__all__ = ["BcuClient", "BcuCurrency", "BcuError", "BcuPermanentError"]
