@@ -10,6 +10,9 @@ from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+import pytest
+
+from app.routes.common import _escape_csv_formula_cell
 from app.services.filters import AdjudicationFilters
 from app.services.listing import AdjudicationRow, iter_adjudications
 
@@ -132,3 +135,40 @@ def test_iter_adjudications_handles_null_amount_uyu(
 
     assert len(rows) == 1
     assert rows[0].amount_uyu is None
+
+
+# ---------------------------------------------------------------------------
+# _escape_csv_formula_cell — spreadsheet formula-prefix escaping
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("prefix", "suffix"),
+    [
+        ("=", "SUM(A1:A10)"),
+        ("+", "12345"),
+        ("-", "100"),
+        ("@", "cmd"),
+        ("\t", "tabbed"),
+        ("\r", "carriage"),
+    ],
+)
+def test_escape_csv_formula_cell_prefixes_dangerous_first_char(
+    prefix: str, suffix: str
+) -> None:
+    """Each dangerous first char gets exactly one leading ASCII apostrophe."""
+
+    value = prefix + suffix
+    escaped = _escape_csv_formula_cell(value)
+    assert escaped == "'" + value
+    assert escaped.count("'") == 1
+
+
+def test_escape_csv_formula_cell_preserves_ordinary_and_empty_values() -> None:
+    """Ordinary, leading-space, numeric/date, and empty values are unchanged."""
+
+    assert _escape_csv_formula_cell("plain text") == "plain text"
+    assert _escape_csv_formula_cell(" leading space") == " leading space"
+    assert _escape_csv_formula_cell("1234.56") == "1234.56"
+    assert _escape_csv_formula_cell("2024-03-15") == "2024-03-15"
+    assert _escape_csv_formula_cell("") == ""

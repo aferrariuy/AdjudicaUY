@@ -7,6 +7,8 @@ contract, using the in-memory SQLite engine from ``conftest.py``.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 from datetime import date, timedelta
 from decimal import Decimal
@@ -21,7 +23,7 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 from app.presenters import _build_concentration_chart_payload
-from app.routes.common import COMPETITOR_LIMIT, RANKING_LIMIT
+from app.routes.common import _CSV_COLUMNS, COMPETITOR_LIMIT, RANKING_LIMIT
 from app.services.company import CompanyProfileSummary, CompanyWinRate
 from app.services.dashboard import ConcentrationResult, KpiSummary
 from app.services.filters import AdjudicationFilters, filters_from_query_params
@@ -1406,6 +1408,39 @@ def test_company_export_decodes_identity_and_matches_global_csv_shape(
         "https://www.comprasestatales.gub.uy/consultas/detalle/id/company-purchase-42"
         in text
     )
+
+
+def test_company_export_escapes_formula_prefix_cells(
+    client: TestClient, make_adjudication
+) -> None:
+    """Company-scoped export escapes dangerous cells with the same rule."""
+
+    make_adjudication(
+        winning_company="=1+1",
+        organism="+ORG",
+        article="@article",
+        company_document="42",
+        company_document_type="RUT",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/company/RUT/42/export")
+
+    assert response.status_code == 200
+    assert response.content.startswith(b"\xef\xbb\xbf")
+    text = response.content.decode("utf-8-sig")
+    assert "\r\n" in text
+
+    parsed = list(csv.reader(io.StringIO(text)))
+    # Header row is never escaped; dangerous data cells are prefixed
+    # with exactly one apostrophe; ordinary identity cells are unchanged.
+    assert parsed[0] == _CSV_COLUMNS
+    data = parsed[1]
+    assert data[1] == "'+ORG"
+    assert data[2] == "'=1+1"
+    assert data[3] == "'@article"
+    assert data[8] == "42"
+    assert data[9] == "RUT"
 
 
 def test_company_export_link_preserves_active_filters(
@@ -2862,6 +2897,42 @@ def test_export_null_amount_uyu_renders_as_empty(
     data_fields = lines[1].split(",")
     # monto_uyu is at index 6 (0-based).
     assert data_fields[6] == ""
+
+
+def test_export_escapes_formula_prefix_cells(
+    client: TestClient, make_adjudication
+) -> None:
+    """Global export escapes dangerous-prefix data cells, never the header."""
+
+    make_adjudication(
+        winning_company='=HYPERLINK("http://evil.test")',
+        organism="+SUM(A1)",
+        article="@import",
+        company_document="-2+3",
+        company_document_type="\tRUT",
+        date=date(CURRENT_YEAR, 3, 1),
+    )
+
+    response = client.get("/adjudications/export")
+
+    assert response.status_code == 200
+    # BOM, CRLF, and the exact header contract are retained.
+    assert response.content.startswith(b"\xef\xbb\xbf")
+    text = response.content.decode("utf-8-sig")
+    assert "\r\n" in text
+
+    parsed = list(csv.reader(io.StringIO(text)))
+    # The header row is never formula-escaped.
+    assert parsed[0] == _CSV_COLUMNS
+    data = parsed[1]
+    # organismo (1), empresa_adjudicataria (2), articulo (3),
+    # documento_empresa (8), tipo_documento (9) carry exactly one
+    # leading apostrophe followed by the original value.
+    assert data[1] == "'+SUM(A1)"
+    assert data[2] == '\'=HYPERLINK("http://evil.test")'
+    assert data[3] == "'@import"
+    assert data[8] == "'-2+3"
+    assert data[9] == "'\tRUT"
 
 
 # ---------------------------------------------------------------------------

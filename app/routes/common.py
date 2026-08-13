@@ -202,15 +202,35 @@ _CSV_COLUMNS = [
     "link_licitacion",
 ]
 
+_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _escape_csv_formula_cell(value: str) -> str:
+    """Prefix spreadsheet-formula-like data cells with one apostrophe.
+
+    Spreadsheet applications treat a leading ``=``, ``+``, ``-``, ``@``,
+    tab, or carriage return as executable content (CWE-1236). Non-empty
+    cells whose first character is one of those prefixes get exactly one
+    ASCII apostrophe prepended; everything else is returned unchanged
+    (no strip, reformat, or truncation). The header row never passes
+    through this helper.
+    """
+
+    if value and value[0] in _CSV_FORMULA_PREFIXES:
+        return "'" + value
+    return value
+
 
 def _row_to_csv_fields(row: Any) -> list[str]:
     """Map an :class:`AdjudicationRow` to the CSV column values.
 
     Raw values only — no es-UY formatting. Dates are ISO, decimals are
-    unformatted, NULLs become empty strings.
+    unformatted, NULLs become empty strings. Each data cell is passed
+    through :func:`_escape_csv_formula_cell` as the final per-cell
+    transformation so both exports inherit formula-prefix protection.
     """
 
-    return [
+    fields = [
         row.date.isoformat(),
         row.organism or "",
         row.winning_company or "",
@@ -225,6 +245,7 @@ def _row_to_csv_fields(row: Any) -> list[str]:
         row.id_compra or "",
         row.license_link or "",
     ]
+    return [_escape_csv_formula_cell(value) for value in fields]
 
 
 def _stream_csv_response(filters: AdjudicationFilters) -> Response:
