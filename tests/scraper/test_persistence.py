@@ -341,6 +341,48 @@ def test_bulk_insert_persists_one_compra_with_children(db_session) -> None:
     assert oferentes[0].nombre_comercial == "Bidder SA"
 
 
+def test_bulk_insert_parent_only_row_persists_with_zero_adjudications(
+    db_session,
+) -> None:
+    """A compra with empty adjudicaciones persists as a parent-only row.
+
+    When every adjudication line was skipped at normalization time, the
+    compra must still land together with its valid oferentes — and ZERO
+    ``adjudicacion`` rows. No placeholder adjudication is fabricated, and
+    ``monto_adj`` is persisted verbatim from the XML parent (never
+    recomputed from surviving children).
+    """
+
+    compra = _compra_row(id_compra="BULK-PARENT-ONLY", organismo="Parent Org")
+    compra.oferentes.append(_oferente_row())
+    compra.oferentes.append(_oferente_row(nombre_comercial="Second Bidder SA"))
+
+    result = bulk_insert(db_session, [compra])
+
+    assert result == 1
+
+    # Parent row persists with its own values.
+    stored_compra = db_session.scalar(
+        select(Compra).where(Compra.id_compra == "BULK-PARENT-ONLY")
+    )
+    assert stored_compra is not None
+    assert stored_compra.organismo == "Parent Org"
+    # monto_adj is persisted verbatim from the XML — never recomputed.
+    assert stored_compra.monto_adj == Decimal("1000.00")
+
+    # The valid oferentes attach to the parent FK.
+    oferentes = db_session.scalars(
+        select(Oferente).where(Oferente.compra_id == stored_compra.id)
+    ).all()
+    assert {o.nombre_comercial for o in oferentes} == {
+        "Bidder SA",
+        "Second Bidder SA",
+    }
+
+    # ZERO adjudication rows — no placeholder is fabricated.
+    assert db_session.scalar(select(func.count()).select_from(Adjudicacion)) == 0
+
+
 def test_bulk_insert_parent_idempotent_on_id_compra(db_session) -> None:
     """Re-running ``bulk_insert`` on the same data inserts nothing.
 
