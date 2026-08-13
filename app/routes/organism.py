@@ -35,6 +35,7 @@ from app.services.filters import (
     filters_from_query_params,
     validate_date_params,
 )
+from app.services.query_cache import cached_aggregate
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
@@ -80,15 +81,19 @@ def _build_organism_context(
         date_to=filters.date_to,
     )
 
-    kpi = kpi_summary(db, filters)
-    trend_rows = monthly_trend(db, filters)
-    concentration = concentration_ratio(db, filters)
+    kpi = cached_aggregate("kpi_summary", kpi_summary, db, filters)
+    trend_rows = cached_aggregate("monthly_trend", monthly_trend, db, filters)
+    concentration = cached_aggregate(
+        "concentration_ratio", concentration_ratio, db, filters
+    )
     concentration_payload = (
         _build_concentration_chart_payload(concentration)
         if concentration.ratio is not None
         else None
     )
-    company_ranking = ranking_by_company(db, filters, limit=RANKING_LIMIT)
+    company_ranking = cached_aggregate(
+        "ranking_by_company", ranking_by_company, db, filters, limit=RANKING_LIMIT
+    )
 
     return {
         "filters": filters,

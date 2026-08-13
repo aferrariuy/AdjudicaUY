@@ -1999,6 +1999,158 @@ def test_validate_date_params_accepts_single_date() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_organism_context_cold_path_uses_four_cached_aggregates(db_session) -> None:
+    """Cold organism context runs exactly the four cached dashboard aggregates.
+
+    The organism profile must obtain KPI, trend, concentration, and company
+    ranking through ``cached_aggregate`` with the same names and callable
+    semantics as the dashboard route, and the company ranking must carry the
+    shared ``RANKING_LIMIT`` explicitly.
+    """
+
+    from app.routes import organism as organism_route
+    from app.routes.common import RANKING_LIMIT
+    from app.routes.organism import _build_organism_context
+
+    raw_params: dict[str, str | None] = {
+        "date_from": f"{CURRENT_YEAR}-01-01",
+        "date_to": f"{CURRENT_YEAR}-12-31",
+    }
+    kpi = KpiSummary(Decimal("0"), Decimal("0"), 0, 0, 0)
+    calls: list[tuple[str, int | None]] = []
+    real_cached_aggregate = organism_route.cached_aggregate
+
+    def recording_cached_aggregate(name, aggregate, session, filters, **kwargs):
+        calls.append((name, kwargs.get("limit")))
+        return real_cached_aggregate(name, aggregate, session, filters, **kwargs)
+
+    with (
+        patch(
+            "app.routes.organism.cached_aggregate",
+            side_effect=recording_cached_aggregate,
+        ),
+        patch("app.routes.organism.kpi_summary", return_value=kpi),
+        patch("app.routes.organism.monthly_trend", return_value=[]),
+        patch(
+            "app.routes.organism.concentration_ratio",
+            return_value=ConcentrationResult(None, 0, 0),
+        ),
+        patch("app.routes.organism.ranking_by_company", return_value=[]),
+    ):
+        _build_organism_context(
+            db_session,
+            decoded_name="Ministerio de Interior",
+            raw_params=raw_params.copy(),
+        )
+
+    assert [name for name, _limit in calls] == [
+        "kpi_summary",
+        "monthly_trend",
+        "concentration_ratio",
+        "ranking_by_company",
+    ]
+    assert calls[3] == ("ranking_by_company", RANKING_LIMIT)
+    assert all(limit is None for name, limit in calls[:3])
+
+
+def test_organism_context_warm_hit_reruns_no_aggregates(db_session) -> None:
+    """A second identical organism context adds zero aggregate work.
+
+    Once the four aggregate entries are populated for an identical filter set
+    and ranking limit, the warm context must reuse every value without
+    calling the underlying aggregate functions again.
+    """
+
+    from app.routes.organism import _build_organism_context
+
+    raw_params: dict[str, str | None] = {
+        "date_from": f"{CURRENT_YEAR}-01-01",
+        "date_to": f"{CURRENT_YEAR}-12-31",
+    }
+    kpi = KpiSummary(Decimal("0"), Decimal("0"), 0, 0, 0)
+    with (
+        patch("app.routes.organism.kpi_summary", return_value=kpi) as kpi_mock,
+        patch("app.routes.organism.monthly_trend", return_value=[]) as trend_mock,
+        patch(
+            "app.routes.organism.concentration_ratio",
+            return_value=ConcentrationResult(None, 0, 0),
+        ) as concentration_mock,
+        patch(
+            "app.routes.organism.ranking_by_company", return_value=[]
+        ) as ranking_mock,
+    ):
+        cold = _build_organism_context(
+            db_session,
+            decoded_name="Ministerio de Interior",
+            raw_params=raw_params.copy(),
+        )
+        warm = _build_organism_context(
+            db_session,
+            decoded_name="Ministerio de Interior",
+            raw_params=raw_params.copy(),
+        )
+
+    assert kpi_mock.call_count == 1
+    assert trend_mock.call_count == 1
+    assert concentration_mock.call_count == 1
+    assert ranking_mock.call_count == 1
+    # Warm hit preserves the view-model values.
+    assert cold["kpi"] == warm["kpi"]
+    assert cold["trend_rows"] == warm["trend_rows"]
+    assert cold["trend_payload"] == warm["trend_payload"]
+    assert cold["concentration"] == warm["concentration"]
+    assert cold["ranking_rows"] == warm["ranking_rows"]
+
+
+def test_organism_context_cache_disabled_reruns_all_four_aggregates(
+    db_session, monkeypatch
+) -> None:
+    """TTL zero repeats all four aggregates and stores nothing.
+
+    With caching disabled each request must evaluate the aggregates again
+    while the view-model values remain identical to the cached path.
+    """
+
+    from app.routes.organism import _build_organism_context
+
+    monkeypatch.setenv("CACHE_TTL_SECONDS", "0")
+    raw_params: dict[str, str | None] = {
+        "date_from": f"{CURRENT_YEAR}-01-01",
+        "date_to": f"{CURRENT_YEAR}-12-31",
+    }
+    kpi = KpiSummary(Decimal("0"), Decimal("0"), 0, 0, 0)
+    with (
+        patch("app.routes.organism.kpi_summary", return_value=kpi) as kpi_mock,
+        patch("app.routes.organism.monthly_trend", return_value=[]) as trend_mock,
+        patch(
+            "app.routes.organism.concentration_ratio",
+            return_value=ConcentrationResult(None, 0, 0),
+        ) as concentration_mock,
+        patch(
+            "app.routes.organism.ranking_by_company", return_value=[]
+        ) as ranking_mock,
+    ):
+        first = _build_organism_context(
+            db_session,
+            decoded_name="Ministerio de Interior",
+            raw_params=raw_params.copy(),
+        )
+        second = _build_organism_context(
+            db_session,
+            decoded_name="Ministerio de Interior",
+            raw_params=raw_params.copy(),
+        )
+
+    assert kpi_mock.call_count == 2
+    assert trend_mock.call_count == 2
+    assert concentration_mock.call_count == 2
+    assert ranking_mock.call_count == 2
+    assert first["kpi"] == second["kpi"]
+    assert first["trend_rows"] == second["trend_rows"]
+    assert first["concentration"] == second["concentration"]
+    assert first["ranking_rows"] == second["ranking_rows"]
+
+
 def test_organism_detail_returns_200_with_widgets_for_known_organism(
     client: TestClient, make_adjudication, db_session
 ) -> None:
