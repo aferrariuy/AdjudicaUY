@@ -22,8 +22,12 @@ from fastapi.responses import HTMLResponse
 if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
-from app.presenters import _build_concentration_chart_payload
-from app.routes.common import _CSV_COLUMNS, COMPETITOR_LIMIT, RANKING_LIMIT
+from app.presenters import (
+    _build_concentration_chart_payload,
+    _build_page_numbers,
+    _build_trend_chart_payload,
+)
+from app.routes.common import _CSV_COLUMNS, COMPETITOR_LIMIT, PAGE_SIZE, RANKING_LIMIT
 from app.services.company import CompanyProfileSummary, CompanyWinRate
 from app.services.dashboard import ConcentrationResult, KpiSummary
 from app.services.filters import AdjudicationFilters, filters_from_query_params
@@ -1964,6 +1968,90 @@ def test_company_context_company_summary_uses_market_total(db_session) -> None:
     assert summary_mock.call_args.kwargs["market_total"] == Decimal("900.00")
     assert first["company_summary"].display_name == "Initial Name"
     assert second["company_summary"].display_name == "Fresh Name"
+
+
+@pytest.mark.parametrize(
+    ("raw_type", "raw_number"),
+    [("", ""), ("RUT", ""), ("", "42")],
+)
+def test_company_context_empty_identity_returns_pinned_empty_context(
+    db_session, raw_type, raw_number
+) -> None:
+    """An empty decoded company identity short-circuits before any DB work.
+
+    The single identity guard must return the pinned empty-context dict —
+    zeroed ``CompanyProfileSummary``, ``CompanyWinRate(0, 0, None)``, a
+    null ``ConcentrationResult``, and ``company_variant=True`` — without
+    invoking the identity lookup, any cached aggregate, or the
+    adjudication listing (fail-if-invoked mocks prove the early return).
+    A real route request cannot carry an empty path segment (Starlette
+    rejects it before the handler), so the guard is exercised directly
+    through ``_build_company_context``, matching the existing context
+    tests.
+    """
+
+    from app.routes.company import _build_company_context
+
+    raw_params: dict[str, str | None] = {
+        "date_from": f"{CURRENT_YEAR}-01-01",
+        "date_to": f"{CURRENT_YEAR}-12-31",
+        "page": "4",
+    }
+    with (
+        patch(
+            "app.routes.company.lookup_company_identity",
+            side_effect=AssertionError("empty identity must not look up a company"),
+        ) as lookup_mock,
+        patch(
+            "app.routes.company.cached_aggregate",
+            side_effect=AssertionError("empty identity must not run aggregates"),
+        ) as cache_mock,
+        patch(
+            "app.routes.company.list_adjudications",
+            side_effect=AssertionError("empty identity must not load listings"),
+        ) as listing_mock,
+    ):
+        context = _build_company_context(
+            db_session,
+            raw_type=raw_type,
+            raw_number=raw_number,
+            raw_params=raw_params.copy(),
+        )
+
+    assert context["filters"].company_doc_exact == (raw_type, raw_number)
+    assert context["company_type"] == raw_type
+    assert context["company_number"] == raw_number
+    assert context["company_name"] is None
+    assert context["company_summary"] == CompanyProfileSummary(
+        display_name=None,
+        total_amount=Decimal("0"),
+        total=0,
+        purchase_count=0,
+        organism_count=0,
+        share_of_total=Decimal("0"),
+    )
+    assert context["results"] == []
+    assert context["total"] == 0
+    assert context["shown"] == 0
+    assert context["page_size"] == PAGE_SIZE
+    assert context["page"] == 4
+    assert context["total_pages"] == 1
+    assert context["page_numbers"] == _build_page_numbers(4, 1)
+    assert context["ranking_rows"] == []
+    assert context["top_article_rows"] == []
+    assert context["organisms"] == []
+    assert context["trend_rows"] == []
+    assert context["trend_payload"] == _build_trend_chart_payload([])
+    assert context["has_trend_data"] is False
+    assert context["concentration"] == ConcentrationResult(None, 0, 0)
+    assert context["concentration_payload"] is None
+    assert context["has_concentration_data"] is False
+    assert context["company_win_rate"] == CompanyWinRate(0, 0, None)
+    assert context["company_competitors"] == []
+    assert context["company_variant"] is True
+    lookup_mock.assert_not_called()
+    cache_mock.assert_not_called()
+    listing_mock.assert_not_called()
 
 
 def test_company_profile_hides_name_filter_but_keeps_organism_filter(
