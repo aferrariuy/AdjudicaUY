@@ -32,10 +32,18 @@ _CACHEABLE_AGGREGATES = frozenset(
         "company_competitors",
         "company_summary",
         "top_articles",
+        "sitemap_xml",
     }
 )
 _LIMIT_AWARE_AGGREGATES = frozenset(
-    {"ranking_by_company", "ranking_by_organism", "distinct_organisms", "top_articles"}
+    {
+        "ranking_by_company",
+        "ranking_by_organism",
+        "distinct_organisms",
+        "top_articles",
+        "company_win_rate",
+        "company_competitors",
+    }
 )
 _CacheEntry = tuple[float, Any]
 _cache: OrderedDict[str, _CacheEntry] = OrderedDict()
@@ -91,6 +99,8 @@ def cached_aggregate(
     settings = get_settings()
     ttl = settings.cache_ttl_seconds
     if ttl == 0:
+        if aggregate_name in _LIMIT_AWARE_AGGREGATES and limit is not None:
+            return aggregate(session, filters, limit=limit)
         return aggregate(session, filters)
 
     key = build_cache_key(aggregate_name, filters, limit=limit)

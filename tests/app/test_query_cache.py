@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -50,6 +50,13 @@ def test_cache_key_normalizes_empty_values_and_distinguishes_active_values() -> 
     assert build_cache_key("kpi_summary", year, limit=10) == build_cache_key(
         "kpi_summary", year
     )
+    for name in ("company_competitors", "company_win_rate"):
+        assert build_cache_key(name, year, limit=10) != build_cache_key(
+            name, year, limit=5
+        )
+        assert build_cache_key(name, year, limit=10) != build_cache_key(
+            name, year, limit=None
+        )
 
 
 def test_cache_miss_then_hit_calls_aggregate_once(monkeypatch) -> None:
@@ -74,6 +81,7 @@ def test_cache_accepts_company_deep_path_aggregates(monkeypatch) -> None:
         "company_competitors",
         "company_summary",
         "top_articles",
+        "sitemap_xml",
     ):
         aggregate = Mock(return_value=name)
 
@@ -110,6 +118,51 @@ def test_top_articles_limit_is_keyed_and_forwarded(monkeypatch) -> None:
     session = Mock()
     cached_aggregate("top_articles", aggregate, session, filters, limit=10)
     aggregate.assert_called_once_with(session, filters, limit=10)
+
+
+def test_company_aggregate_limits_are_keyed_and_forwarded(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.query_cache.get_settings", lambda: _settings())
+    filters = AdjudicationFilters(company_doc_exact=("RUT", "42"))
+
+    for name in ("company_competitors", "company_win_rate"):
+        assert build_cache_key(name, filters, limit=10) != build_cache_key(
+            name, filters, limit=20
+        )
+        assert build_cache_key(name, filters, limit=10) != build_cache_key(
+            name, filters, limit=None
+        )
+
+        aggregate = Mock(return_value=[])
+        session = Mock()
+        cached_aggregate(name, aggregate, session, filters, limit=10)
+        aggregate.assert_called_once_with(session, filters, limit=10)
+
+
+def test_zero_ttl_forwards_explicit_limit_for_limit_aware_aggregates(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.query_cache.get_settings", lambda: _settings(ttl=0)
+    )
+    filters = AdjudicationFilters(company_doc_exact=("RUT", "42"))
+
+    for name in ("company_competitors", "company_win_rate"):
+        aggregate = Mock(return_value=["fresh"])
+        session = Mock()
+
+        assert cached_aggregate(name, aggregate, session, filters, limit=10) == [
+            "fresh"
+        ]
+        assert cached_aggregate(name, aggregate, session, filters, limit=10) == [
+            "fresh"
+        ]
+        assert aggregate.call_count == 2
+        aggregate.assert_has_calls(
+            [
+                call(session, filters, limit=10),
+                call(session, filters, limit=10),
+            ]
+        )
 
 
 def test_cache_expiry_reexecutes_after_ttl(monkeypatch) -> None:
