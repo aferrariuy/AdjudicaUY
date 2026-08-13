@@ -73,11 +73,11 @@ app/                  # FastAPI web app
   templates/          # pages/ (5) + partials/ (9): Jinja2 + HTMX fragments
 
 scraper/              # Worker pipeline: fetch → parse → enrich → normalize → persist
-  main.py             # run_scrape() — orchestration, batched flush, per-day isolation
+  main.py             # run_scrape() — orchestration, batched flush (buffer drained in finally), per-day isolation
   scheduler.py        # Daily scheduler loop with SIGTERM/SIGINT graceful shutdown
   xml_report.py       # Fetch + parse government XML (lxml), partial recovery
-  normalizer.py       # Row normalization + currency conversion (amount_uyu)
-  bcu_client.py       # BCU SOAP client: per-(code, date) cache, 7-day lookback, retry
+  normalizer.py       # Per-adjudication normalization + currency conversion (amount_uyu); invalid lines isolated, parent retained
+  bcu_client.py       # BCU SOAP client: per-(code, date) rate cache, 7-day lookback, retries only transport errors (BcuPermanentError never retried), per-client monedas cache
   persistence.py      # Idempotent bulk_insert: ON CONFLICT DO NOTHING on all 3 tables
   retry.py            # Shared retry_with_backoff (1s/3s/9s + jitter, transport-agnostic)
   organism_lookup.py  # Static (id_inciso, id_ue) → organism name mapping
@@ -130,9 +130,9 @@ Child rows link via `compra_id` FK with `ON DELETE CASCADE`. The unique constrai
 - **App factory** (`create_app()`): no import-time side effects; templates on `app.state` (tests can swap the Jinja environment); `lifespan` fails fast on bad config and warms the engine.
 - **Lazy engine/session**: `get_engine()`/`get_session_factory()` build once per process; `pool_pre_ping` guards stale connections; `expire_on_commit=False`; `get_db` yields and closes a request-scoped session.
 - **Idempotent ingestion**: `ON CONFLICT DO NOTHING` on the natural key of all three tables (compra first, then resolve PKs, then children). `run_scrape` batches with `flush_size` (1000) / `flush_interval` (7 days) thresholds and drains the buffer in `finally`.
-- **Failure isolation**: per-day fetch failures skip the day; per-compra normalization failures log and continue; malformed XML blocks are skipped but the parent compra is still yielded. DB errors propagate (fail-hard) in the worker; the day-by-day script soft-fails.
-- **Shared retry**: `retry_with_backoff` (1s/3s/9s + uniform jitter, configurable retryable tuple) is transport-agnostic; the BCU wrapper re-raises `BcuError`.
-- **BCU rate cache**: `BcuClient` caches `(bcu_code, date)` including confirmed-empty results (weekends/holidays) and walks back up to 7 days for the first available rate.
+- **Failure isolation**: per-day fetch failures skip the day; per-adjudication normalization failures log and continue — an invalid line is dropped at line scope while the parent compra and its valid siblings are retained (a compra with zero surviving adjudications still persists as a parent-only row, `monto_adj` verbatim and never recomputed); malformed XML blocks are skipped but the parent compra is still yielded. DB errors propagate (fail-hard) in the worker; the day-by-day script soft-fails.
+- **Shared retry**: `retry_with_backoff` (1s/3s/9s + uniform jitter, configurable retryable tuple) is transport-agnostic; the BCU wrapper retries only transport/HTTP errors and raises permanent response failures (`BcuPermanentError`, a `BcuError` subclass) immediately — never retried, never cached.
+- **BCU rate cache**: `BcuClient` caches `(bcu_code, date)` including confirmed-empty results (weekends/holidays), walks back up to 7 days for the first available rate, and caches the `monedas` catalogue per client instance so unknown-currency resolution reuses one parsed catalogue.
 - **Organism resolution chain**: `(id_inciso, id_ue)` static map → `id_ucc` codiguera → `"Desconocido (x-y)"` fallback. Never raises — the pipeline must always produce a row.
 - **Aggregate cache** (`query_cache.py`): process-local TTL/LRU over a **whitelist** of aggregate names; normalized JSON keys (limit only for limit-aware aggregates); `RLock`; TTL is 0 (disabled) or 300–900s; LRU eviction at `cache_max_entries`. Cache is TTL-only — no invalidation on scrape.
 - **HTMX partials**: full-page routes render the same data as their `/partial` counterparts; `partial=table` skips the expensive aggregates for pagination requests; `HX-Request` is logged for tracing.
