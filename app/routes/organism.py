@@ -10,12 +10,12 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 
 from app.database import get_db
-from app.main import HeadAwareAPIRoute
 from app.presenters import (
     _build_concentration_chart_payload,
     _build_seo_context,
     _build_trend_chart_payload,
 )
+from app.routes._base import HeadAwareAPIRoute
 from app.routes.common import (
     RANKING_LIMIT,
     _full_page_validation_error,

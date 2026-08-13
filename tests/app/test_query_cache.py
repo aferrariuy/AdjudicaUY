@@ -8,7 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from app.services.adjudication_service import AdjudicationFilters
+from app.services.filters import AdjudicationFilters
 from app.services.query_cache import build_cache_key, cached_aggregate, clear_cache
 
 

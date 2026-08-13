@@ -24,10 +24,8 @@ from sqlalchemy.exc import IntegrityError
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
 from app.models.oferente import Oferente
-from app.services.adjudication_service import (
-    AdjudicationFilters,
-    list_adjudications,
-)
+from app.services.filters import AdjudicationFilters
+from app.services.listing import list_adjudications
 
 # ---------------------------------------------------------------------------
 # Helpers

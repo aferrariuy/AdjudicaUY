@@ -13,7 +13,7 @@ Design notes
   Pure functions are trivially testable and survive the
   ``scraper.main`` / ``scripts/scrape_day_by_day.py`` split that
   the rest of the pipeline shares.
-* :func:`_bulk_insert` uses ``ON CONFLICT DO NOTHING`` on
+* :func:`bulk_insert` uses ``ON CONFLICT DO NOTHING`` on
   ``compra.id_compra`` so a re-run of the scraper on the same
   data is a no-op at the parent level. The function lets
   :class:`~sqlalchemy.exc.SQLAlchemyError` propagate (fail-hard)
@@ -100,7 +100,7 @@ def _oferente_dict(compra_id: int, row: OferenteRow) -> dict[str, Any]:
     }
 
 
-def _bulk_insert(session: Session, rows: Iterable[CompraRow]) -> int:
+def bulk_insert(session: Session, rows: Iterable[CompraRow]) -> int:
     """Insert ``rows`` into the new schema, idempotently.
 
     Each :class:`CompraRow` produces one ``compra`` (with ``ON

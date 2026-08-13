@@ -35,7 +35,13 @@ import logging
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING
-from urllib.parse import quote
+
+from app.formatting import (
+    CONVERSION_TABLE,
+    NON_CONVERTIBLE_TABLE,
+    PASSTHROUGH_TABLE,
+    display_currency,
+)
 
 if TYPE_CHECKING:
     from datetime import date
@@ -67,60 +73,6 @@ class ConversionMode(enum.Enum):
     PASSTHROUGH = "passthrough"  # UYU — amount_uyu = amount
     CONVERT = "convert"  # Mapped currency — amount_uyu = amount * TCC
     NULL = "null"  # Non-convertible — amount_uyu = NULL
-
-
-# Mapping for ``id_moneda`` codes that convert via the BCU API.
-# Format: ``id_moneda -> (BCU code, ISO 4217 display code)``.
-CONVERSION_TABLE: dict[int, tuple[int, str]] = {
-    20: (2224, "USD"),  # DOLAR INTERBANCARIO COMPRADOR
-    37: (2224, "USD"),  # DLS. USA CABLE
-    36: (2225, "USD"),  # DLS.USA BILLETE
-    1: (2222, "USD"),  # DOLAR PIZARRA VENDEDOR (deprecated 01/01/2025)
-    2: (2222, "USD"),  # DOLAR INTERBANCARIO VENDEDOR
-    40: (2230, "USD"),  # DOLAR FONDO COMPRADOR
-    47: (2230, "USD"),  # DOLAR PROMEDIO
-    25: (1000, "BRL"),  # REAL
-    15: (1111, "EUR"),  # EURO
-    8: (2309, "CAD"),  # DOLAR CANADIENSE
-    11: (2700, "GBP"),  # LIBRA ESTERLINA
-    12: (3600, "JPY"),  # YEN
-    21: (1300, "CLP"),  # PESO CHILENO
-    23: (500, "ARS"),  # PESO ARGENTINO
-    24: (105, "AUD"),  # DLS.AUSTRALIANOS
-    27: (4150, "CNY"),  # YUANES RENMBI
-    28: (1800, "DKK"),  # CORONAS DANESAS
-    29: (4200, "MXN"),  # NVO. PSO. MEXICANO
-    30: (4600, "NOK"),  # CORONAS NORUEGAS
-    31: (1490, "NZD"),  # DLS. NEOZELANDESES
-    33: (1620, "ZAR"),  # RAND SUDAFRICANO
-    34: (501, "ARS"),  # PESO ARGENTINO
-    38: (2230, "USD"),  # DOLAR FONDO COMPRADOR
-    41: (5100, "HKD"),  # DOLAR HONG KONG
-    42: (5300, "KRW"),  # WON
-    44: (5500, "COP"),  # PESO COLOMBIANO
-    46: (5700, "INR"),  # RUPIA INDIA
-    14: (5900, "CHF"),  # FRANCO SUIZO
-    48: (4900, "ISK"),  # CORONA ISLANDESA
-    49: (2222, "USD"),  # DOLAR PIZARRA VENDEDOR
-    17: (2, "XDR"),  # DER.ESP. DE GIRO (SDR)
-    19: (9900, "U.R."),  # BCU 9900, ISO U.R.
-}
-
-# Pass-through: ``amount_uyu = amount``, no BCU call. Maps to display
-# currency for documentation/audit purposes.
-PASSTHROUGH_TABLE: dict[int, str] = {
-    0: "UYU",  # PESOS URUGUAYOS
-}
-
-# Non-convertible: ``amount_uyu = NULL``. The display code is a
-# non-ISO 4217 placeholder (Uruguayan domestic units / historical codes)
-# — the database stores whatever 3-letter string is provided here.
-NON_CONVERTIBLE_TABLE: dict[int, str] = {
-    4: "UIX",  # UNIDAD INDEXADA
-    5: "URX",  # UNIDAD REAJUSTABLE
-    22: "OHX",  # ORO (historical)
-    39: "EUX",  # EURO TRANSFERENCIA (non-convertible via BCU)
-}
 
 
 # ---------------------------------------------------------------------------
@@ -245,44 +197,6 @@ def _resolve_mode(id_moneda: int) -> ConversionMode:
     if id_moneda in CONVERSION_TABLE:
         return ConversionMode.CONVERT
     return ConversionMode.NULL  # default for unknown IDs
-
-
-def display_currency(id_moneda: int) -> str:
-    """Pick the 3-letter display code for ``id_moneda``.
-
-    Falls back to ``"N/D"`` (No Disponible) when the ID is unrecognised so the
-    row still satisfies the ``String(3) NOT NULL`` constraint and the UI
-    shows a consistent Spanish placeholder.
-    """
-
-    if id_moneda in PASSTHROUGH_TABLE:
-        return PASSTHROUGH_TABLE[id_moneda]
-    if id_moneda in NON_CONVERTIBLE_TABLE:
-        return NON_CONVERTIBLE_TABLE[id_moneda]
-    if id_moneda in CONVERSION_TABLE:
-        return CONVERSION_TABLE[id_moneda][1]
-    return "N/D"
-
-
-# ---------------------------------------------------------------------------
-# License link template — deterministic URL built from ``id_compra``.
-# ---------------------------------------------------------------------------
-
-_LICENSE_LINK_TEMPLATE = (
-    "https://www.comprasestatales.gub.uy/consultas/detalle/id/{id_compra}"
-)
-
-
-def build_license_link(id_compra: str) -> str:
-    """Build the public detail-page URL for ``id_compra``.
-
-    Deterministic — no HTTP request — so the same ``id_compra`` always
-    produces the same ``license_link`` (see ``organism-lookup`` spec,
-    "License Link Construction" scenario). The identifier is URL-encoded
-    so a scraped value cannot break the resulting URL path.
-    """
-
-    return _LICENSE_LINK_TEMPLATE.format(id_compra=quote(id_compra, safe=""))
 
 
 def _quantize_uyu(value: Decimal) -> Decimal:
@@ -487,7 +401,5 @@ __all__ = [
     "OferenteRow",
     "PASSTHROUGH_TABLE",
     "AdjudicacionRow",
-    "build_license_link",
-    "display_currency",
     "normalize_compra",
 ]

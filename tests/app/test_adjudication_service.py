@@ -1,8 +1,8 @@
 """Unit tests for the citizen-dashboard aggregate queries.
 
 The functions tested here (:func:`kpi_summary`, :func:`monthly_trend`,
-:func:`concentration_ratio`) live in :mod:`app.services.adjudication_service`
-and own the SQLAlchemy-side of the dashboard. They are exercised here
+:func:`concentration_ratio`) live in :mod:`app.services.dashboard`
+and related service modules. They are exercised here
 against the in-memory SQLite engine from ``conftest.py`` — no HTTP
 layer, no network, no chart payloads. The route-side coverage of
 the new widgets (HTML rendering, JSON payload shape, organism links)
@@ -26,29 +26,29 @@ import sqlalchemy as sa
 from app.models.adjudicacion import Adjudicacion
 from app.models.compra import Compra
 from app.models.oferente import Oferente
-from app.services.adjudication_service import (
-    AdjudicationFilters,
+from app.services.company import (
     CompanyProfileSummary,
     CompanyWinRate,
-    ConcentrationResult,
-    KpiSummary,
-    ValidationError,
     _document_pair_match,
     _scoped_compra_ids,
     company_competitors,
     company_summary,
     company_win_rate,
-    concentration_ratio,
-    count_adjudications,
-    kpi_summary,
-    list_adjudications,
     lookup_company_identities,
     lookup_company_identity,
+)
+from app.services.dashboard import (
+    ConcentrationResult,
+    KpiSummary,
+    concentration_ratio,
+    kpi_summary,
     monthly_trend,
     ranking_by_company,
     ranking_by_organism,
     top_articles,
 )
+from app.services.filters import AdjudicationFilters, ValidationError
+from app.services.listing import count_adjudications, list_adjudications
 
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session

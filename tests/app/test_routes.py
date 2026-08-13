@@ -21,14 +21,9 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 from app.presenters import _build_concentration_chart_payload
-from app.services.adjudication_service import (
-    AdjudicationFilters,
-    CompanyProfileSummary,
-    CompanyWinRate,
-    ConcentrationResult,
-    KpiSummary,
-    filters_from_query_params,
-)
+from app.services.company import CompanyProfileSummary, CompanyWinRate
+from app.services.dashboard import ConcentrationResult, KpiSummary
+from app.services.filters import AdjudicationFilters, filters_from_query_params
 
 # The route layer defaults the date range to the current calendar year
 # on cold load (no date params). Tests that don't pass explicit date
@@ -1899,7 +1894,7 @@ def test_organism_limpiar_resets_date_range(
 
 
 def test_validate_date_params_accepts_missing_keys() -> None:
-    from app.services.adjudication_service import validate_date_params
+    from app.services.filters import validate_date_params
 
     # Empty / absent params are the route's default-injection concern,
     # not a validation error.
@@ -1908,7 +1903,7 @@ def test_validate_date_params_accepts_missing_keys() -> None:
 
 
 def test_validate_date_params_accepts_valid_iso() -> None:
-    from app.services.adjudication_service import validate_date_params
+    from app.services.filters import validate_date_params
 
     validate_date_params({"date_from": "2024-01-15", "date_to": "2024-12-31"})
 
@@ -1916,7 +1911,7 @@ def test_validate_date_params_accepts_valid_iso() -> None:
 def test_validate_date_params_rejects_garbage_string() -> None:
     import pytest
 
-    from app.services.adjudication_service import (
+    from app.services.filters import (
         DateValidationError,
         validate_date_params,
     )
@@ -1928,7 +1923,7 @@ def test_validate_date_params_rejects_garbage_string() -> None:
 def test_validate_date_params_rejects_reversed_range() -> None:
     import pytest
 
-    from app.services.adjudication_service import (
+    from app.services.filters import (
         DateValidationError,
         validate_date_params,
     )
@@ -1940,7 +1935,7 @@ def test_validate_date_params_rejects_reversed_range() -> None:
 def test_validate_date_params_accepts_under_5y() -> None:
     """A range shorter than 5 years is accepted."""
 
-    from app.services.adjudication_service import validate_date_params
+    from app.services.filters import validate_date_params
 
     # 3-year range: well under the 5-year limit.
     validate_date_params({"date_from": "2022-01-01", "date_to": "2024-12-31"})
@@ -1949,7 +1944,7 @@ def test_validate_date_params_accepts_under_5y() -> None:
 def test_validate_date_params_accepts_exactly_5y_boundary() -> None:
     """A range of exactly 1825 days (5×365) is accepted as the boundary."""
 
-    from app.services.adjudication_service import validate_date_params
+    from app.services.filters import validate_date_params
 
     # 2020-01-01 → 2024-12-30 is exactly 1825 days (2020 is leap, so
     # the leap day is already accounted for inside the span).
@@ -1961,7 +1956,7 @@ def test_validate_date_params_rejects_over_5y() -> None:
 
     import pytest
 
-    from app.services.adjudication_service import (
+    from app.services.filters import (
         DateValidationError,
         validate_date_params,
     )
@@ -1978,7 +1973,7 @@ def test_validate_date_params_rejects_wider_range() -> None:
 
     import pytest
 
-    from app.services.adjudication_service import (
+    from app.services.filters import (
         DateValidationError,
         validate_date_params,
     )
@@ -1991,7 +1986,7 @@ def test_validate_date_params_rejects_wider_range() -> None:
 def test_validate_date_params_accepts_single_date() -> None:
     """When only one date is provided, no range exists to check."""
 
-    from app.services.adjudication_service import validate_date_params
+    from app.services.filters import validate_date_params
 
     # Only date_from — the max-range check only runs when both are present.
     validate_date_params({"date_from": "2024-01-01", "date_to": ""})

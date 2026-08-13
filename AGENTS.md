@@ -7,7 +7,7 @@ This file is the source of truth for project conventions, architecture decisions
 ## Stack
 
 | Layer | Technology |
-|---|---|
+| --- | --- |
 | Runtime | Python 3.13, FastAPI, uvicorn |
 | Persistence | PostgreSQL 16, SQLAlchemy 2.0, Alembic |
 | Frontend | Jinja2 templates + HTMX (no JS framework), Tailwind CSS (compiled, committed output is gitignored) |
@@ -60,16 +60,16 @@ pre-commit run --all-files                        # validate everything
 app/                  # FastAPI web app
   main.py             # create_app() factory, lifespan (env validation + engine warm-up),
                       # middleware (gzip, security headers with nonce-based CSP, static cache),
-                      # HeadAwareAPIRoute, /healthz, /robots.txt, /sitemap.xml
+                      # /healthz, /robots.txt, /sitemap.xml
   config.py           # Pydantic Settings; URL validators enforce HTTPS + host allowlist
   database.py         # Lazy engine + session factory (pool_pre_ping), get_db dependency
-  formatting.py       # es-UY number formatting as Jinja filters (no system locale needed)
+  formatting.py       # es-UY number formatting + display_currency/build_license_link + currency tables
   presenters.py       # Pure view-shaping layer: chart payloads, SEO context, page numbers (no DB/session)
   models/             # ORM: Compra, Adjudicacion, Oferente (3 tables)
   routes/             # HTTP layer split by resource: common.py, dashboard.py, organism.py,
-                      # company.py, about.py — aggregated into one router via routes/__init__.py
+                      # company.py, about.py, _base.py (HeadAwareAPIRoute) — via routes/__init__.py
   services/           # Domain modules: filters.py, listing.py, dashboard.py, company.py, catalog.py,
-                      # adjudication_service.py (compat/deprecation facade) + query_cache.py
+                      # query_cache.py
   templates/          # pages/ (5) + partials/ (9): Jinja2 + HTMX fragments
 
 scraper/              # Worker pipeline: fetch → parse → enrich → normalize → persist
@@ -78,7 +78,7 @@ scraper/              # Worker pipeline: fetch → parse → enrich → normaliz
   xml_report.py       # Fetch + parse government XML (lxml), partial recovery
   normalizer.py       # Row normalization + currency conversion (amount_uyu)
   bcu_client.py       # BCU SOAP client: per-(code, date) cache, 7-day lookback, retry
-  persistence.py      # Idempotent inserts: ON CONFLICT DO NOTHING on all 3 tables
+  persistence.py      # Idempotent bulk_insert: ON CONFLICT DO NOTHING on all 3 tables
   retry.py            # Shared retry_with_backoff (1s/3s/9s + jitter, transport-agnostic)
   organism_lookup.py  # Static (id_inciso, id_ue) → organism name mapping
   ucc_lookup.py       # UCC codiguera fallback for organism resolution
@@ -101,7 +101,7 @@ tests/
 All routes live in `app/routes/`, split by resource (`common.py`, `dashboard.py`, `organism.py`, `company.py`, `about.py`) and aggregated into one router via `app/routes/__init__.py`. Everything is excluded from OpenAPI schema. All GET routes also accept HEAD (via `HeadAwareAPIRoute`) — HEAD returns 200 with empty body and an `Allow: GET, HEAD` header.
 
 | Path | Handler | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `GET /` | `index` | Full dashboard page: filters, listing, KPI, trend, concentration, rankings |
 | `GET /adjudications` | `adjudications_partial` | HTMX partial for the results container; `partial=table` skips aggregates (pagination) |
 | `GET /adjudications/export` | `export_adjudications` | CSV export of the filtered listing (streaming via `_stream_csv_response` in `common.py`) |
@@ -117,7 +117,7 @@ Plus in `app/main.py`: `/healthz` (compose healthcheck), `/robots.txt`, `/sitema
 ## Data Model
 
 | Table | Natural key / uniqueness | Notes |
-|---|---|---|
+| --- | --- | --- |
 | `compra` | `id_compra` unique | One per `<compra>` XML element; nullable XML attributes tolerate schema drift; `organismo` nullable (lookup may miss); indexes on filter/ordering columns (`fecha_pub_adj`, `id_inciso`, `id_ue`, `id_tipocompra`, `id_ucc`) |
 | `adjudicacion` | `(compra_id, nombre_comercial, desc_articulo)` | One line item per award; `amount_uyu` nullable (non-convertible currencies); `ON DELETE CASCADE` from compra |
 | `oferente` | `(compra_id, nombre_comercial)` | One bidder per purchase; flat row, raw `id_moneda` only (no normalized amount) |
@@ -139,8 +139,8 @@ Child rows link via `compra_id` FK with `ON DELETE CASCADE`. The unique constrai
 - **Validation**: `validate_date_params` raises `DateValidationError` (unparseable, reversed range, >5 years); full-page routes render 422 with the user's input preserved; out-of-bounds page numbers redirect (302) to the last valid page instead of 4xx.
 - **SEO**: per-route `_build_seo_context` (meta + OG, in `app/presenters.py`), sitemap.xml, robots.txt, canonical paths.
 - **Nonce-based CSP**: per-request `secrets.token_urlsafe(16)` nonce injected into `request.state.csp_nonce`; the `Content-Security-Policy` header uses `script-src 'self' 'nonce-{n}'` and `style-src 'self' 'nonce-{n}'`. Every inline `<script>` and `<style>` block must carry `nonce="{{ request.state.csp_nonce }}"`; `JSON-LD` blocks are nonce-free.
-- **HEAD for GET routes**: `HeadAwareAPIRoute` (app/main.py) adds `HEAD` to all `GET` methods. Wired via `app.router.route_class` (main) + `route_class=` on each module `APIRouter`. HEAD returns the same status as GET with an empty body and an `Allow` header listing both methods.
-- **es-UY formatting**: `app/formatting.py` implements thousands/decimal/percent formatting as Jinja filters because the deploy image lacks the `es_UY` locale. `format_percent_adaptive` handles tiny KPI shares: ≥1% → 1 decimal, <1% → 3 decimals (e.g. `0.0057` → `"0,006 %"`). Registered as `pct_adaptive` in the Jinja env.
+- **HEAD for GET routes**: `HeadAwareAPIRoute` (`app/routes/_base.py`) adds `HEAD` to all `GET` methods. Wired via `app.router.route_class` (main) + `route_class=` on each module `APIRouter`. HEAD returns the same status as GET with an empty body and an `Allow` header listing both methods.
+- **es-UY formatting**: `app/formatting.py` implements thousands/decimal/percent formatting as Jinja filters because the deploy image lacks the `es_UY` locale. `format_percent_adaptive` handles tiny KPI shares: ≥1% → 1 decimal, <1% → 3 decimals (e.g. `0.0057` → `"0,006 %"`). Registered as `pct_adaptive` in the Jinja env. The same module owns `display_currency`, `build_license_link`, and the currency lookup tables used by listing and the scraper normalizer.
 - **Config safety**: Pydantic Settings validators enforce HTTPS and a host allowlist (`comprasestatales.gub.uy`, `cotizaciones.bcu.gub.uy`); test mode (via `PYTEST_CURRENT_TEST`) permits `example.test` hosts; credentials are stripped from log lines.
 
 ## Testing

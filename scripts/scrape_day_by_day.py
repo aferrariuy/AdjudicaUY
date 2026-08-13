@@ -34,7 +34,7 @@ from scraper.normalizer import (
     CompraRow,
     normalize_compra,
 )
-from scraper.persistence import _bulk_insert as _bulk_insert_hard
+from scraper.persistence import bulk_insert as _bulk_insert_hard
 from scraper.xml_report import (
     XmlCompra,
     fetch_xml_report,
@@ -53,15 +53,15 @@ logger = logging.getLogger("scrape_day_by_day")
 # :mod:`scraper.persistence`. The day-by-day backfill script
 # prefers **soft-failure** — a failed flush should not abort the
 # whole run, so this thin wrapper catches the ``SQLAlchemyError``
-# the canonical ``_bulk_insert`` propagates and turns it into a
+# the canonical ``bulk_insert`` propagates and turns it into a
 # logged warning + a 0 return. The canonical worker
-# (``scraper.main``) calls ``_bulk_insert`` directly with no
+# (``scraper.main``) calls ``bulk_insert`` directly with no
 # wrapper because it wants the orchestrating cron / Dokploy job
 # to see the DB error.
 
 
 def _bulk_insert(session: Session, rows: list[CompraRow]) -> int:
-    """Soft-failure wrapper around :func:`scraper.persistence._bulk_insert`.
+    """Soft-failure wrapper around :func:`scraper.persistence.bulk_insert`.
 
     Rolls the session back on any exception (matching the legacy
     behavior) and logs only ``exc.orig`` — SQLAlchemy dumps the
@@ -371,7 +371,7 @@ def main() -> None:
     finally:
         # Final flush: anything left in the buffer must be committed so a
         # graceful exit (or a crash right after) doesn't lose data. The
-        # on_conflict_do_nothing on _bulk_insert keeps a re-run idempotent
+        # on_conflict_do_nothing on bulk_insert keeps a re-run idempotent
         # in case the process was killed between commit and process exit.
         if buffer and not args.dry_run:
             inserted = _bulk_insert(session, buffer)
