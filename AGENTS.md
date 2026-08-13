@@ -164,6 +164,7 @@ Child rows link via `compra_id` FK with `ON DELETE CASCADE`. The unique constrai
 - **Dockerfile** is multi-stage: `builder` (Python venv), `tailwind` (pnpm + Tailwind compile with template content scan), `runtime` (non-root uid 1000, libpq5 only).
 - **Entrypoint** (`scripts/entrypoint.sh`): runs `alembic upgrade head` with 5 retries (5s apart) then `exec "$@"`; migrations are serialized via PostgreSQL advisory locks in `migrations/env.py`.
 - **Worker schedule**: daily at `SCRAPE_HOUR:SCRAPE_MINUTE` UTC (default 02:00 = 23:00 Montevideo). The worker is a long-running container — Dokploy's Scheduled Jobs feature needs it running.
+- **Worker observability** (`scraper/scheduler.py`, `docker-compose.yml`): `WORKER_HEARTBEAT_FILE` defaults to `/tmp/worker.heartbeat` and its mtime reports scheduler-loop liveness; the worker healthcheck requires a regular heartbeat file younger than 300 seconds (five minutes) and has a 60-second startup grace period. `WORKER_LAST_RUN_FILE` defaults to `/tmp/worker.last-run.json` and is atomically replaced only after a successful scrape with its UTC completion time and returned record count; a stale or absent marker is the failure signal and no separate failure marker is written. Both defaults use the worker's writable `/tmp` tmpfs despite `read_only: true`; custom paths must be writable.
 
 ## Conventions
 
