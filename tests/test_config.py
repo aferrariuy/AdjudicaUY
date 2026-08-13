@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from app.config import Settings
+from app.config import Settings, trusted_host_allowlist
 
 
 def _set_env(key: str, value: str | None) -> str | None:
@@ -104,3 +104,78 @@ def test_debug_reads_false_from_env(base_env: Any, monkeypatch: Any) -> None:
     monkeypatch.setenv("DEBUG", "false")
     settings = _make_settings()
     assert settings.debug is False
+
+
+# ---------------------------------------------------------------------------
+# trusted_host_allowlist
+# ---------------------------------------------------------------------------
+
+
+def test_trusted_host_allowlist_includes_canonical_hostname(
+    base_env: Any, monkeypatch: Any
+) -> None:
+    """The canonical SITE_URL hostname is always allowlisted."""
+
+    monkeypatch.setenv("SITE_URL", "https://adjudica.digitales.gub.uy")
+    settings = _make_settings()
+    allowed = trusted_host_allowlist(settings)
+    assert "adjudica.digitales.gub.uy" in allowed
+
+
+def test_trusted_host_allowlist_always_includes_local_aliases(
+    base_env: Any, monkeypatch: Any
+) -> None:
+    """localhost and the loopback aliases are always present."""
+
+    monkeypatch.setenv("SITE_URL", "https://adjudica.digitales.gub.uy")
+    settings = _make_settings()
+    allowed = trusted_host_allowlist(settings)
+    assert {"localhost", "127.0.0.1", "::1"} <= set(allowed)
+
+
+def test_trusted_host_allowlist_excludes_test_hosts_outside_pytest(
+    base_env: Any, monkeypatch: Any
+) -> None:
+    """example.test/testserver are NOT allowlisted outside a pytest run."""
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("SITE_URL", "https://adjudica.digitales.gub.uy")
+    settings = _make_settings()
+    allowed = trusted_host_allowlist(settings)
+    assert "example.test" not in allowed
+    assert "testserver" not in allowed
+
+
+def test_trusted_host_allowlist_includes_test_hosts_under_pytest(
+    base_env: Any, monkeypatch: Any
+) -> None:
+    """An active pytest context allowlists example.test and testserver."""
+
+    monkeypatch.setenv("SITE_URL", "https://adjudica.digitales.gub.uy")
+    settings = _make_settings()
+    allowed = trusted_host_allowlist(settings)
+    assert "example.test" in allowed
+    assert "testserver" in allowed
+
+
+def test_trusted_host_allowlist_is_sorted(base_env: Any, monkeypatch: Any) -> None:
+    """The allowlist is returned sorted for deterministic middleware config."""
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.setenv("SITE_URL", "https://zzz.example")
+    settings = _make_settings()
+    allowed = trusted_host_allowlist(settings)
+    assert allowed == sorted(allowed)
+    # With a site hostname that sorts last, the loopback alias comes first.
+    assert allowed[0] == "127.0.0.1"
+
+
+def test_trusted_host_allowlist_rejects_hostless_site_url(
+    base_env: Any, monkeypatch: Any
+) -> None:
+    """A SITE_URL without a hostname raises ValueError."""
+
+    monkeypatch.setenv("SITE_URL", "https:///path-only")
+    settings = _make_settings()
+    with pytest.raises(ValueError, match="SITE_URL must include a hostname"):
+        trusted_host_allowlist(settings)

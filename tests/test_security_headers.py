@@ -225,3 +225,130 @@ def test_rendered_partials_have_no_inline_scripts(
         if not script.get("src") and script.get("type") != "application/ld+json"
     ]
     assert inline_scripts == []
+
+
+# ---------------------------------------------------------------------------
+# Referrer-Policy + Permissions-Policy
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/healthz",
+        "/",
+        "/adjudications",
+        "/organism/SECURITY-ORG/partial",
+        "/company/RUT/42/partial",
+        "/adjudications/export",
+        "/missing-security-page",
+        "/?date_from=not-a-date",
+    ],
+)
+def test_referrer_and_permissions_policy_present_on_all_responses(
+    client: TestClient, path: str
+) -> None:
+    """Every response type carries the exact new policy headers."""
+
+    response = client.get(path)
+    assert response.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+    assert (
+        response.headers.get("Permissions-Policy")
+        == "geolocation=(), camera=(), microphone=()"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Trusted Host allowlist
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "host",
+    ["testserver", "example.test", "localhost", "127.0.0.1"],
+)
+def test_trusted_host_allowlist_accepts_local_and_test_hosts(
+    client: TestClient, host: str
+) -> None:
+    """Deliberate local/test hosts reach the application normally.
+
+    ``::1`` cannot be sent as a Host header because Starlette's
+    TrustedHostMiddleware parses the value with ``split(":")[0]``; the
+    IPv6 alias is therefore verified at the allowlist level in
+    ``tests/test_config.py`` instead of over HTTP.
+    """
+
+    response = client.get("/healthz", headers={"host": host})
+    assert response.status_code == 200
+
+
+def test_trusted_host_allowlist_accepts_canonical_site_url_host(
+    db_session: Any, monkeypatch: Any
+) -> None:
+    """The canonical SITE_URL hostname is accepted in production mode."""
+
+    from urllib.parse import urlparse
+
+    from app.config import Settings
+
+    monkeypatch.setenv("SITE_URL", "https://adjudica.digitales.gub.uy")
+    canonical = urlparse(Settings().site_url).hostname  # type: ignore[call-arg]
+    assert canonical == "adjudica.digitales.gub.uy"
+
+    client = _make_client_with_debug(debug=False, db_session=db_session)
+    try:
+        response = client.get("/healthz", headers={"host": canonical})
+        assert response.status_code == 200
+    finally:
+        client.close()
+
+
+def test_untrusted_host_returns_400_with_full_security_header_contract(
+    db_session: Any,
+) -> None:
+    """Host: evil.com is rejected with 400 and keeps every security header."""
+
+    client = _make_client_with_debug(debug=False, db_session=db_session)
+    try:
+        response = client.get("/healthz", headers={"host": "evil.com"})
+
+        assert response.status_code == 400
+        headers = response.headers
+        assert headers.get("X-Content-Type-Options") == "nosniff"
+        assert headers.get("X-Frame-Options") == "DENY"
+        assert headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+        assert (
+            headers.get("Permissions-Policy")
+            == "geolocation=(), camera=(), microphone=()"
+        )
+        csp = headers.get("Content-Security-Policy")
+        assert csp is not None
+        assert "default-src 'self'" in csp
+        assert "'nonce-" in csp
+        hsts = headers.get("Strict-Transport-Security")
+        assert hsts is not None
+        assert "max-age=31536000" in hsts
+        assert "includeSubDomains" in hsts
+    finally:
+        client.close()
+
+
+def test_untrusted_host_400_in_debug_mode_omits_hsts(db_session: Any) -> None:
+    """Debug-mode Host 400 keeps the headers but drops HSTS."""
+
+    client = _make_client_with_debug(debug=True, db_session=db_session)
+    try:
+        response = client.get("/healthz", headers={"host": "evil.com"})
+
+        assert response.status_code == 400
+        headers = response.headers
+        assert headers.get("Strict-Transport-Security") is None
+        assert headers.get("X-Content-Type-Options") == "nosniff"
+        assert headers.get("X-Frame-Options") == "DENY"
+        assert headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+        assert (
+            headers.get("Permissions-Policy")
+            == "geolocation=(), camera=(), microphone=()"
+        )
+    finally:
+        client.close()

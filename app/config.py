@@ -163,6 +163,26 @@ class Settings(BaseSettings):
         return value
 
 
+def trusted_host_allowlist(settings: Settings) -> list[str]:
+    """Return the explicit inbound Host allowlist for the web application.
+
+    The canonical host comes from ``settings.site_url``; local development
+    loopback aliases are always accepted. ``example.test`` and the Starlette
+    ``TestClient`` default host ``testserver`` are added only while pytest is
+    running (``_is_test_mode()``) so the test suite keeps working without
+    opening production to arbitrary hosts. No wildcard or suffix matching.
+    """
+
+    hostname = urlparse(settings.site_url).hostname
+    if not hostname:
+        raise ValueError("SITE_URL must include a hostname")
+
+    allowed = {hostname, "localhost", "127.0.0.1", "::1"}
+    if _is_test_mode():
+        allowed.update({"example.test", "testserver"})
+    return sorted(allowed)
+
+
 def get_settings() -> Settings:
     """FastAPI dependency that returns a cached Settings instance."""
 
