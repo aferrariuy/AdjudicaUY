@@ -7,6 +7,7 @@ import io
 from datetime import date
 from typing import TYPE_CHECKING, Any, cast
 
+from fastapi import HTTPException
 from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from markupsafe import escape
 
@@ -165,6 +166,21 @@ def _coerce_page(raw: str | None) -> int:
         return 1
 
 
+def _enforce_identity_length(value: str, *, maximum: int) -> str:
+    """Reject an overlong decoded route identity as a missing resource.
+
+    The limit is measured on the already-decoded value (after the route's
+    explicit ``unquote`` and, for organism names, ``.strip()``). Values
+    longer than ``maximum`` are treated as non-existent resources and
+    raise the standard 404 before any identity-dependent query, service,
+    cache, or filter work runs. There is no truncation.
+    """
+
+    if len(value) > maximum:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return value
+
+
 def _render_str(template_name: str, request: Request, context: dict[str, Any]) -> str:
     """Render ``template_name`` with ``context`` to an HTML string.
 
@@ -314,6 +330,7 @@ __all__ = [
     "_CSV_COLUMNS",
     "_ERROR_FRAGMENT_TEMPLATE",
     "_coerce_page",
+    "_enforce_identity_length",
     "_full_page_validation_error",
     "_inject_default_year_params",
     "_render",

@@ -26,6 +26,7 @@ from app.routes.common import (
     PAGE_SIZE,
     RANKING_LIMIT,
     _coerce_page,
+    _enforce_identity_length,
     _full_page_validation_error,
     _inject_default_year_params,
     _render,
@@ -64,6 +65,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 router = APIRouter(route_class=HeadAwareAPIRoute)
+
+# Match the database column limits on ``Adjudicacion`` — decoded company
+# identities longer than these are rejected as missing resources before
+# any identity-dependent query, filter, or CSV work runs.
+MAX_COMPANY_DOCUMENT_TYPE_LENGTH = 10
+MAX_COMPANY_DOCUMENT_NUMBER_LENGTH = 50
+
+
+def _validated_company_identity(raw_type: str, raw_number: str) -> tuple[str, str]:
+    """Decode and cap a company path identity before query construction.
+
+    Returns the decoded (tipo_doc_prov, nro_doc_prov) tuple — the same
+    values the routes already derive from unquote (no .strip(), no
+    re-encoding) — or raises the standard 404 when either component
+    exceeds its column limit.
+    """
+
+    decoded_type = _enforce_identity_length(
+        unquote(raw_type), maximum=MAX_COMPANY_DOCUMENT_TYPE_LENGTH
+    )
+    decoded_number = _enforce_identity_length(
+        unquote(raw_number), maximum=MAX_COMPANY_DOCUMENT_NUMBER_LENGTH
+    )
+    return decoded_type, decoded_number
 
 
 def _company_filters(
@@ -264,8 +289,8 @@ def company_detail(
     request: Request,
     db: Session = Depends(get_db),
 ) -> Response:
+    decoded_identity = _validated_company_identity(tipo_doc_prov, nro_doc_prov)
     raw_params = cast("dict[str, str | None]", dict(request.query_params))
-    decoded_identity = (unquote(tipo_doc_prov), unquote(nro_doc_prov))
     try:
         context = _build_company_context(
             db,
@@ -312,6 +337,7 @@ def export_company_adjudications(
 ) -> Response:
     """Stream the standard CSV export scoped to one company document."""
 
+    _validated_company_identity(tipo_doc_prov, nro_doc_prov)
     params = cast("dict[str, str | None]", dict(request.query_params))
     _inject_default_year_params(params)
     try:
@@ -333,6 +359,7 @@ def company_detail_partial(
     request: Request,
     db: Session = Depends(get_db),
 ) -> Response:
+    _validated_company_identity(tipo_doc_prov, nro_doc_prov)
     raw_params = cast("dict[str, str | None]", dict(request.query_params))
     try:
         context = _build_company_context(
