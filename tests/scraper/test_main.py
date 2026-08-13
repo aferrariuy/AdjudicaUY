@@ -339,12 +339,18 @@ def _xml_compra_with_amount(
     )
 
 
-def test_run_scrape_for_day_skips_compra_on_normalization_error(
+def test_run_scrape_for_day_retains_parent_row_when_adjudication_invalid(
     caplog: pytest.LogCaptureFixture,
     monkeypatch: pytest.MonkeyPatch,
     db_session: Any,
 ) -> None:
-    """A normalization failure should log a warning and continue processing."""
+    """An invalid adjudication line is skipped; the parent row survives.
+
+    The invalid ``BAD`` compra is no longer discarded as a whole — it is
+    returned as a parent-only row, the valid ``GOOD`` compra keeps its
+    child line, and the only warning is the normalizer's line-level
+    skip warning naming the purchase and the offending line.
+    """
 
     import scraper.main as scraper_main
 
@@ -367,7 +373,7 @@ def test_run_scrape_for_day_skips_compra_on_normalization_error(
     )
     bcu = _mock_bcu_client()
 
-    with caplog.at_level(logging.WARNING, logger="scraper.run_scrape"):
+    with caplog.at_level(logging.WARNING):
         result = _run_scrape_for_day(
             target_day=date(2024, 1, 15),
             source_a_base_url="https://example.test/xml",
@@ -378,12 +384,28 @@ def test_run_scrape_for_day_skips_compra_on_normalization_error(
             end_hour=23,
         )
 
-    assert len(result) == 1
-    assert result[0].id_compra == "GOOD"
+    assert len(result) == 2
+    rows_by_id = {row.id_compra: row for row in result}
+    assert set(rows_by_id) == {"GOOD", "BAD"}
+
+    # The invalid compra survives as a parent-only row.
+    assert rows_by_id["BAD"].adjudicaciones == []
+    # The valid compra keeps its child line.
+    assert len(rows_by_id["GOOD"].adjudicaciones) == 1
 
     warning_messages = [
         record.message for record in caplog.records if record.levelno == logging.WARNING
     ]
     assert any(
-        "BAD" in msg and "Normalization failed" in msg for msg in warning_messages
+        "Skipping adjudication" in msg
+        and "id_compra=BAD" in msg
+        and "invalid precio_tot_imp" in msg
+        and "nombre_comercial='Empresa SA'" in msg
+        and "desc_articulo='Laptop'" in msg
+        and "id_articulo='42851'" in msg
+        for msg in warning_messages
+    )
+    # The whole-compra discard path must no longer fire for BAD.
+    assert not any(
+        "Normalization failed" in msg and "BAD" in msg for msg in warning_messages
     )

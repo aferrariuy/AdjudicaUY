@@ -24,6 +24,7 @@ from scraper.normalizer import (
     NON_CONVERTIBLE_TABLE,
     PASSTHROUGH_TABLE,
     CompraEnrichment,
+    CompraRow,
     ConversionMode,
     CurrencyNotResolvedError,
     MalformedCompraError,
@@ -71,6 +72,7 @@ def _build_xml_compra(
     fecha_pub_adj: date = date(2024, 1, 15),
     id_moneda_monto_adj: int = 20,
     id_tipocompra: str = "CD",
+    monto_adj: Decimal | None = Decimal("1234.56"),
     adjudicaciones: list[XmlAdjudicacion] | None = None,
     oferentes: list[XmlOferente] | None = None,
 ) -> XmlCompra:
@@ -104,7 +106,7 @@ def _build_xml_compra(
         id_tipocompra=id_tipocompra,
         id_moneda_monto_adj=id_moneda_monto_adj,
         objeto="Adquisición",
-        monto_adj=Decimal("1234.56"),
+        monto_adj=monto_adj,
         num_compra="86825",
         anio_compra="2024",
         subtipo_compra="",
@@ -408,8 +410,13 @@ def test_normalize_non_convertible_does_not_call_bcu() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_unknown_currency_raises_currency_not_resolved(caplog) -> None:
-    """Unmapped id_moneda that BCU cannot resolve raises a specific error."""
+def test_normalize_unknown_currency_skips_line_and_retains_parent(caplog) -> None:
+    """An unresolved ``id_moneda`` skips only that line; the parent survives.
+
+    The unmapped currency is warned with its identifying fields and the
+    parent is returned as a parent-only :class:`CompraRow` with all
+    parent fields unchanged.
+    """
 
     compra = _build_xml_compra(
         id_moneda_monto_adj=99999,
@@ -447,11 +454,32 @@ def test_normalize_unknown_currency_raises_currency_not_resolved(caplog) -> None
     client = httpx.Client(transport=transport)
     bcu = BcuClient("https://example.test/wsbcucotizaciones", client=client)
 
-    with (
-        caplog.at_level(logging.WARNING, logger="scraper.normalizer"),
-        pytest.raises(CurrencyNotResolvedError),
-    ):
-        normalize_compra(compra, _enrichment(), bcu)
+    with caplog.at_level(logging.WARNING, logger="scraper.normalizer"):
+        result = normalize_compra(compra, _enrichment(), bcu)
+
+    # One parent-only row; the unresolved line is absent.
+    assert isinstance(result, CompraRow)
+    assert result.id_compra == "1319278"
+    assert result.adjudicaciones == []
+    # Parent fields are unchanged by the skipped line.
+    assert result.monto_adj == Decimal("1234.56")
+    assert result.id_moneda_monto_adj == 99999
+    assert result.organismo == "Ministerio del Interior"
+
+    warning_messages = [
+        record.message
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.name == "scraper.normalizer"
+    ]
+    assert len(warning_messages) == 1
+    msg = warning_messages[0]
+    assert "Skipping adjudication" in msg
+    assert "id_compra=1319278" in msg
+    assert "currency not resolved" in msg
+    assert "id_moneda=99999" in msg
+    assert "desc_articulo='Laptop'" in msg
+    assert "id_articulo='42851'" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -527,8 +555,8 @@ def test_conversion_table_every_entry_has_bcu_code_and_iso() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_raises_malformed_compra_for_negative_amount() -> None:
-    """A negative ``precio_tot_imp`` is a data-quality error, not a conversion."""
+def test_normalize_negative_amount_skips_line_and_retains_parent(caplog) -> None:
+    """A negative ``precio_tot_imp`` skips only that line; the parent survives."""
 
     compra = _build_xml_compra(
         id_moneda_monto_adj=20,
@@ -548,8 +576,23 @@ def test_normalize_raises_malformed_compra_for_negative_amount() -> None:
         ],
     )
 
-    with pytest.raises(MalformedCompraError):
-        normalize_compra(compra, _enrichment(), _static_bcu_client())
+    with caplog.at_level(logging.WARNING, logger="scraper.normalizer"):
+        result = normalize_compra(compra, _enrichment(), _static_bcu_client())
+
+    assert result.id_compra == "1319278"
+    assert result.adjudicaciones == []
+    assert result.monto_adj == Decimal("1234.56")
+
+    warning_messages = [
+        record.message
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.name == "scraper.normalizer"
+    ]
+    assert len(warning_messages) == 1
+    assert "invalid precio_tot_imp" in warning_messages[0]
+    assert "id_compra=1319278" in warning_messages[0]
+    assert "precio_tot_imp=-100.00" in warning_messages[0]
 
 
 @pytest.mark.parametrize(
@@ -560,10 +603,11 @@ def test_normalize_raises_malformed_compra_for_negative_amount() -> None:
         Decimal("-Infinity"),
     ],
 )
-def test_normalize_raises_malformed_compra_for_non_finite_amount(
+def test_normalize_non_finite_amount_skips_line_and_retains_parent(
     precio_tot_imp: Decimal,
+    caplog,
 ) -> None:
-    """Non-finite ``precio_tot_imp`` values are data-quality errors."""
+    """Non-finite ``precio_tot_imp`` values skip the line and keep the parent."""
 
     compra = _build_xml_compra(
         id_moneda_monto_adj=0,
@@ -583,12 +627,33 @@ def test_normalize_raises_malformed_compra_for_non_finite_amount(
         ],
     )
 
-    with pytest.raises(MalformedCompraError):
-        normalize_compra(compra, _enrichment(), _static_bcu_client())
+    with caplog.at_level(logging.WARNING, logger="scraper.normalizer"):
+        result = normalize_compra(compra, _enrichment(), _static_bcu_client())
+
+    assert result.id_compra == "1319278"
+    assert result.adjudicaciones == []
+    assert result.monto_adj == Decimal("1234.56")
+
+    warning_messages = [
+        record.message
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.name == "scraper.normalizer"
+    ]
+    assert len(warning_messages) == 1
+    assert "invalid precio_tot_imp" in warning_messages[0]
 
 
-def test_normalize_propagates_bcu_error_from_monedas_lookup(monkeypatch) -> None:
-    """A BCU service failure while resolving an unknown currency propagates."""
+def test_normalize_bcu_failure_from_monedas_lookup_isolates_line_and_retains_parent(
+    monkeypatch,
+    caplog,
+) -> None:
+    """A BCU failure resolving an unknown currency skips only that line.
+
+    The failure is isolated at the normalization line boundary: the
+    parent is returned as a parent-only row with a warning, while the
+    BCU client API itself still raises :class:`BcuError`.
+    """
 
     monkeypatch.setattr(retry_module.time, "sleep", lambda _seconds: None)
 
@@ -617,8 +682,262 @@ def test_normalize_propagates_bcu_error_from_monedas_lookup(monkeypatch) -> None
     client = httpx.Client(transport=transport)
     bcu = BcuClient("https://example.test/wsbcucotizaciones", client=client)
 
+    with caplog.at_level(logging.WARNING, logger="scraper.normalizer"):
+        result = normalize_compra(compra, _enrichment(), bcu)
+
+    assert result.id_compra == "1319278"
+    assert result.adjudicaciones == []
+    assert result.monto_adj == Decimal("1234.56")
+
+    warning_messages = [
+        record.message
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.name == "scraper.normalizer"
+    ]
+    assert len(warning_messages) == 1
+    assert "id_compra=1319278" in warning_messages[0]
+    assert "BCU/conversion failure" in warning_messages[0]
+
+    # The client API still raises inside the line boundary — the
+    # isolation happens in the normalizer, not in the BCU client.
     with pytest.raises(BcuError):
-        normalize_compra(compra, _enrichment(), bcu)
+        bcu.list_monedas()
+
+
+# ---------------------------------------------------------------------------
+# Per-adjudication isolation — sibling retention
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_mixed_valid_invalid_siblings_keeps_only_valid_line(
+    caplog,
+) -> None:
+    """A valid sibling survives when a sibling line in the same compra is invalid."""
+
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=20,
+        adjudicaciones=[
+            XmlAdjudicacion(  # invalid: negative amount
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("-100.00"),
+                desc_articulo="Laptop",
+                id_moneda=20,
+                id_articulo="42851",
+            ),
+            XmlAdjudicacion(  # valid: 1000 USD at 38.50 → 38500.00 UYU
+                id_compra="1319278",
+                nombre_comercial="Proveedor SRL",
+                nro_doc_prov="210000000077",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("2.00"),
+                precio_unit=Decimal("500.00"),
+                precio_tot_imp=Decimal("1000.00"),
+                desc_articulo="Silla",
+                id_moneda=20,
+                id_articulo="42851",
+            ),
+        ],
+    )
+
+    with caplog.at_level(logging.WARNING, logger="scraper.normalizer"):
+        result = normalize_compra(
+            compra, _enrichment(), _static_bcu_client(rate=Decimal("38.50"))
+        )
+
+    assert len(result.adjudicaciones) == 1
+    survivor = result.adjudicaciones[0]
+    assert survivor.nombre_comercial == "Proveedor SRL"
+    assert survivor.precio_tot_imp == Decimal("1000.00")
+    assert survivor.amount_uyu == Decimal("38500.00")
+    assert result.monto_adj == Decimal("1234.56")
+
+    warning_messages = [
+        record.message
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.name == "scraper.normalizer"
+    ]
+    assert len(warning_messages) == 1
+    assert "id_compra=1319278" in warning_messages[0]
+    assert "invalid precio_tot_imp" in warning_messages[0]
+    assert "nombre_comercial='Empresa SA'" in warning_messages[0]
+
+
+def test_normalize_all_invalid_children_retains_parent_with_oferentes(
+    caplog,
+) -> None:
+    """Zero surviving adjudications still yields a parent-only row with oferentes.
+
+    Each skipped line emits its own warning; no placeholder adjudication
+    is fabricated.
+    """
+
+    oferentes = [
+        XmlOferente(
+            id_compra="1319278",
+            nombre_comercial="Empresa SA",
+            nro_doc_prov="210000000018",
+            tipo_doc_prov="RUT",
+            cant_ofertada=Decimal("10.00"),
+            precio_unit_ofertado=Decimal("100.00"),
+            id_moneda=20,
+            variacion=None,
+            alternativas=None,
+        )
+    ]
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=99999,
+        adjudicaciones=[
+            XmlAdjudicacion(  # invalid: negative amount
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("-100.00"),
+                desc_articulo="Laptop",
+                id_moneda=0,
+                id_articulo="42851",
+            ),
+            XmlAdjudicacion(  # invalid: unresolved currency
+                id_compra="1319278",
+                nombre_comercial="Otra SA",
+                nro_doc_prov="210000000099",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("1.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("100.00"),
+                desc_articulo="Servicio",
+                id_moneda=99999,
+                id_articulo="42851",
+            ),
+        ],
+        oferentes=oferentes,
+    )
+
+    def _monedas_handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        return httpx.Response(200, content=b"<?xml version='1.0'?><root></root>")
+
+    def _cotizaciones_handler(request: httpx.Request) -> httpx.Response:  # noqa: ARG001
+        return httpx.Response(
+            200,
+            content=b"<?xml version='1.0'?><root><datos><TCC>1.0</TCC></datos></root>",
+        )
+
+    def _route(request: httpx.Request) -> httpx.Response:
+        if "awsbcumonedas" in str(request.url):
+            return _monedas_handler(request)
+        return _cotizaciones_handler(request)
+
+    transport = httpx.MockTransport(_route)
+    client = httpx.Client(transport=transport)
+    bcu = BcuClient("https://example.test/wsbcucotizaciones", client=client)
+
+    with caplog.at_level(logging.WARNING, logger="scraper.normalizer"):
+        result = normalize_compra(compra, _enrichment(), bcu)
+
+    assert result.id_compra == "1319278"
+    assert result.adjudicaciones == []
+    assert result.monto_adj == Decimal("1234.56")
+    assert len(result.oferentes) == 1
+    assert result.oferentes[0].nombre_comercial == "Empresa SA"
+
+    warning_messages = [
+        record.message
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.name == "scraper.normalizer"
+    ]
+    assert len(warning_messages) == 2
+    assert any("invalid precio_tot_imp" in msg for msg in warning_messages)
+    assert any("currency not resolved" in msg for msg in warning_messages)
+
+
+def test_normalize_monto_adj_verbatim_when_it_differs_from_surviving_totals(
+    caplog,
+) -> None:
+    """XML ``monto_adj`` is persisted verbatim, never recomputed from children.
+
+    The parent total deliberately differs from the surviving child's
+    converted amount — the stored value must stay exactly the XML value.
+    """
+
+    compra = _build_xml_compra(
+        id_moneda_monto_adj=20,
+        monto_adj=Decimal("999.99"),
+        adjudicaciones=[
+            XmlAdjudicacion(  # invalid: skipped line
+                id_compra="1319278",
+                nombre_comercial="Empresa SA",
+                nro_doc_prov="210000000018",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("10.00"),
+                precio_unit=Decimal("100.00"),
+                precio_tot_imp=Decimal("-100.00"),
+                desc_articulo="Laptop",
+                id_moneda=20,
+                id_articulo="42851",
+            ),
+            XmlAdjudicacion(  # valid: 1000 USD at 38.50 → 38500.00 UYU
+                id_compra="1319278",
+                nombre_comercial="Proveedor SRL",
+                nro_doc_prov="210000000077",
+                tipo_doc_prov="RUT",
+                cant_adj=Decimal("2.00"),
+                precio_unit=Decimal("500.00"),
+                precio_tot_imp=Decimal("1000.00"),
+                desc_articulo="Silla",
+                id_moneda=20,
+                id_articulo="42851",
+            ),
+        ],
+    )
+
+    with caplog.at_level(logging.WARNING, logger="scraper.normalizer"):
+        result = normalize_compra(
+            compra, _enrichment(), _static_bcu_client(rate=Decimal("38.50"))
+        )
+
+    # The XML total survives verbatim — no recomputation from children.
+    assert result.monto_adj == Decimal("999.99")
+    assert len(result.adjudicaciones) == 1
+    assert result.adjudicaciones[0].amount_uyu == Decimal("38500.00")
+
+    warning_messages = [
+        record.message
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and record.name == "scraper.normalizer"
+    ]
+    assert len(warning_messages) == 1
+
+
+def test_normalize_parent_level_failure_still_raises_malformed_compra(
+    monkeypatch,
+) -> None:
+    """A parent-construction failure still raises ``MalformedCompraError``.
+
+    Parent assembly happens outside the per-line catch: a failure while
+    building the parent row must propagate and never be converted into a
+    line warning or a partial parent-only row.
+    """
+
+    def _boom(*_args: object, **_kwargs: object) -> CompraRow:
+        raise MalformedCompraError("parent row construction failed")
+
+    monkeypatch.setattr("scraper.normalizer.CompraRow", _boom)
+
+    compra = _build_xml_compra()  # one valid USD adjudication
+
+    with pytest.raises(MalformedCompraError, match="parent row construction failed"):
+        normalize_compra(compra, _enrichment(), _static_bcu_client())
 
 
 # ---------------------------------------------------------------------------
