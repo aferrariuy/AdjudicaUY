@@ -19,7 +19,17 @@ The pipeline is, per ``<adjudicacion>`` child:
 4. If the code is unmapped, the normalizer queries the BCU ``monedas``
    endpoint as a best-effort sanity check. If the procurement ID
    happens to coincide with a valid BCU code, the conversion proceeds;
-   otherwise ``amount_uyu`` is ``NULL`` and a warning is logged.
+   otherwise the line is skipped with a warning and the parent is
+   retained.
+
+Adjudication lines are isolated from each other: an invalid line
+(negative or non-finite ``precio_tot_imp``, negative ``id_moneda``, an
+unresolved currency, or a line-specific BCU/conversion failure) is
+skipped with a warning while the parent compra and its valid siblings
+are retained. A constructible compra may therefore have zero surviving
+adjudications and is still returned as a valid parent-only row;
+``monto_adj`` is always persisted verbatim from the XML parent and is
+never recomputed from surviving children.
 
 The BCU rate is resolved per adjudicated line item, using
 ``adjudicacion.id_moneda`` (NOT the compra-level
@@ -42,12 +52,13 @@ from app.formatting import (
     PASSTHROUGH_TABLE,
     display_currency,
 )
+from scraper.bcu_client import BcuError
 
 if TYPE_CHECKING:
     from datetime import date
 
     from scraper.bcu_client import BcuClient
-    from scraper.xml_report import XmlCompra
+    from scraper.xml_report import XmlAdjudicacion, XmlCompra
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +75,12 @@ class CurrencyNotResolvedError(NormalizationError):
 
 
 class MalformedCompraError(NormalizationError):
-    """Raised when a compra or adjudication fails data-quality validation."""
+    """Raised when a compra fails parent-level validation or construction.
+
+    Line-scoped adjudication failures are skipped and warned instead of
+    raising; this error is reserved for failures that prevent building
+    the parent :class:`CompraRow` itself.
+    """
 
 
 class ConversionMode(enum.Enum):
@@ -160,7 +176,9 @@ class CompraRow:
     :class:`OferenteRow` to its child table. The shape is
     flat-on-the-parent / nested-on-the-children — the database is
     normalized, but the orchestrator's view stays one XmlCompra =
-    one CompraRow.
+    one CompraRow. ``adjudicaciones`` may be empty: a constructible
+    compra whose lines were all skipped is still a valid parent-only
+    row.
     """
 
     id_compra: str
@@ -212,8 +230,10 @@ def _try_resolve_unknown(
 
     The procurement and BCU ID spaces are independent, so this only
     succeeds when the unknown procurement ID *coincidentally* equals a
-    BCU currency code. The endpoint call is intentionally not cached —
-    the catalogue is small and rarely changes.
+    BCU currency code. The catalogue is cached by the shared
+    :class:`BcuClient` for the lifetime of the client instance, so
+    repeated lookups across a scrape reuse the same parsed catalogue
+    instead of fetching it per line.
     """
 
     monedas = bcu_client.list_monedas()
@@ -275,83 +295,112 @@ def normalize_compra(
 
     Each nested :class:`XmlAdjudicacion` is BCU-normalized
     independently — the per-row ``amount_uyu`` lives on the child
-    :class:`AdjudicacionRow`, not the parent. Unmapped
-    ``id_moneda`` codes fall back to the BCU ``monedas`` endpoint
-    as a last resort (the same path the legacy normalizer took).
+    :class:`AdjudicacionRow`, not the parent. Invalid adjudication
+    lines (negative/non-finite ``precio_tot_imp``, negative
+    ``id_moneda``, unresolved currency, or a line-specific
+    BCU/conversion failure) are skipped and warned at line scope;
+    they never discard the parent compra or its valid siblings. A
+    constructible compra may therefore have zero surviving
+    adjudications and is still returned as a valid parent-only row.
+    Unmapped ``id_moneda`` codes fall back to the BCU ``monedas``
+    endpoint as a last resort (the same path the legacy normalizer
+    took).
     """
 
     adjudicaciones: list[AdjudicacionRow] = []
-    for adj in compra.adjudicaciones:
-        # Data-quality gate: negative amounts, non-finite values, or negative
-        # currency IDs are not valid procurement data and would corrupt
-        # downstream analytics.
-        if not adj.precio_tot_imp.is_finite() or adj.precio_tot_imp < 0:
-            raise MalformedCompraError(
-                f"Invalid precio_tot_imp={adj.precio_tot_imp} "
-                f"for id_compra={compra.id_compra}"
-            )
-        if adj.id_moneda < 0:
-            raise MalformedCompraError(
-                f"Negative id_moneda={adj.id_moneda} for id_compra={compra.id_compra}"
-            )
 
-        # Last-resort: if id_moneda is not in any of the static
-        # tables, try the BCU monedas catalogue. This branch only
-        # runs for the small set of unmapped codes; the rest take
-        # the fast path in ``_convert_amount``.
-        id_moneda = adj.id_moneda
-        if (
-            id_moneda not in PASSTHROUGH_TABLE
-            and id_moneda not in NON_CONVERTIBLE_TABLE
-            and id_moneda not in CONVERSION_TABLE
-        ):
-            resolved = _try_resolve_unknown(id_moneda, bcu_client)
-            if resolved is not None:
-                # Inject the resolved code into the static table so
-                # the rest of the run can use the fast path. Use a
-                # per-call local copy to keep the module-level
-                # tables pristine (and the dispatch predictable).
-                local_conversion = {**CONVERSION_TABLE, id_moneda: resolved}
-                bcu_code, iso = local_conversion[id_moneda]
-                rate = bcu_client.get_tcc(
-                    bcu_code,
+    def _skip_line(reason: str, adj: XmlAdjudicacion) -> None:
+        """Emit the line-scoped skip warning with the full line identity."""
+        logger.warning(
+            "Skipping adjudication: id_compra=%s reason=%s "
+            "nombre_comercial=%r desc_articulo=%r id_moneda=%s "
+            "id_articulo=%r precio_tot_imp=%s",
+            compra.id_compra,
+            reason,
+            adj.nombre_comercial,
+            adj.desc_articulo,
+            adj.id_moneda,
+            adj.id_articulo,
+            adj.precio_tot_imp,
+        )
+
+    for adj in compra.adjudicaciones:
+        try:
+            # Data-quality gate: non-finite/negative amounts and
+            # negative currency IDs are line-scoped skips — they are
+            # not valid procurement data, but they must not reject
+            # the whole compra.
+            if not adj.precio_tot_imp.is_finite() or adj.precio_tot_imp < 0:
+                _skip_line("invalid precio_tot_imp", adj)
+                continue
+            if adj.id_moneda < 0:
+                _skip_line("negative id_moneda", adj)
+                continue
+
+            # Last-resort: if id_moneda is not in any of the static
+            # tables, try the BCU monedas catalogue. This branch only
+            # runs for the small set of unmapped codes; the rest take
+            # the fast path in ``_convert_amount``.
+            id_moneda = adj.id_moneda
+            if (
+                id_moneda not in PASSTHROUGH_TABLE
+                and id_moneda not in NON_CONVERTIBLE_TABLE
+                and id_moneda not in CONVERSION_TABLE
+            ):
+                resolved = _try_resolve_unknown(id_moneda, bcu_client)
+                if resolved is not None:
+                    # Inject the resolved code into the static table so
+                    # the rest of the run can use the fast path. Use a
+                    # per-call local copy to keep the module-level
+                    # tables pristine (and the dispatch predictable).
+                    local_conversion = {**CONVERSION_TABLE, id_moneda: resolved}
+                    bcu_code, iso = local_conversion[id_moneda]
+                    rate = bcu_client.get_tcc(
+                        bcu_code,
+                        compra.fecha_pub_adj,
+                        max_lookback_days=max_lookback_days,
+                    )
+                    currency = iso[:3]
+                    amount_uyu = (
+                        None
+                        if rate is None
+                        else _quantize_uyu(adj.precio_tot_imp * rate)
+                    )
+                else:
+                    raise CurrencyNotResolvedError(
+                        f"Could not resolve id_moneda={id_moneda} "
+                        f"for id_compra={compra.id_compra}"
+                    )
+            else:
+                currency, amount_uyu = _convert_amount(
+                    id_moneda,
+                    adj.precio_tot_imp,
                     compra.fecha_pub_adj,
+                    bcu_client,
                     max_lookback_days=max_lookback_days,
                 )
-                currency = iso[:3]
-                amount_uyu = (
-                    None if rate is None else _quantize_uyu(adj.precio_tot_imp * rate)
-                )
-            else:
-                raise CurrencyNotResolvedError(
-                    f"Could not resolve id_moneda={id_moneda} "
-                    f"for id_compra={compra.id_compra}"
-                )
-        else:
-            currency, amount_uyu = _convert_amount(
-                id_moneda,
-                adj.precio_tot_imp,
-                compra.fecha_pub_adj,
-                bcu_client,
-                max_lookback_days=max_lookback_days,
-            )
 
-        adjudicaciones.append(
-            AdjudicacionRow(
-                id_compra=compra.id_compra,
-                nombre_comercial=adj.nombre_comercial,
-                nro_doc_prov=adj.nro_doc_prov,
-                tipo_doc_prov=adj.tipo_doc_prov,
-                cant_adj=adj.cant_adj,
-                precio_unit=adj.precio_unit,
-                precio_tot_imp=adj.precio_tot_imp,
-                id_moneda=id_moneda,
-                currency=currency,
-                amount_uyu=amount_uyu,
-                desc_articulo=adj.desc_articulo,
-                id_articulo=adj.id_articulo,
+            # Append only after every line step succeeded.
+            adjudicaciones.append(
+                AdjudicacionRow(
+                    id_compra=compra.id_compra,
+                    nombre_comercial=adj.nombre_comercial,
+                    nro_doc_prov=adj.nro_doc_prov,
+                    tipo_doc_prov=adj.tipo_doc_prov,
+                    cant_adj=adj.cant_adj,
+                    precio_unit=adj.precio_unit,
+                    precio_tot_imp=adj.precio_tot_imp,
+                    id_moneda=id_moneda,
+                    currency=currency,
+                    amount_uyu=amount_uyu,
+                    desc_articulo=adj.desc_articulo,
+                    id_articulo=adj.id_articulo,
+                )
             )
-        )
+        except CurrencyNotResolvedError:
+            _skip_line("currency not resolved", adj)
+        except (BcuError, NormalizationError) as exc:
+            _skip_line(f"BCU/conversion failure: {exc}", adj)
 
     oferentes: list[OferenteRow] = [
         OferenteRow(
