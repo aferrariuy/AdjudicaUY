@@ -63,7 +63,13 @@ services:
     healthcheck:
       # Lightweight /healthz endpoint — avoids rendering templates and
       # exposing the homepage to the shared Dokploy network.
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=3)",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -100,7 +106,13 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev
     healthcheck:
-      test: ["CMD", "python", "-c", "import os; from scraper.scheduler import _heartbeat_is_fresh; raise SystemExit(0 if _heartbeat_is_fresh(os.environ['WORKER_HEARTBEAT_FILE'], 300) else 1)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os; from scraper.scheduler import _heartbeat_is_fresh; raise SystemExit(0 if _heartbeat_is_fresh(os.environ['WORKER_HEARTBEAT_FILE'], 300) else 1)",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
