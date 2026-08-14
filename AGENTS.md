@@ -56,7 +56,7 @@ pre-commit run --all-files                        # validate everything
 
 ## Architecture
 
-```
+```text
 app/                  # FastAPI web app
   main.py             # create_app() factory, lifespan (env validation + engine warm-up),
                       # middleware (gzip, security headers with nonce-based CSP, static cache),
@@ -140,7 +140,7 @@ Child rows link via `compra_id` FK with `ON DELETE CASCADE`. The unique constrai
 - **SEO**: per-route `_build_seo_context` (meta + OG, in `app/presenters.py`), sitemap.xml, robots.txt, canonical paths.
 - **Nonce-based CSP**: per-request `secrets.token_urlsafe(16)` nonce injected into `request.state.csp_nonce`; the `Content-Security-Policy` header uses `script-src 'self' 'nonce-{n}'` and `style-src 'self' 'nonce-{n}'`. Every inline `<script>` and `<style>` block must carry `nonce="{{ request.state.csp_nonce }}"`; `JSON-LD` blocks are nonce-free.
 - **HEAD for GET routes**: `HeadAwareAPIRoute` (`app/routes/_base.py`) adds `HEAD` to all `GET` methods. Wired via `app.router.route_class` (main) + `route_class=` on each module `APIRouter`. HEAD returns the same status as GET with an empty body and an `Allow` header listing both methods.
-- **es-UY formatting**: `app/formatting.py` implements thousands/decimal/percent formatting as Jinja filters because the deploy image lacks the `es_UY` locale. `format_percent_adaptive` handles tiny KPI shares: ≥1% → 1 decimal, <1% → 3 decimals (e.g. `0.0057` → `"0,006 %"`). Registered as `pct_adaptive` in the Jinja env. The same module owns `display_currency`, `build_license_link`, and the currency lookup tables used by listing and the scraper normalizer.
+- **es-UY formatting**: `app/formatting.py` implements thousands/decimal/percent formatting as Jinja filters because the deploy image lacks the `es_UY` locale. `format_percent_adaptive` handles tiny KPI shares: the ratio is always scaled by 100, then ≥1% → 1 decimal, <1% → 3 decimals (e.g. `0.0057` → `"0,570 %"`). Registered as `pct_adaptive` in the Jinja env. The same module owns `display_currency`, `build_license_link`, and the currency lookup tables used by listing and the scraper normalizer.
 - **Config safety**: Pydantic Settings validators enforce HTTPS and a host allowlist (`comprasestatales.gub.uy`, `cotizaciones.bcu.gub.uy`); test mode (via `PYTEST_CURRENT_TEST`) permits `example.test` hosts; credentials are stripped from log lines.
 
 ## Testing

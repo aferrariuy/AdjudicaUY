@@ -137,7 +137,7 @@ def _integer_grouped(value: Number) -> str:
 
     quantized = Decimal(str(value)).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
     sign = "-" if quantized < 0 else ""
-    digits = str(abs(int(quantized)))
+    digits = str(abs(quantized))
     # Insert a period every three digits from the right.
     groups: list[str] = []
     while len(digits) > 3:
@@ -222,21 +222,17 @@ def format_percent(value: Number) -> str:
 
 
 def format_percent_adaptive(value: Number) -> str:
-    """Format a ratio with extra precision for tiny KPI shares.
+    """Format a ratio as an es-UY percentage with adaptive precision.
 
-    Ratios at or above one percent use one decimal place after scaling to a
-    percentage. Smaller ratios are kept visible with three decimal places.
-    The latter intentionally preserves the small ratio's displayed magnitude,
-    matching the company-profile KPI contract.
+    The ratio is always scaled by 100 before quantization. Percentages at
+    or above one percent use one decimal place; smaller percentages keep
+    three decimal places so a genuinely tiny share stays visible instead of
+    collapsing to ``"0,0 %"``.
     """
 
     ratio = Decimal(str(value))
-    if abs(ratio) >= Decimal("0.01"):
-        percentage = ratio * 100
-        places = 1
-    else:
-        percentage = ratio
-        places = 3
+    percentage = ratio * 100
+    places = 1 if abs(percentage) >= Decimal("1") else 3
 
     quantized = percentage.quantize(
         Decimal("1").scaleb(-places), rounding=ROUND_HALF_UP

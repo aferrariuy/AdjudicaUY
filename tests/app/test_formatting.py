@@ -10,18 +10,40 @@ import pytest
 @pytest.mark.parametrize(
     ("ratio", "expected"),
     [
-        (Decimal("0.5"), "50,0 %"),
-        (Decimal("0.0057"), "0,006 %"),
-        (Decimal("0.0001"), "0,000 %"),
+        (Decimal("0"), "0,000 %"),
+        (Decimal("0.0001"), "0,010 %"),
+        (Decimal("0.0057"), "0,570 %"),
+        (Decimal("0.009999"), "1,000 %"),
+        (Decimal("0.01"), "1,0 %"),
         (Decimal("0.4231"), "42,3 %"),
+        (Decimal("0.5"), "50,0 %"),
+        (Decimal("1"), "100,0 %"),
     ],
 )
 def test_format_percent_adaptive_matrix(ratio: Decimal, expected: str) -> None:
-    """Adaptive precision keeps small KPI shares visible in es-UY format."""
+    """Adaptive precision scales ratios to percentages across both branches.
+
+    The ratio is always multiplied by 100: values at or above one percent
+    use one decimal, smaller ones use three decimals so they stay visible.
+    """
 
     from app.formatting import format_percent_adaptive
 
     assert format_percent_adaptive(ratio) == expected
+
+
+def test_format_percent_adaptive_scales_sub_one_percent_shares() -> None:
+    """A sub-1% ratio must still be scaled to a percentage (×100).
+
+    Regression guard: the previous implementation returned the raw ratio for
+    the sub-1% branch, rendering a 0.57% share as ``"0,006 %"`` instead of
+    ``"0,570 %"``.
+    """
+
+    from app.formatting import format_percent_adaptive
+
+    assert format_percent_adaptive(Decimal("0.0057")) == "0,570 %"
+    assert format_percent_adaptive(Decimal("0.0001")) == "0,010 %"
 
 
 @pytest.mark.parametrize(

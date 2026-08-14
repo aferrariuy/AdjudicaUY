@@ -1152,7 +1152,7 @@ def test_company_profile_renders_adaptive_tiny_share(
     response = client.get("/company/RUT/210000000012")
 
     assert response.status_code == 200
-    assert "0,006 %" in response.text
+    assert "0,570 %" in response.text
 
 
 def test_concentration_labels_are_company_specific(
