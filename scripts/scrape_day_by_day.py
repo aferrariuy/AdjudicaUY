@@ -74,7 +74,7 @@ def _bulk_insert(session: Session, rows: list[CompraRow]) -> int:
         return _bulk_insert_hard(session, rows)
     except Exception as exc:
         session.rollback()
-        orig = exc.orig if hasattr(exc, "orig") else exc
+        orig = getattr(exc, "orig", exc)
         logger.error("DB insert failed (%d rows): %s", len(rows), orig)
         return 0
 
