@@ -55,5 +55,8 @@ node_modules/
 .opencode/
 opencode.jsonc
 
+# pi-lens (personal tool config — keep local)
+.pi-lens.json
+
 # Unlighthouse
 .unlighthouse/
