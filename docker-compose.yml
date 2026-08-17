@@ -17,6 +17,12 @@ services:
     image: postgres:16-alpine
     container_name: adjudicauy-db-v2
     restart: unless-stopped
+    # PostgreSQL parallel-query workers allocate dynamic shared memory (DSM)
+    # backed by /dev/shm, which Docker caps at 64 MB by default. The
+    # company-identity window query spawns parallel workers that exhaust that
+    # budget and fail with "could not resize shared memory segment ... No
+    # space left on device". Give the DB a larger shm mount.
+    shm_size: 256m
     networks:
       # The database lives only on the internal Compose network. It is
       # NOT attached to the external Dokploy network; that prevents any
