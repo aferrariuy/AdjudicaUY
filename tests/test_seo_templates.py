@@ -185,6 +185,14 @@ class TestBaseTemplateSEO:
         html = _render_full(self.env, "base.html", _base_context())
         assert '<meta property="og:url"' in html
 
+    def test_has_og_site_name_meta_tag(self):
+        html = _render_full(self.env, "base.html", _base_context())
+        assert '<meta property="og:site_name"' in html
+
+    def test_has_og_image_meta_tag(self):
+        html = _render_full(self.env, "base.html", _base_context())
+        assert '<meta property="og:image"' in html
+
     def test_has_twitter_card_meta_tag(self):
         html = _render_full(self.env, "base.html", _base_context())
         assert '<meta name="twitter:card"' in html
@@ -268,6 +276,12 @@ class TestIndexTemplateSEO:
         html = _render_block(self.env, "index.html", "json_ld", _index_seo_context())
         assert '"@type": "WebSite"' in html
         assert '"name": "AdjudicaUY"' in html
+
+    def test_website_json_ld_has_search_action(self):
+        html = _render_block(self.env, "index.html", "json_ld", _index_seo_context())
+        assert '"@type": "SearchAction"' in html
+        assert '?article={search_term_string}' in html
+        assert '"query-input": "required name=search_term_string"' in html
 
     def test_twitter_card_present(self):
         # Twitter tags are in base.html using meta_title/meta_description vars

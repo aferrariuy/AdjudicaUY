@@ -21,6 +21,8 @@
   <meta property="og:description" content="{% block og_description %}{{ meta_description | default('Adjudicaciones del Estado uruguayo', true) }}{% endblock %}">
   <meta property="og:type" content="{% block og_type %}{{ og_type | default('website', true) }}{% endblock %}">
   <meta property="og:url" content="{% block og_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/', true) }}{% endblock %}">
+  <meta property="og:site_name" content="{% block og_site_name %}{{ og_site_name | default('AdjudicaUY', true) }}{% endblock %}">
+  <meta property="og:image" content="{% block og_image %}{{ og_image | default('https://adjudica.digitales.gub.uy/static/og-image.png', true) }}{% endblock %}">
 
   {# Twitter Card #}
   <meta name="twitter:card" content="summary">

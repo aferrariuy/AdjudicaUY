@@ -115,7 +115,9 @@ def _build_seo_context(
     The dict provides page-specific values for the SEO blocks in
     ``base.html`` (meta description, OG tags, canonical URL). The
     ``canonical_url`` is built from ``settings.site_url`` + ``path``,
-    stripping any query parameters so the canonical is stable.
+    stripping any query parameters so the canonical is stable. The
+    ``og_image`` and ``og_site_name`` are shared across every page so
+    social shares use the same branded card regardless of the route.
     """
 
     settings = get_settings()
@@ -125,6 +127,8 @@ def _build_seo_context(
         "meta_description": meta_description,
         "og_type": og_type,
         "canonical_url": canonical_url,
+        "og_image": f"{settings.site_url}/static/og-image.png",
+        "og_site_name": "AdjudicaUY",
     }
 
 

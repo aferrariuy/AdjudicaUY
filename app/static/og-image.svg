@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#1B2A4A"/>
+  <rect x="0" y="0" width="1200" height="14" fill="#B23B2E"/>
+  <rect x="80" y="200" width="64" height="8" fill="#2F6F62"/>
+
+  <text x="80" y="320" font-family="sans-serif" font-size="118" font-weight="700" fill="#F1F2EC" letter-spacing="1">AdjudicaUY</text>
+  <text x="82" y="398" font-family="sans-serif" font-size="42" font-weight="400" fill="#A9B4C9">Adjudicaciones del Estado uruguayo</text>
+
+  <rect x="80" y="470" width="1040" height="1" fill="#2F3A54"/>
+
+  <text x="82" y="560" font-family="sans-serif" font-size="28" font-weight="400" fill="#5B6478">Datos públicos · Compras Estatales · BCU</text>
+</svg>

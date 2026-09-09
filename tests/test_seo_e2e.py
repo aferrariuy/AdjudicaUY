@@ -106,6 +106,51 @@ class TestIndexSEO:
         )
         assert "name" in data, "JSON-LD must include 'name'"
 
+    def test_og_site_name_present(self, client: Any) -> None:
+        """Index page has <meta property="og:site_name"> with the brand name."""
+
+        response = client.get("/")
+        soup = _parse(response.text)
+        content = _meta_content(soup, property_name="og:site_name")
+        assert content is not None, "<meta property='og:site_name'> must be present"
+        assert content == "AdjudicaUY", (
+            f"og:site_name must be 'AdjudicaUY', got {content!r}"
+        )
+
+    def test_og_image_present(self, client: Any) -> None:
+        """Index page has <meta property="og:image"> pointing at the OG asset."""
+
+        response = client.get("/")
+        soup = _parse(response.text)
+        content = _meta_content(soup, property_name="og:image")
+        assert content is not None, "<meta property='og:image'> must be present"
+        assert "og-image.png" in content, (
+            f"og:image must reference og-image.png, got {content!r}"
+        )
+
+    def test_json_ld_search_action(self, client: Any) -> None:
+        """Index JSON-LD exposes a SearchAction with an article query-input."""
+
+        response = client.get("/")
+        soup = _parse(response.text)
+        ld_script = soup.find("script", attrs={"type": "application/ld+json"})
+        assert ld_script is not None, "JSON-LD <script> must be present"
+        assert ld_script.string is not None, "JSON-LD <script> must contain text"
+        data = json.loads(ld_script.string)
+        action = data.get("potentialAction")
+        assert action is not None, "JSON-LD must include a potentialAction"
+        assert action.get("@type") == "SearchAction", (
+            f"potentialAction @type must be 'SearchAction', got {action.get('@type')!r}"
+        )
+        assert "article={search_term_string}" in action.get("target", ""), (
+            "SearchAction target must include the article query-input, "
+            f"got {action.get('target')!r}"
+        )
+        assert action.get("query-input") == "required name=search_term_string", (
+            "query-input must be 'required name=search_term_string', "
+            f"got {action.get('query-input')!r}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # 4.2 — About page (/about) SEO tags

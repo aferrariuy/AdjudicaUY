@@ -21,7 +21,12 @@
   "@type": "WebSite",
   "name": "AdjudicaUY",
   "url": {{ canonical_url | default('https://adjudica.digitales.gub.uy/', true) | tojson }},
-  "description": "Buscador de adjudicaciones del Estado uruguayo"
+  "description": "Buscador de adjudicaciones del Estado uruguayo",
+  "potentialAction": {
+    "@type": "SearchAction",
+    "target": {{ (canonical_url | default('https://adjudica.digitales.gub.uy/', true) ~ '?article={search_term_string}') | tojson }},
+    "query-input": "required name=search_term_string"
+  }
 }
 </script>
 {% endblock %}
