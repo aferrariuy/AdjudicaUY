@@ -94,7 +94,8 @@ class Settings(BaseSettings):
         default="http://localhost:8000",
         description=(
             "Public base URL of the site, used for canonical URLs and "
-            "OG/Twitter meta tags. No trailing slash. Override via SITE_URL "
+            "OG/Twitter meta tags. Any trailing slash is stripped at load "
+            "time so URL joins stay well-formed. Override via SITE_URL "
             "env var in production."
         ),
     )
@@ -154,6 +155,22 @@ class Settings(BaseSettings):
             allowed_hosts={"cotizaciones.bcu.gub.uy"},
             allow_http=False,
         )
+
+    @field_validator("site_url", mode="before")
+    @classmethod
+    def _normalize_site_url(cls, value: str) -> str:
+        """Strip trailing slashes from ``SITE_URL``.
+
+        ``site_url`` is concatenated with route paths
+        (``f"{settings.site_url}{path}"``) in every absolute URL the app
+        publishes: canonical links, OG tags, the sitemap and robots.txt. A
+        stored trailing slash therefore leaks ``//`` into all of them, so the
+        value is normalized here at the single point where it enters the app.
+        """
+
+        if not isinstance(value, str):
+            return value
+        return value.rstrip("/")
 
     @field_validator("cache_ttl_seconds")
     @classmethod

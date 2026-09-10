@@ -74,6 +74,39 @@ def test_site_url_reads_from_env(base_env: Any, monkeypatch: Any) -> None:
     assert settings.site_url == "https://adjudica.digitales.gub.uy"
 
 
+def test_site_url_strips_trailing_slash(base_env: Any, monkeypatch: Any) -> None:
+    """A trailing slash in SITE_URL is dropped instead of stored verbatim.
+
+    ``site_url`` is concatenated with route paths (``f"{site_url}{path}"``), so
+    keeping the slash leaks a double slash into canonical URLs, OG tags, the
+    sitemap and robots.txt.
+    """
+
+    monkeypatch.setenv("SITE_URL", "https://adjudica.digitales.gub.uy/")
+    settings = _make_settings()
+    assert settings.site_url == "https://adjudica.digitales.gub.uy"
+
+
+def test_site_url_strips_repeated_trailing_slashes(
+    base_env: Any, monkeypatch: Any
+) -> None:
+    """Every trailing slash goes, not just the last one."""
+
+    monkeypatch.setenv("SITE_URL", "https://adjudica.digitales.gub.uy///")
+    settings = _make_settings()
+    assert settings.site_url == "https://adjudica.digitales.gub.uy"
+
+
+def test_site_url_strips_trailing_slash_after_path(
+    base_env: Any, monkeypatch: Any
+) -> None:
+    """Only the trailing slash is removed; a base path is preserved."""
+
+    monkeypatch.setenv("SITE_URL", "https://adjudica.digitales.gub.uy/base/")
+    settings = _make_settings()
+    assert settings.site_url == "https://adjudica.digitales.gub.uy/base"
+
+
 # ---------------------------------------------------------------------------
 # debug
 # ---------------------------------------------------------------------------

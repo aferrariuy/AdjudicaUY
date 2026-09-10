@@ -1,11 +1,12 @@
-"""Unit tests for pure chart presenters."""
+"""Unit tests for the pure view-shaping presenters (charts, SEO context)."""
 
 from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
+from typing import Any
 
-from app.presenters import _build_trend_chart_payload
+from app.presenters import _build_seo_context, _build_trend_chart_payload
 
 
 def test_trend_payload_marks_current_month_without_dropping_points() -> None:
@@ -31,3 +32,23 @@ def test_trend_payload_omits_partial_for_historical_final_month() -> None:
 
     assert "partial" not in payload
     assert len(payload["labels"]) == len(payload["datasets"][0]["data"]) == 2
+
+
+def test_seo_context_has_no_double_slash_when_site_url_has_trailing_slash(
+    monkeypatch: Any,
+) -> None:
+    """A trailing-slash SITE_URL must not produce ``//`` in absolute URLs."""
+
+    monkeypatch.setenv("SITE_URL", "https://adjudicauy.appuy.dedyn.io/")
+
+    context = _build_seo_context(
+        meta_title="AdjudicaUY",
+        meta_description="Adjudicaciones del Estado uruguayo",
+        og_type="website",
+        path="/",
+    )
+
+    assert context["canonical_url"] == "https://adjudicauy.appuy.dedyn.io/"
+    assert context["og_image"] == (
+        "https://adjudicauy.appuy.dedyn.io/static/og-image.png"
+    )
