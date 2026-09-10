@@ -280,7 +280,7 @@ class TestIndexTemplateSEO:
     def test_website_json_ld_has_search_action(self):
         html = _render_block(self.env, "index.html", "json_ld", _index_seo_context())
         assert '"@type": "SearchAction"' in html
-        assert '?article={search_term_string}' in html
+        assert "?article={search_term_string}" in html
         assert '"query-input": "required name=search_term_string"' in html
 
     def test_twitter_card_present(self):
