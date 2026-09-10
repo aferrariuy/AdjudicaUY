@@ -107,6 +107,21 @@ def test_site_url_strips_trailing_slash_after_path(
     assert settings.site_url == "https://adjudica.digitales.gub.uy/base"
 
 
+def test_site_url_of_only_slashes_is_rejected_at_load_time(
+    base_env: Any, monkeypatch: Any
+) -> None:
+    """A SITE_URL left without a hostname after stripping fails at the field.
+
+    Without this guard the value normalizes to the empty string and the
+    missing hostname only surfaces later, from ``trusted_host_allowlist``.
+    """
+
+    monkeypatch.setenv("SITE_URL", "///")
+
+    with pytest.raises(ValueError, match="SITE_URL must include a hostname"):
+        _make_settings()
+
+
 # ---------------------------------------------------------------------------
 # debug
 # ---------------------------------------------------------------------------

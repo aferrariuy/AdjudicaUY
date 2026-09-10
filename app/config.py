@@ -170,7 +170,10 @@ class Settings(BaseSettings):
 
         if not isinstance(value, str):
             return value
-        return value.rstrip("/")
+        normalized = value.rstrip("/")
+        if not normalized:
+            raise ValueError("SITE_URL must include a hostname")
+        return normalized
 
     @field_validator("cache_ttl_seconds")
     @classmethod
