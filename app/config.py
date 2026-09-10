@@ -204,6 +204,12 @@ def trusted_host_allowlist(settings: Settings) -> list[str]:
 
 
 def get_settings() -> Settings:
-    """FastAPI dependency that returns a cached Settings instance."""
+    """FastAPI dependency that returns a ``Settings`` read from the environment.
+
+    Every call builds a fresh instance, so environment changes made between
+    calls (as tests do with ``monkeypatch.setenv``) are picked up. There is no
+    cache: callers that need one consistent snapshot must keep the returned
+    object.
+    """
 
     return Settings()  # type: ignore[call-arg]

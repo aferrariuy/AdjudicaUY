@@ -11,7 +11,7 @@ from typing import Any
 
 import pytest
 
-from app.config import Settings, trusted_host_allowlist
+from app.config import Settings, get_settings, trusted_host_allowlist
 
 
 def _set_env(key: str, value: str | None) -> str | None:
@@ -227,3 +227,24 @@ def test_trusted_host_allowlist_rejects_hostless_site_url(
     settings = _make_settings()
     with pytest.raises(ValueError, match="SITE_URL must include a hostname"):
         trusted_host_allowlist(settings)
+
+
+# ---------------------------------------------------------------------------
+# get_settings
+# ---------------------------------------------------------------------------
+
+
+def test_get_settings_rereads_environment_on_every_call(
+    base_env: Any, monkeypatch: Any
+) -> None:
+    """``get_settings`` is not cached, so a later env change is reflected.
+
+    The SEO presenter reads settings on every call and tests swap ``SITE_URL``
+    per test, so re-reading is a contract rather than an accident.
+    """
+
+    monkeypatch.setenv("SITE_URL", "https://first.example.test")
+    assert get_settings().site_url == "https://first.example.test"
+
+    monkeypatch.setenv("SITE_URL", "https://second.example.test")
+    assert get_settings().site_url == "https://second.example.test"

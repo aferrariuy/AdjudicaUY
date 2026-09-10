@@ -49,9 +49,8 @@ _TEST_ENV: dict[str, str] = {
 }
 
 # Apply once at import time. Individual tests can override a variable by
-# calling ``monkeypatch.setenv`` and then re-invoking ``get_settings``
-# (the production app deliberately re-reads env on every call only if
-# the cached value is missing — see :mod:`app.config`).
+# calling ``monkeypatch.setenv`` and then re-invoking ``get_settings``,
+# which re-reads the environment on every call (see :mod:`app.config`).
 for key, value in _TEST_ENV.items():
     os.environ.setdefault(key, value)
 
