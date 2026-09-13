@@ -167,7 +167,7 @@ Child rows link via `compra_id` FK with `ON DELETE CASCADE`. The unique constrai
 
 ## Deployment
 
-- **Compose** (`docker-compose.yml`): `db` (postgres:16-alpine, healthcheck, internal network only), `app` (uvicorn) and `worker` (`python -m scraper.scheduler`), both hardened with `read_only`, `cap_drop: ALL`, `no-new-privileges`, tmpfs `/tmp`. Env comes from `.env`; `dokploy-network` is external.
+- **Compose** (`docker-compose.yml`): `db` (postgres:16-alpine, healthcheck, internal network only), `app` (uvicorn) and `worker` (`python -m scraper.scheduler`), both hardened with `read_only`, `cap_drop: ALL`, `no-new-privileges`, tmpfs `/tmp`. Env comes from `.env` for Compose's `${VAR}` interpolation, but each container receives only the variables named in its own `environment` block — there is no `env_file`, so a variable documented in `.env.example` that no service names is silently unreachable (the process starts and reads its default). IndexNow needs a line in **both** `app` and `worker`; `tests/test_compose_contract.py` fails whenever `.env.example` and those blocks drift apart.
 - **Dockerfile** is multi-stage: `builder` (Python venv), `tailwind` (pnpm + Tailwind compile with template content scan), `runtime` (non-root uid 1000, libpq5 only).
 - **Entrypoint** (`scripts/entrypoint.sh`): runs `alembic upgrade head` with 5 retries (5s apart) then `exec "$@"`; migrations are serialized via PostgreSQL advisory locks in `migrations/env.py`.
 - **Worker schedule**: daily at `SCRAPE_HOUR:SCRAPE_MINUTE` UTC (default 02:00 = 23:00 Montevideo). The worker is a long-running container — Dokploy's Scheduled Jobs feature needs it running.

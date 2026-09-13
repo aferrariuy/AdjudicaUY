@@ -9,12 +9,14 @@ Docker daemon is required — this validates the deployed configuration itself.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, cast
 
 import yaml  # type: ignore[import-untyped]
 
 COMPOSE_PATH = Path(__file__).resolve().parents[1] / "docker-compose.yml"
+ENV_EXAMPLE_PATH = Path(__file__).resolve().parents[1] / ".env.example"
 
 EXPECTED_HEARTBEAT_ENV = "${WORKER_HEARTBEAT_FILE:-/tmp/worker.heartbeat}"  # noqa: S108 — pinned default
 EXPECTED_LAST_RUN_ENV = "${WORKER_LAST_RUN_FILE:-/tmp/worker.last-run.json}"  # noqa: S108 — pinned default
@@ -30,9 +32,31 @@ EXPECTED_HEALTHCHECK_TEST = [
 ]
 
 
-def _worker_config() -> dict[str, Any]:
+def _service_config(service: str) -> dict[str, Any]:
+    """Return one service's Compose definition."""
+
     compose = yaml.safe_load(COMPOSE_PATH.read_text())
-    return cast("dict[str, Any]", compose["services"]["worker"])
+    return cast("dict[str, Any]", compose["services"][service])
+
+
+def _worker_config() -> dict[str, Any]:
+    return _service_config("worker")
+
+
+def _documented_settings() -> set[str]:
+    """Return the ``Settings`` fields ``.env.example`` tells an operator to set.
+
+    ``.env.example`` is the operator-facing contract: it is where someone looks to
+    learn which knobs the deployment exposes. Commented-out lines are excluded,
+    since they document intent rather than an active invitation to set the value.
+    """
+
+    from app.config import Settings
+
+    documented = set(
+        re.findall(r"^([A-Z0-9_]+)=", ENV_EXAMPLE_PATH.read_text(), re.MULTILINE)
+    )
+    return documented & {name.upper() for name in Settings.model_fields}
 
 
 def test_worker_exposes_marker_env_defaults() -> None:
@@ -79,3 +103,41 @@ def test_worker_keeps_hardened_filesystem_settings() -> None:
     worker = _worker_config()
     assert worker["read_only"] is True
     assert "/tmp:rw,noexec,nosuid,nodev" in worker["tmpfs"]  # noqa: S108 — pinned mount
+
+
+# ---------------------------------------------------------------------------
+# Settings reachability
+# ---------------------------------------------------------------------------
+
+
+def test_every_documented_setting_is_wired_into_both_containers() -> None:
+    """A setting documented in ``.env.example`` must reach both containers.
+
+    Compose passes the environment by explicit allowlist rather than
+    ``env_file``, so a variable present in ``.env`` never enters a container
+    unless that service names it. That is a silent failure mode: the operator sets
+    the variable, the deployment looks configured, and the process quietly reads
+    its default instead. Tying the assertion to ``.env.example`` makes the
+    operator-facing contract and the container wiring impossible to drift apart.
+    """
+
+    documented = _documented_settings()
+    assert documented, "nothing parsed: .env.example or Settings changed shape"
+
+    for service in ("app", "worker"):
+        environment = _service_config(service)["environment"]
+        missing = sorted(name for name in documented if name not in environment)
+        assert missing == [], f"the {service} container cannot receive {missing}"
+
+
+def test_indexnow_key_is_wired_with_a_blank_safe_default() -> None:
+    """Both containers receive the key, defaulting to empty when unset.
+
+    The explicit empty default matters: without it Compose warns about an unset
+    variable, and with it an unconfigured deployment passes ``""``, which the
+    settings validator treats as "off".
+    """
+
+    for service in ("app", "worker"):
+        environment = _service_config(service)["environment"]
+        assert environment["INDEXNOW_KEY"] == "${INDEXNOW_KEY:-}"

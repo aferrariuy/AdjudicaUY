@@ -5,7 +5,13 @@
 #   * worker — scraper scheduler (long-running, executes scrape daily)
 #   * db     — PostgreSQL 16
 #
-# Environment variables are loaded from the .env file in the same directory.
+# Compose reads the .env file in this directory to resolve the ${VAR}
+# interpolations below, but each container receives ONLY the variables named in
+# its own `environment` block -- there is no `env_file`. Putting a variable in
+# .env is therefore NOT enough to reach a container, and one that no service
+# names fails silently: the process starts and reads its default. Every service
+# that constructs Settings has to wire the fields it needs, which
+# tests/test_compose_contract.py enforces.
 # For Dokploy: mount or copy the .env file to the server.
 #
 # The worker runs a persistent scheduler that executes the scraper once
@@ -59,6 +65,12 @@ services:
       SOURCE_B_BASE_URL: ${SOURCE_B_BASE_URL}
       BCU_API_URL: ${BCU_API_URL}
       SITE_URL: ${SITE_URL:-http://localhost:8000}
+      # The documented escape hatch for a non-TLS upstream. It was read from the
+      # environment by the config validator but never reached this container, so
+      # setting it in .env had no effect.
+      ALLOW_HTTP_SOURCE_URL: ${ALLOW_HTTP_SOURCE_URL:-false}
+      # Optional: off unless set. The app serves /${INDEXNOW_KEY}.txt.
+      INDEXNOW_KEY: ${INDEXNOW_KEY:-}
     read_only: true
     cap_drop:
       - ALL
@@ -100,6 +112,10 @@ services:
       SOURCE_B_BASE_URL: ${SOURCE_B_BASE_URL}
       BCU_API_URL: ${BCU_API_URL}
       SITE_URL: ${SITE_URL:-http://localhost:8000}
+      # The documented escape hatch for a non-TLS upstream.
+      ALLOW_HTTP_SOURCE_URL: ${ALLOW_HTTP_SOURCE_URL:-false}
+      # Optional: off unless set. The worker submits the changed URLs.
+      INDEXNOW_KEY: ${INDEXNOW_KEY:-}
       SCRAPE_HOUR: ${SCRAPE_HOUR:-2}
       SCRAPE_MINUTE: ${SCRAPE_MINUTE:-0}
       WORKER_HEARTBEAT_FILE: ${WORKER_HEARTBEAT_FILE:-/tmp/worker.heartbeat}
