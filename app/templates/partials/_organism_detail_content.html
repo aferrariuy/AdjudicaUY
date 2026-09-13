@@ -11,17 +11,24 @@
    within a single organism the question "which companies won
    the most contracts?" is non-trivial.
 
-   The trend / concentration widgets still mount Chart.js via
-   base.html; the company ranking is rendered as a plain HTML
-   list. The empty states are handled by the per-widget partials
-   (KPI, trend, concentration, ranking) — this file is just a
-   layout shell. #}
+   When the active window holds no adjudications, every widget would
+   render its own empty branch and the page would repeat the same
+   generic sentence four times. ``empty_window`` (set by the route only
+   in that case) replaces the whole set with one informative block that
+   names the window and points at the last year with activity.
+
+   This file is a layout shell: the empty states inside each widget still
+   exist for the index page, which shares them. #}
 
 <div class="space-y-6">
-  {% include "partials/_kpi_cards.html" %}
-  {% include "partials/_trend_chart.html" %}
-  {% include "partials/_concentration_chart.html" %}
-  {% with rows=ranking_rows, heading_id="ranking-heading", title="Ranking de empresas", link_to_organism=false, link_to_company=link_to_company %}
-    {% include "partials/_ranking_list.html" %}
-  {% endwith %}
+  {% if empty_window %}
+    {% include "partials/_empty_window.html" %}
+  {% else %}
+    {% include "partials/_kpi_cards.html" %}
+    {% include "partials/_trend_chart.html" %}
+    {% include "partials/_concentration_chart.html" %}
+    {% with rows=ranking_rows, heading_id="ranking-heading", title="Ranking de empresas", link_to_organism=false, link_to_company=link_to_company %}
+      {% include "partials/_ranking_list.html" %}
+    {% endwith %}
+  {% endif %}
 </div>

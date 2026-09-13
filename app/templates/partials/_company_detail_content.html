@@ -1,82 +1,19 @@
+{# Company profile body — HTMX-swappable partial rendered by
+   ``GET /company/{tipo}/{nro}/partial`` and included by ``company_detail.html``
+   on the first page load.
+
+   Layout shell: the widgets live in ``_company_detail_widgets.html`` and the
+   empty case is handled by the shared ``_empty_window.html`` block, so an
+   empty window gets one informative message (naming the window, pointing at
+   the last year with activity) instead of one generic sentence per section.
+
+   The filter form lives outside this partial, so the block links to the full
+   page: that way the form reloads showing the window being displayed. #}
+
 <div class="space-y-6">
-  {% if total == 0 %}
-    <p class="bg-folio border border-linea p-4 text-texto-sec" role="status">
-      No se encontró actividad registrada para esta empresa en el período seleccionado.
-    </p>
+  {% if empty_window %}
+    {% include "partials/_empty_window.html" %}
+  {% else %}
+    {% include "partials/_company_detail_widgets.html" %}
   {% endif %}
-
-  <section aria-labelledby="company-kpi-heading" class="bg-folio border border-linea p-4 sm:p-6">
-    <h2 id="company-kpi-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Resumen</h2>
-    <dl class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <div class="rounded-md border border-linea p-4">
-        <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Adjudicaciones</dt>
-        <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">{{ company_summary.purchase_count | count_uy }}</dd>
-      </div>
-      <div class="rounded-md border border-linea p-4">
-        <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Total adjudicado</dt>
-        <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">{{ company_summary.total_amount | uyu }} UYU</dd>
-      </div>
-      <div class="rounded-md border border-linea p-4">
-        <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Organismos</dt>
-        <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">{{ company_summary.organism_count | count_uy }}</dd>
-      </div>
-      <div class="rounded-md border border-linea p-4">
-        <dt class="text-xs font-ibm-plex-mono uppercase tracking-wider text-texto-sec">Participación del total</dt>
-        <dd class="mt-1 text-2xl font-semibold tabular-nums text-ink">{{ company_summary.share_of_total | pct_adaptive }}</dd>
-      </div>
-    </dl>
-  </section>
-
-  {% include "partials/_trend_chart.html" %}
-  {% include "partials/_concentration_chart.html" %}
-
-  {% if company_win_rate.rate is not none %}
-    <section aria-labelledby="company-win-rate-heading" class="bg-folio border border-linea p-4 sm:p-6">
-      <h2 id="company-win-rate-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Tasa de éxito</h2>
-      <p class="text-3xl font-semibold tabular-nums text-ink">{{ company_win_rate.rate | pct_adaptive }}</p>
-      <p class="mt-3 text-sm text-texto-sec"><strong>Ganadas:</strong> {{ company_win_rate.wins | count_uy }} · <strong>Participaciones:</strong> {{ company_win_rate.participations | count_uy }}</p>
-    </section>
-  {% endif %}
-
-  <section id="company-competitors" aria-labelledby="company-competitors-heading" class="bg-folio border border-linea p-4 sm:p-6">
-    <h2 id="company-competitors-heading" class="font-big-shoulders text-xl font-bold mb-4 text-ink">Principales competidores</h2>
-    {% if company_competitors | length >= 2 %}
-      <ol>
-        {% for competitor in company_competitors %}
-          <li class="flex justify-between gap-4 py-1">
-            <a href="{{ competitor.company_profile_url }}" class="text-sello hover:underline">{{ competitor.display_name }}</a>
-            <span class="text-sm text-texto-sec">{{ competitor.purchase_count | count_uy }} compras</span>
-          </li>
-        {% endfor %}
-      </ol>
-    {% else %}
-      <p class="text-texto-sec text-sm" role="status">No hay suficientes competidores para mostrar.</p>
-    {% endif %}
-  </section>
-
-  {% with rows=ranking_rows, heading_id="company-organism-ranking-heading", title="Ranking de organismos", link_to_organism=true %}
-    {% include "partials/_ranking_list.html" %}
-  {% endwith %}
-
-  {% with rows=top_article_rows, heading_id="company-top-articles-heading", title="Principales artículos", link_to_organism=false %}
-    {% include "partials/_ranking_list.html" %}
-  {% endwith %}
-
-  <section aria-labelledby="company-history-heading">
-    <div class="flex items-center justify-between gap-4 mb-4">
-      <h2 id="company-history-heading" class="font-big-shoulders text-xl font-bold text-ink">Historial de adjudicaciones</h2>
-      {% if total > 0 %}
-        <a
-          href="/company/{{ company_type | urlencode }}/{{ company_number | urlencode }}/export?{{ request.query_params }}"
-          class="inline-flex items-center gap-1 rounded-lg border border-primary px-3 py-1.5 text-xs font-medium text-primary hover:bg-primary/10 transition-colors"
-          download
-        >Exportar CSV</a>
-      {% endif %}
-    </div>
-    <div id="table-container" aria-live="polite" aria-busy="false">
-      {% with company_profile=true, listing_base_url="/company/" ~ (company_type | urlencode) ~ "/" ~ (company_number | urlencode), filter_form_id="company-filter-form" %}
-        {% include "partials/_results_table.html" %}
-      {% endwith %}
-    </div>
-  </section>
 </div>

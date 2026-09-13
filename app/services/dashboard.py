@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
@@ -309,6 +309,28 @@ def top_articles(
         )
         for row in session.execute(stmt)
     ]
+
+
+def latest_activity_date(session: Session, filters: AdjudicationFilters) -> date | None:
+    """Return the most recent award date in scope, ignoring the date window.
+
+    The date bounds are deliberately dropped: this answers "when did this
+    entity last have activity?", which is what an entity page needs when the
+    requested window turns out to be empty. Everything else in ``filters``
+    (organism / company / article scope) is kept.
+
+    The join to ``adjudicacion`` is kept as well, so the returned year is one
+    that actually renders data when the visitor opens it: a compra with no
+    adjudication rows would name a year that is empty for the same reason the
+    current window is.
+    """
+
+    entity_scope = replace(filters, date_from=None, date_to=None)
+    stmt = select(func.max(Compra.fecha_pub_adj)).join(
+        Adjudicacion, Adjudicacion.compra_id == Compra.id
+    )
+    stmt = _apply_filters(stmt, entity_scope)
+    return session.execute(stmt).scalar()
 
 
 def kpi_summary(session: Session, filters: AdjudicationFilters) -> KpiSummary:

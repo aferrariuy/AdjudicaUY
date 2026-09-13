@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
@@ -132,6 +133,57 @@ def _build_seo_context(
     }
 
 
+@dataclass(frozen=True)
+class EmptyWindowView:
+    """View-model for the informative empty state of an entity page.
+
+    Rendered when the active date window holds no adjudications. It carries
+    the window that was actually queried (so the page can name it instead of
+    saying "no data") and a link to the entity's last year with activity (so
+    the visitor has a way out instead of a dead end).
+    """
+
+    window_label: str
+    last_year: int | None
+    last_year_url: str | None
+    last_year_total_amount: Decimal | None
+    last_year_purchase_count: int | None
+
+
+def _build_empty_window_view(
+    *,
+    window_from: date,
+    window_to: date,
+    last_activity: date | None,
+    last_year_total_amount: Decimal | None,
+    last_year_purchase_count: int | None,
+    path: str,
+) -> EmptyWindowView:
+    """Build the empty-window view-model for an entity page.
+
+    ``path`` is the entity's own path (already URL-encoded) and the link
+    deliberately targets the full page rather than the HTMX partial, so the
+    filter form reloads showing the window that is actually displayed
+    instead of keeping the old dates next to new data.
+    """
+
+    last_year = last_activity.year if last_activity is not None else None
+    return EmptyWindowView(
+        window_label=(
+            f"{window_from.strftime('%d/%m/%Y')} \u2013 "
+            f"{window_to.strftime('%d/%m/%Y')}"
+        ),
+        last_year=last_year,
+        last_year_url=(
+            f"{path}?date_from={last_year}-01-01&date_to={last_year}-12-31"
+            if last_year is not None
+            else None
+        ),
+        last_year_total_amount=last_year_total_amount,
+        last_year_purchase_count=last_year_purchase_count,
+    )
+
+
 def _build_page_numbers(current: int, total: int) -> list[int | str]:
     """Return the visible page numbers + ellipsis markers for the pagination bar.
 
@@ -171,7 +223,9 @@ def _build_page_numbers(current: int, total: int) -> list[int | str]:
 
 
 __all__ = [
+    "EmptyWindowView",
     "_build_concentration_chart_payload",
+    "_build_empty_window_view",
     "_build_page_numbers",
     "_build_seo_context",
     "_build_trend_chart_payload",

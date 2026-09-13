@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+from dataclasses import replace
 from datetime import date
 from typing import TYPE_CHECKING, Any, cast
 
@@ -12,6 +13,8 @@ from fastapi.responses import HTMLResponse, Response, StreamingResponse
 from markupsafe import escape
 
 from app.database import get_session_factory
+from app.presenters import _build_empty_window_view
+from app.services.dashboard import kpi_summary, latest_activity_date
 from app.services.filters import (
     AdjudicationFilters,
     filters_from_query_params,
@@ -21,9 +24,13 @@ from app.services.listing import (
     count_adjudications,
     iter_adjudications,
 )
+from app.services.query_cache import cached_aggregate
 
 if TYPE_CHECKING:
     from fastapi import Request
+    from sqlalchemy.orm import Session
+
+    from app.presenters import EmptyWindowView
 
 PAGE_SIZE = 10
 RANKING_LIMIT = 10
@@ -194,6 +201,60 @@ def _render_str(template_name: str, request: Request, context: dict[str, Any]) -
     return cast("str", template.render({**context, "request": request}))
 
 
+def _empty_window_context(
+    db: Session,
+    *,
+    filters: AdjudicationFilters,
+    path: str,
+) -> EmptyWindowView | None:
+    """Build the informative empty state for an entity page, or ``None``.
+
+    Call this only when the active window came back empty, so the healthy
+    path pays no extra query. Both lookups ignore the date window on purpose
+    — the question is "when did this entity last have activity?" — while
+    keeping the entity scope, and both go through the aggregate cache so a
+    repeat request is free.
+    """
+
+    if filters.date_from is None or filters.date_to is None:
+        return None
+
+    last_activity = cached_aggregate(
+        "latest_activity_date",
+        latest_activity_date,
+        db,
+        replace(filters, date_from=None, date_to=None),
+    )
+    if last_activity is None:
+        return _build_empty_window_view(
+            window_from=filters.date_from,
+            window_to=filters.date_to,
+            last_activity=None,
+            last_year_total_amount=None,
+            last_year_purchase_count=None,
+            path=path,
+        )
+
+    last_year_kpi = cached_aggregate(
+        "kpi_summary",
+        kpi_summary,
+        db,
+        replace(
+            filters,
+            date_from=date(last_activity.year, 1, 1),
+            date_to=date(last_activity.year, 12, 31),
+        ),
+    )
+    return _build_empty_window_view(
+        window_from=filters.date_from,
+        window_to=filters.date_to,
+        last_activity=last_activity,
+        last_year_total_amount=last_year_kpi.total_amount,
+        last_year_purchase_count=last_year_kpi.purchase_count,
+        path=path,
+    )
+
+
 def _render(
     template_name: str, request: Request, context: dict[str, Any]
 ) -> HTMLResponse:
@@ -330,6 +391,7 @@ __all__ = [
     "_CSV_COLUMNS",
     "_ERROR_FRAGMENT_TEMPLATE",
     "_coerce_page",
+    "_empty_window_context",
     "_enforce_identity_length",
     "_full_page_validation_error",
     "_inject_default_year_params",

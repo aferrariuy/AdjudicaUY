@@ -18,6 +18,7 @@ from app.presenters import (
 from app.routes._base import HeadAwareAPIRoute
 from app.routes.common import (
     RANKING_LIMIT,
+    _empty_window_context,
     _enforce_identity_length,
     _full_page_validation_error,
     _inject_default_year_params,
@@ -100,7 +101,20 @@ def _build_organism_context(
         "ranking_by_company", ranking_by_company, db, filters, limit=RANKING_LIMIT
     )
 
+    # Only pay for the empty-state lookups when the window came back empty;
+    # the healthy path runs no extra query.
+    empty_window = (
+        _empty_window_context(
+            db,
+            filters=filters,
+            path=f"/organism/{quote(decoded_name, safe='')}",
+        )
+        if kpi.purchase_count == 0
+        else None
+    )
+
     return {
+        "empty_window": empty_window,
         "filters": filters,
         "organism_name": decoded_name,
         "kpi": kpi,

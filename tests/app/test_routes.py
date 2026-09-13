@@ -1466,11 +1466,19 @@ def test_company_export_link_preserves_active_filters(
 
 
 def test_unknown_company_profile_returns_200_empty_state(client: TestClient) -> None:
+    """An unknown company renders the informative empty state, not a 404.
+
+    The empty state is now the shared ``_empty_window.html`` block: one
+    message naming the window and stating there is no activity in any period,
+    instead of every widget printing its own generic sentence. The assertion
+    on the widget-level competitor copy is therefore gone with the widgets.
+    """
+
     response = client.get("/company/RUT/999999999999")
 
     assert response.status_code == 200
+    assert "Sin adjudicaciones en el período" in response.text
     assert "No se encontró actividad registrada" in response.text
-    assert "No hay suficientes competidores" in response.text
     assert 'role="status"' in response.text
 
 
@@ -2136,6 +2144,14 @@ def test_organism_limpiar_resets_date_range(
 
 
 # ---------------------------------------------------------------------------
+def _iso_days_ago(days: int) -> str:
+    """Return an ISO date ``days`` before today, so date tests never freeze time."""
+
+    from datetime import date, timedelta
+
+    return (date.today() - timedelta(days=days)).isoformat()
+
+
 # Direct coverage of the pure ``validate_date_params`` helper
 # ---------------------------------------------------------------------------
 
@@ -2231,14 +2247,21 @@ def test_validate_date_params_rejects_wider_range() -> None:
 
 
 def test_validate_date_params_accepts_single_date() -> None:
-    """When only one date is provided, no range exists to check."""
+    """A one-sided window inside the cap is accepted, not left unchecked.
+
+    The span of a one-sided window is measured against the bound the service
+    derives for the missing side (see
+    ``app.services.filters.effective_date_window``), so the 5-year cap applies
+    to it too. Both cases below are inside the cap.
+    """
 
     from app.services.filters import validate_date_params
 
-    # Only date_from — the max-range check only runs when both are present.
-    validate_date_params({"date_from": "2024-01-01", "date_to": ""})
-    # Only date_to.
-    validate_date_params({"date_from": "", "date_to": "2024-12-31"})
+    # Only date_from one year back — the implicit upper bound is today.
+    validate_date_params({"date_from": _iso_days_ago(365), "date_to": ""})
+    # Only date_to one year back — the implicit lower bound is date_to minus
+    # the cap, so the span is exactly 1825 days.
+    validate_date_params({"date_from": "", "date_to": _iso_days_ago(365)})
 
 
 # ---------------------------------------------------------------------------
@@ -2450,9 +2473,10 @@ def test_organism_detail_returns_200_with_empty_state_for_unknown_organism(
     body = response.text
     # The page still loads and shows the requested name.
     assert "Nonexistent Organism" in body
-    # All widgets fall back to their empty-state copy.
-    assert "No hay datos" in body
-    assert "Sin datos disponibles" in body
+    # The widgets are replaced by one informative empty state that names the
+    # window, instead of four copies of the same generic sentence.
+    assert "Sin adjudicaciones en el período" in body
+    assert "No se encontró actividad registrada" in body
 
 
 def test_organism_detail_decodes_url_with_accents(
@@ -3086,7 +3110,7 @@ def test_organism_detail_accepts_maximum_255_char_name(
     response = client.get(f"/organism/{'O' * 255}")
 
     assert response.status_code == 200
-    assert "No hay datos" in response.text
+    assert "Sin adjudicaciones en el período" in response.text
 
 
 def test_organism_detail_partial_accepts_maximum_255_char_name(

@@ -23,6 +23,7 @@ AggregateFn = Callable[..., T]
 _CACHEABLE_AGGREGATES = frozenset(
     {
         "kpi_summary",
+        "latest_activity_date",
         "monthly_trend",
         "concentration_ratio",
         "ranking_by_company",

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import and_
@@ -88,6 +88,65 @@ class DateValidationError(ValidationError):
     """Raised when ``date_from`` or ``date_to`` are present but invalid."""
 
 
+# 5 * 365 days; leap-year safe enough for a range guard.
+MAX_DATE_RANGE_DAYS = 1825
+
+
+def _parse_optional_date(raw: str | None) -> date | None:
+    """Parse an optional raw ISO date, raising on a non-empty invalid value.
+
+    Returning ``None`` for a missing or blank value (and raising otherwise)
+    is what lets callers tell "the user typed nothing" from "the user typed
+    garbage" — a distinction the parsed :class:`AdjudicationFilters` loses.
+    """
+
+    if raw is None:
+        return None
+    stripped = raw.strip()
+    if not stripped:
+        return None
+    try:
+        return date.fromisoformat(stripped)
+    except ValueError as exc:
+        raise DateValidationError("Formato de fecha inválido. Use AAAA-MM-DD.") from exc
+
+
+def effective_date_window(
+    date_from: date | None,
+    date_to: date | None,
+    *,
+    today: date,
+) -> tuple[date | None, date | None]:
+    """Return the effective window, deriving the bound a caller left out.
+
+    Both bounds, or neither, are returned unchanged. A window missing exactly
+    one bound gets that bound derived, so its span is always finite and
+    measurable against :data:`MAX_DATE_RANGE_DAYS`:
+
+    * missing ``date_to`` — anchored at ``today``. Award dates cannot be in
+      the future, so the results are unchanged; this keeps the natural
+      "desde 2024" query working instead of rejecting it.
+    * missing ``date_from`` — anchored at ``date_to`` minus the cap, so
+      "hasta 2023" keeps meaning "the history before 2023" while never
+      scanning more than the cap.
+
+    A one-sided window is therefore never unbounded, and the derived bound is
+    part of the filters, so the filter form displays the window that was
+    actually queried rather than hiding it.
+    """
+
+    if date_from is not None and date_to is not None:
+        return date_from, date_to
+    if date_from is not None:
+        # Only the upper bound is missing. ``max`` keeps a future ``date_from``
+        # from turning into a reversed range: it collapses to that single day
+        # instead of raising, matching the old "no results" behaviour.
+        return date_from, max(today, date_from)
+    if date_to is not None:
+        return date_to - timedelta(days=MAX_DATE_RANGE_DAYS), date_to
+    return None, None
+
+
 def validate_date_params(params: dict[str, str | None]) -> None:
     """Validate raw ``date_from``/``date_to`` query parameters.
 
@@ -102,34 +161,39 @@ def validate_date_params(params: dict[str, str | None]) -> None:
     parsed form collapses into ``None``.
     """
 
-    # 1. Reject unparseable date strings.
-    for key in ("date_from", "date_to"):
-        raw = params.get(key)
-        if raw is None:
-            continue
-        stripped = raw.strip()
-        if not stripped:
-            continue
-        try:
-            date.fromisoformat(stripped)
-        except ValueError as exc:
-            raise DateValidationError(
-                "Formato de fecha inválido. Use AAAA-MM-DD."
-            ) from exc
+    # 1. Reject unparseable date strings (a blank value is not an error).
+    date_from = _parse_optional_date(params.get("date_from"))
+    date_to = _parse_optional_date(params.get("date_to"))
+    if date_from is None and date_to is None:
+        return
 
-    # 2. Reject reversed range.
-    dfrom_raw = params.get("date_from")
-    dto_raw = params.get("date_to")
-    if dfrom_raw and dfrom_raw.strip() and dto_raw and dto_raw.strip():
-        dfrom = date.fromisoformat(dfrom_raw.strip())
-        dto = date.fromisoformat(dto_raw.strip())
-        if dfrom > dto:
+    # 2. Reject a reversed range, and a span wider than the cap.
+    #
+    # The span is measured on the *effective* window, so a missing bound is
+    # anchored instead of treated as unbounded. Without that, a single-sided
+    # request such as ``?date_from=1990-01-01`` skipped this check entirely
+    # and made the server aggregate the whole dataset — roughly 13-16s per
+    # distinct value, and a fresh aggregate-cache miss for each one. The cap
+    # must hold whether the caller supplied both bounds or only one.
+    single_sided = (date_from is None) != (date_to is None)
+    effective_from, effective_to = effective_date_window(
+        date_from, date_to, today=date.today()
+    )
+    if effective_from is None or effective_to is None:  # pragma: no cover - defensive
+        return
+    if effective_from > effective_to:
+        raise DateValidationError(
+            "La fecha 'Desde' no puede ser posterior a la fecha 'Hasta'."
+        )
+    if (effective_to - effective_from).days > MAX_DATE_RANGE_DAYS:
+        if single_sided:
+            # Only a too-old "Desde" can land here: a lone "Hasta" is anchored
+            # at exactly the cap, so its span can never exceed it.
             raise DateValidationError(
-                "La fecha 'Desde' no puede ser posterior a la fecha 'Hasta'."
+                "El rango de fechas no puede superar los 5 años. "
+                "Acercá la fecha 'Desde' o cargá una fecha 'Hasta'."
             )
-        # 3. Reject range wider than 5 years (1825 days = 5*365, leap-year safe).
-        if (dto - dfrom).days > 1825:
-            raise DateValidationError("El rango de fechas no puede superar los 5 años.")
+        raise DateValidationError("El rango de fechas no puede superar los 5 años.")
 
 
 def filters_from_query_params(params: dict[str, str | None]) -> AdjudicationFilters:
@@ -153,13 +217,22 @@ def filters_from_query_params(params: dict[str, str | None]) -> AdjudicationFilt
         except ValueError:
             return None
 
+    _window = effective_date_window(
+        _maybe_date(params.get("date_from")),
+        _maybe_date(params.get("date_to")),
+        today=date.today(),
+    )
+
     return AdjudicationFilters(
         company=_normalize(params.get("company")),
         organism=_normalize(params.get("organism")),
         article=_normalize(params.get("article")),
         article_id=_normalize(params.get("article_id")),
-        date_from=_maybe_date(params.get("date_from")),
-        date_to=_maybe_date(params.get("date_to")),
+        # The window is materialized here, at the single place every route
+        # builds filters, so a one-sided request always reaches the service
+        # layer bounded and the filter form renders the bound it derived.
+        date_from=_window[0],
+        date_to=_window[1],
     )
 
 

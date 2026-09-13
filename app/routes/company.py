@@ -26,6 +26,7 @@ from app.routes.common import (
     PAGE_SIZE,
     RANKING_LIMIT,
     _coerce_page,
+    _empty_window_context,
     _enforce_identity_length,
     _full_page_validation_error,
     _inject_default_year_params,
@@ -128,6 +129,7 @@ def _build_company_context(
     # document type or number.
     if not decoded_type or not decoded_number:
         return {
+            "empty_window": None,
             "filters": filters,
             "company_type": decoded_type,
             "company_number": decoded_number,
@@ -247,7 +249,23 @@ def _build_company_context(
     )
     page_numbers = _build_page_numbers(page, total_pages)
 
+    # Only pay for the empty-state lookups when the window came back empty;
+    # the healthy path runs no extra query.
+    empty_window = (
+        _empty_window_context(
+            db,
+            filters=filters,
+            path=(
+                f"/company/{quote(decoded_type, safe='')}/"
+                f"{quote(decoded_number, safe='')}"
+            ),
+        )
+        if summary.purchase_count == 0
+        else None
+    )
+
     return {
+        "empty_window": empty_window,
         "filters": filters,
         "company_type": decoded_type,
         "company_number": decoded_number,

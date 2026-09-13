@@ -1,0 +1,42 @@
+{# Informative empty state for an entity page whose active date window has no
+   adjudications.
+
+   Rendered INSTEAD of the widgets, because an empty window makes every widget
+   fall back to its own empty branch — which used to print the same generic
+   sentence four times without ever naming the window or offering a way out.
+   This block names the window, reports the entity's last year with activity
+   together with its real figure (so the page has content of its own rather
+   than four copies of one sentence), and links to it.
+
+   ``empty_window`` is an ``EmptyWindowView``. The link targets the FULL page,
+   not the HTMX partial, so the filter form reloads showing the window that is
+   actually being displayed instead of keeping the old dates on screen. #}
+
+<section class="bg-folio border border-linea p-4 sm:p-6" role="status"
+         aria-labelledby="empty-window-heading">
+  <h2 id="empty-window-heading" class="font-big-shoulders text-xl font-bold mb-2 text-ink">
+    Sin adjudicaciones en el período
+  </h2>
+
+  {% if empty_window.last_year %}
+    <p class="text-sm text-texto-sec">
+      No se encontró actividad registrada entre el {{ empty_window.window_label }}.
+    </p>
+    <p class="mt-3 text-sm text-ink">
+      El último año con actividad fue
+      <strong>{{ empty_window.last_year }}</strong>:
+      <strong>{{ empty_window.last_year_total_amount | uyu }} UYU</strong>
+      en {{ empty_window.last_year_purchase_count | count_uy }} adjudicaciones.
+    </p>
+    <p class="mt-3">
+      <a href="{{ empty_window.last_year_url }}"
+         class="font-ibm-plex-mono text-xs uppercase tracking-wider text-sello hover:underline">
+        Ver el año {{ empty_window.last_year }} &rarr;
+      </a>
+    </p>
+  {% else %}
+    <p class="text-sm text-texto-sec">
+      No se encontró actividad registrada para esta entidad en ningún período.
+    </p>
+  {% endif %}
+</section>
