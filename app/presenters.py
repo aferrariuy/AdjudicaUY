@@ -116,7 +116,11 @@ def _build_breadcrumb_json_ld(
     **except the last one**, where ``item`` may be omitted and the containing
     page's URL is used instead; it also requires at least two items, so a shorter
     trail is rejected here rather than published as markup that can never be
-    eligible. Its
+    eligible. Raising is deliberate: both call sites pass exactly two levels, so a
+    shorter trail is a programming error rather than user input, and no request can
+    produce one. Failing loudly is the cheaper failure — the alternative is publishing
+    ineligible markup that nothing reports, which is how this docstring came to state
+    a two-item rule the code did not enforce. Its
     guidelines recommend a trail that follows a real user path rather than
     mirroring the URL structure, which is why the trail here is
     "Inicio > <page>": an intermediate "Organismos" level would need a URL of

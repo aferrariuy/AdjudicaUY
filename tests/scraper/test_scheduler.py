@@ -703,3 +703,32 @@ def test_run_survives_a_failing_indexnow_notification(
     scheduler._run()
 
     assert json.loads(last_run.read_text())["record_count"] == 7
+
+
+def test_run_reports_a_failure_before_the_scrape_starts(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+) -> None:
+    """Resolving the scraped day fails inside the guard, not outside it.
+
+    ``scrape_day()`` is the first thing ``_run`` does, and it sits inside the guard
+    whose log line names a failed run. A failure there is therefore reported like any
+    other instead of escaping into the scheduler loop, and no last-run marker is
+    written for a run that never scraped. Moving the call back out of the guard is the
+    regression this covers.
+    """
+
+    last_run = tmp_path / "last-run.json"
+    monkeypatch.setenv("WORKER_LAST_RUN_FILE", str(last_run))
+
+    def _boom() -> date:
+        raise RuntimeError("no timezone database")
+
+    monkeypatch.setattr(scheduler, "scrape_day", _boom)
+
+    with caplog.at_level(logging.ERROR):
+        scheduler._run()
+
+    assert "Scheduled scrape failed" in caplog.text
+    assert not last_run.exists()

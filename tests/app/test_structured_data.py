@@ -66,8 +66,14 @@ def _visible_trail(html: str) -> list[str]:
 # ── The builder ────────────────────────────────────────────────────────
 
 
-def test_breadcrumb_builder_accepts_the_two_item_trail_the_routes_pass() -> None:
-    """The trail both call sites build is accepted, complete and well formed."""
+def test_breadcrumb_builder_wraps_the_trail_in_a_breadcrumb_list() -> None:
+    """The envelope is the part only this test covers.
+
+    The element shape — positions, names, where ``item`` appears — is pinned by the
+    tests below, so this one asserts the ``@context``/``@type`` pair that makes the
+    node machine-readable and the element count that matches the two-level trail both
+    call sites build.
+    """
 
     from app.presenters import _build_breadcrumb_json_ld
 

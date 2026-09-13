@@ -44,7 +44,20 @@ TODAY = date(2026, 9, 13)
 
 
 def _iso(days_ago: int) -> str:
+    """A date ``days_ago`` before the real today, for the HTTP-level tests.
+
+    Those go through the routes, which read the real clock, so anchoring to the real
+    today keeps the span exact whenever the suite runs. The unit tests below inject
+    :data:`TODAY` instead — a fixed date would drift out of the cap eventually.
+    """
+
     return (date.today() - timedelta(days=days_ago)).isoformat()
+
+
+def _iso_before(days_ago: int) -> str:
+    """A date ``days_ago`` before :data:`TODAY`, paired with ``today=TODAY``."""
+
+    return (TODAY - timedelta(days=days_ago)).isoformat()
 
 
 # ── The pure helper ────────────────────────────────────────────────────
@@ -94,29 +107,31 @@ def test_single_sided_from_beyond_the_cap_is_rejected() -> None:
     """The gap this change closes: 1990 → today is not a range to compute."""
 
     with pytest.raises(DateValidationError, match="5 años"):
-        validate_date_params({"date_from": _iso(MAX_DATE_RANGE_DAYS + 1)})
+        validate_date_params(
+            {"date_from": _iso_before(MAX_DATE_RANGE_DAYS + 1)}, today=TODAY
+        )
 
 
 def test_single_sided_from_within_the_cap_is_accepted() -> None:
-    validate_date_params({"date_from": _iso(365)})
+    validate_date_params({"date_from": _iso_before(365)}, today=TODAY)
 
 
 def test_single_sided_from_at_the_cap_boundary_is_accepted() -> None:
-    validate_date_params({"date_from": _iso(MAX_DATE_RANGE_DAYS)})
+    validate_date_params({"date_from": _iso_before(MAX_DATE_RANGE_DAYS)}, today=TODAY)
 
 
 def test_single_sided_to_is_always_within_the_cap() -> None:
     """A lone 'hasta' is anchored at the cap, so its span can never exceed it."""
 
     for days_ago in (0, 365, 3650, 36500):
-        validate_date_params({"date_to": _iso(days_ago)})
+        validate_date_params({"date_to": _iso_before(days_ago)}, today=TODAY)
 
 
 def test_rejection_message_tells_the_user_what_to_change() -> None:
     """A one-sided rejection must not read like a two-sided one."""
 
     with pytest.raises(DateValidationError) as excinfo:
-        validate_date_params({"date_from": "1990-01-01"})
+        validate_date_params({"date_from": "1990-01-01"}, today=TODAY)
 
     message = str(excinfo.value)
     assert "5 años" in message
@@ -125,19 +140,23 @@ def test_rejection_message_tells_the_user_what_to_change() -> None:
 
 def test_two_sided_rejection_keeps_the_original_message() -> None:
     with pytest.raises(DateValidationError, match="5 años") as excinfo:
-        validate_date_params({"date_from": "1990-01-01", "date_to": "2026-01-01"})
+        validate_date_params(
+            {"date_from": "1990-01-01", "date_to": "2026-01-01"}, today=TODAY
+        )
 
     assert "Hasta'" not in str(excinfo.value)
 
 
 def test_unparseable_date_still_rejected() -> None:
     with pytest.raises(DateValidationError, match="Formato de fecha inválido"):
-        validate_date_params({"date_from": "not-a-date"})
+        validate_date_params({"date_from": "not-a-date"}, today=TODAY)
 
 
 def test_reversed_range_still_rejected() -> None:
     with pytest.raises(DateValidationError, match="posterior"):
-        validate_date_params({"date_from": "2025-12-01", "date_to": "2025-01-01"})
+        validate_date_params(
+            {"date_from": "2025-12-01", "date_to": "2025-01-01"}, today=TODAY
+        )
 
 
 # ── Materialization into the filters ───────────────────────────────────
@@ -146,16 +165,16 @@ def test_reversed_range_still_rejected() -> None:
 def test_filters_materialize_the_missing_upper_bound() -> None:
     """The requested window is what reaches the query, so it is bounded."""
 
-    filters = filters_from_query_params({"date_from": _iso(365)})
+    filters = filters_from_query_params({"date_from": _iso_before(365)}, today=TODAY)
 
-    assert filters.date_from == date.today() - timedelta(days=365)
-    assert filters.date_to == date.today()
+    assert filters.date_from == TODAY - timedelta(days=365)
+    assert filters.date_to == TODAY
 
 
 def test_filters_materialize_the_missing_lower_bound() -> None:
     """This is the regression guard for the 13s uncapped query."""
 
-    filters = filters_from_query_params({"date_to": "2023-12-31"})
+    filters = filters_from_query_params({"date_to": "2023-12-31"}, today=TODAY)
 
     assert filters.date_to == date(2023, 12, 31)
     assert filters.date_from == date(2023, 12, 31) - timedelta(days=MAX_DATE_RANGE_DAYS)
@@ -163,7 +182,7 @@ def test_filters_materialize_the_missing_lower_bound() -> None:
 
 def test_filters_leave_a_two_sided_window_alone() -> None:
     filters = filters_from_query_params(
-        {"date_from": "2024-01-01", "date_to": "2024-12-31"}
+        {"date_from": "2024-01-01", "date_to": "2024-12-31"}, today=TODAY
     )
 
     assert (filters.date_from, filters.date_to) == (
@@ -176,12 +195,12 @@ def test_every_served_window_is_bounded() -> None:
     """No input shape produces an open-ended window any more."""
 
     cases: list[dict[str, str | None]] = [
-        {"date_from": _iso(365)},
-        {"date_to": _iso(365)},
-        {"date_from": _iso(365), "date_to": _iso(30)},
+        {"date_from": _iso_before(365)},
+        {"date_to": _iso_before(365)},
+        {"date_from": _iso_before(365), "date_to": _iso_before(30)},
     ]
     for params in cases:
-        filters = filters_from_query_params(params)
+        filters = filters_from_query_params(params, today=TODAY)
         assert filters.date_from is not None, params
         assert filters.date_to is not None, params
         span = (filters.date_to - filters.date_from).days
@@ -245,3 +264,51 @@ def test_missing_lower_bound_is_visible_in_the_filter_form(client: Any) -> None:
     assert response.status_code == 200
     expected_from = date(2023, 12, 31) - timedelta(days=MAX_DATE_RANGE_DAYS)
     assert f'value="{expected_from.isoformat()}"' in response.text
+
+
+# ── The injected clock ─────────────────────────────────────────────────
+
+
+def test_validation_measures_the_cap_against_the_injected_day() -> None:
+    """The same window flips verdicts when only ``today`` changes.
+
+    This is what makes the parameter a real seam rather than a decoration: the cap is
+    measured against the day it is handed, so a caller that pins it gets a verdict that
+    cannot move with the wall clock.
+    """
+
+    # 1826 days before TODAY is over the cap. The same date fits inside it when the
+    # clock it is measured against moves 30 days *earlier* — the span shrinks as the
+    # anchor recedes, so the direction matters and is the point of the test.
+    params: dict[str, str | None] = {"date_from": _iso_before(MAX_DATE_RANGE_DAYS + 1)}
+
+    with pytest.raises(DateValidationError, match="5 años"):
+        validate_date_params(params, today=TODAY)
+
+    validate_date_params(params, today=TODAY - timedelta(days=30))
+
+
+def test_materialization_anchors_on_the_injected_day() -> None:
+    """The window is anchored on the day the caller pinned, not on the real one.
+
+    The pinned day is deliberately one the wall clock will never read, which is what
+    makes the assertion able to fail. An earlier version of this test pinned
+    :data:`TODAY` — the date the suite happened to run on — so an implementation that
+    ignored the argument and read ``date.today()`` produced the same value and stayed
+    green.
+    """
+
+    pinned = date(2019, 1, 1)
+    assert pinned != date.today(), "pick a day the wall clock cannot be reading"
+
+    filters = filters_from_query_params({"date_from": "2018-01-01"}, today=pinned)
+
+    assert filters.date_to == pinned
+
+
+def test_omitting_the_clock_reads_the_real_one() -> None:
+    """The parameter is optional, and its absence means "read the clock now"."""
+
+    filters = filters_from_query_params({"date_from": "2024-01-01"})
+
+    assert filters.date_to == date.today()
