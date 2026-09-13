@@ -8,10 +8,16 @@ startup rather than producing a confusing runtime error later.
 from __future__ import annotations
 
 import os
+import re
 from urllib.parse import urlparse
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# IndexNow accepts 8-128 characters from the alphanumeric set plus the hyphen.
+# The key doubles as a filename (``/<key>.txt``), so anything outside that set
+# would produce a path the route could not serve.
+_INDEXNOW_KEY_PATTERN = re.compile(r"[A-Za-z0-9-]{8,128}")
 
 
 def _is_test_mode() -> bool:
@@ -130,6 +136,37 @@ class Settings(BaseSettings):
             "genuinely does not support HTTPS."
         ),
     )
+
+    # IndexNow
+    indexnow_key: str | None = Field(
+        default=None,
+        description=(
+            "IndexNow key. When set, the worker announces the pages a successful "
+            "scrape touched and the app serves the key at /{key}.txt so IndexNow "
+            "can verify domain ownership. Unset (the default) keeps the feature "
+            "off: nothing is submitted and no key file is served. Must be "
+            "8-128 characters from [A-Za-z0-9-]."
+        ),
+    )
+
+    @field_validator("indexnow_key", mode="before")
+    @classmethod
+    def _normalize_indexnow_key(cls, value: str | None) -> str | None:
+        """Normalize the optional IndexNow key, treating blank as unset.
+
+        A deployment commonly declares the variable while leaving it empty, to
+        keep it visible in a compose file or an env template. That must disable
+        the feature rather than serve an empty key file, which could never verify.
+        """
+
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        if not _INDEXNOW_KEY_PATTERN.fullmatch(stripped):
+            raise ValueError("INDEXNOW_KEY must be 8-128 characters from [A-Za-z0-9-]")
+        return stripped
 
     @field_validator("source_a_base_url", mode="before")
     @classmethod

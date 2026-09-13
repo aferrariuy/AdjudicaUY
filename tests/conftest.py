@@ -45,6 +45,10 @@ _TEST_ENV: dict[str, str] = {
         "https://cotizaciones.bcu.gub.uy/wscotizaciones/servlet/awsbcucotizaciones"
     ),
     "CACHE_TTL_SECONDS": "600",
+    # Declared empty rather than absent so the test suite is deterministic even
+    # on a checkout whose .env turns IndexNow on: a blank value means "unset", so
+    # the feature stays off unless a test opts in.
+    "INDEXNOW_KEY": "",
     "CACHE_MAX_ENTRIES": "256",
 }
 

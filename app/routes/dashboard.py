@@ -30,6 +30,7 @@ from app.routes.common import (
     _stream_csv_response,
     _validation_error_response,
 )
+from app.services.catalog import catalog_date_span
 from app.services.dashboard import (
     concentration_ratio,
     distinct_organisms,
@@ -221,6 +222,15 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
         # browser state.
         return RedirectResponse(url=f"?page={result.redirect_page}", status_code=302)
 
+    # The catalogue-wide publication span, cached under a single entry because
+    # it does not depend on the request's filters. It dates the Dataset node.
+    date_span = cached_aggregate(
+        "catalog_date_span",
+        lambda session, _filters: catalog_date_span(session),
+        db,
+        AdjudicationFilters(),
+    )
+
     return _render(
         "index.html",
         request,
@@ -233,7 +243,7 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
                 ),
                 og_type="website",
                 path="/",
-                dataset=_build_catalog_dataset_json_ld(),
+                dataset=_build_catalog_dataset_json_ld(date_span=date_span),
             ),
             **result.context,
         },

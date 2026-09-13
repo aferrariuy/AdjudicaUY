@@ -21,7 +21,9 @@ The formatters here are used in two places:
 This module is also the canonical home for pure display/link helpers
 shared by the listing service and the scraper normalizer:
 ``display_currency`` and ``build_license_link``, plus the currency
-lookup tables they depend on.
+lookup tables they depend on. ``organism_path`` and ``company_path``
+live here too: the sitemap and the IndexNow notifier both need the
+canonical entity URLs, and one definition keeps them identical.
 
 Negative numbers are formatted with a leading minus (the dashboard
 never emits a negative sum today, but the helper tolerates them
@@ -123,6 +125,31 @@ def build_license_link(id_compra: str) -> str:
     """
 
     return _LICENSE_LINK_TEMPLATE.format(id_compra=quote(id_compra, safe=""))
+
+
+def organism_path(name: str) -> str:
+    """Build the canonical path of an organism page.
+
+    Shared by the sitemap and the IndexNow notifier so the URL a crawler is
+    handed by one is byte-identical to the URL the other advertises; two copies
+    of this format would drift. The name is URL-encoded for the same reason
+    ``build_license_link`` encodes its identifier: a scraped value must not be
+    able to break out of the path segment. Note that encoding also means the
+    result can never contain ``<``, ``&`` or ``>``, which is why interpolating
+    it into XML needs no further escaping.
+    """
+
+    return f"/organism/{quote(name, safe='')}"
+
+
+def company_path(company_type: str, company_number: str) -> str:
+    """Build the canonical path of a company page.
+
+    Both document segments are encoded independently: the identity is the pair,
+    so neither half may be allowed to swallow the separator between them.
+    """
+
+    return f"/company/{quote(company_type, safe='')}/{quote(company_number, safe='')}"
 
 
 def _integer_grouped(value: Number) -> str:
@@ -247,9 +274,11 @@ __all__ = [
     "NON_CONVERTIBLE_TABLE",
     "PASSTHROUGH_TABLE",
     "build_license_link",
+    "company_path",
     "display_currency",
     "format_uyu",
     "format_count",
     "format_percent",
     "format_percent_adaptive",
+    "organism_path",
 ]

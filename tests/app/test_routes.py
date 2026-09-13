@@ -400,6 +400,9 @@ def test_dashboard_aggregate_routes_use_the_query_cache(
     if path == "/":
         expected_names.append("distinct_organisms")
     expected_names += ["monthly_trend", "concentration_ratio"]
+    if path == "/":
+        # The index dates its Dataset node, so it reads the catalogue span too.
+        expected_names.append("catalog_date_span")
 
     with (
         patch(

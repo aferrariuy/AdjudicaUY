@@ -138,17 +138,25 @@ def _build_breadcrumb_json_ld(
     }
 
 
-def _build_catalog_dataset_json_ld() -> dict[str, Any]:
+def _build_catalog_dataset_json_ld(
+    *,
+    date_span: tuple[date | None, date | None] | None = None,
+) -> dict[str, Any]:
     """Build the ``Dataset`` node describing the whole catalogue.
 
     Google requires only ``name`` and ``description`` (50-5000 characters);
     everything else comes from its recommended list and is stated only where
-    the project can back it up. Two deliberate omissions:
+    the project can back it up. One deliberate omission remains:
 
     * no ``license`` — the project declares none, and publishing terms it does
-      not grant would misrepresent how the data may be reused;
-    * no ``temporalCoverage`` — the span has not been measured yet, and an
-      assumed one would be a guess published as fact.
+      not grant would misrepresent how the data may be reused.
+
+    ``date_span`` is the catalogue's oldest and newest publication date, read
+    from the same query that dates the sitemap, so the two can never disagree.
+    It becomes ``temporalCoverage`` only when both ends are known: an unmeasured
+    or half-open span stays unasserted, because a guessed span published as fact
+    is worse than an absent property. The interval uses schema.org's ISO 8601
+    ``start/end`` form.
 
     The ``distribution`` points at the CSV export. That endpoint answers
     ``X-Robots-Tag: noindex`` (it is a download, not a page), which is
@@ -157,7 +165,13 @@ def _build_catalog_dataset_json_ld() -> dict[str, Any]:
     """
 
     site_url = get_settings().site_url
-    return {
+    coverage: str | None = None
+    if date_span is not None:
+        start, end = date_span
+        if start is not None and end is not None:
+            coverage = f"{start.isoformat()}/{end.isoformat()}"
+
+    node: dict[str, Any] = {
         "@context": "https://schema.org",
         "@type": "Dataset",
         "name": "Adjudicaciones del Estado uruguayo",
@@ -201,6 +215,9 @@ def _build_catalog_dataset_json_ld() -> dict[str, Any]:
             }
         ],
     }
+    if coverage is not None:
+        node["temporalCoverage"] = coverage
+    return node
 
 
 def _build_seo_context(

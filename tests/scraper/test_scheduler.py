@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock
@@ -540,3 +541,109 @@ def test_heartbeat_is_fresh_strict_boundary(
     # A custom threshold keeps the same strict boundary.
     os.utime(heartbeat, (now - 100.0, now - 100.0))
     assert scheduler._heartbeat_is_fresh(str(heartbeat), threshold=100.0) is False
+
+
+# ---------------------------------------------------------------------------
+# IndexNow notification after a successful scrape
+# ---------------------------------------------------------------------------
+
+
+class _SettingsStub:
+    """The two settings fields the notifier reads."""
+
+    def __init__(self, *, indexnow_key: str | None) -> None:
+        self.indexnow_key = indexnow_key
+        self.site_url = "https://adjudica.test"
+
+
+def _run_with_indexnow(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    key: str | None,
+    entities: tuple[list[str], list[tuple[str, str]]] = (["ANEP"], [("RUT", "1")]),
+) -> list[dict[str, object]]:
+    """Drive one ``_run()`` and return the submission calls it produced."""
+
+    submissions: list[dict[str, object]] = []
+
+    def _record(urls: list[str], *, site_url: str, key: str) -> Mock:
+        submissions.append({"urls": list(urls), "site_url": site_url, "key": key})
+        return Mock(status="submitted", url_count=len(urls), dropped_count=0)
+
+    monkeypatch.setenv("WORKER_LAST_RUN_FILE", str(tmp_path / "last-run.json"))
+    monkeypatch.setattr(scheduler, "run_scrape", lambda: 7)
+    monkeypatch.setattr(
+        scheduler, "get_settings", lambda: _SettingsStub(indexnow_key=key)
+    )
+    # The entity query is patched, so the session is never read: an empty
+    # context manager stands in for it instead of a hand-written double.
+    monkeypatch.setattr(scheduler, "get_session_factory", lambda: nullcontext)
+    monkeypatch.setattr(
+        scheduler,
+        "entities_active_between",
+        lambda session, *, start_date, end_date: entities,
+    )
+    monkeypatch.setattr(scheduler, "submit_urls", _record)
+
+    scheduler._run()
+    return submissions
+
+
+def test_run_notifies_indexnow_with_the_urls_the_scrape_touched(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The index plus every page the run touched is announced once."""
+
+    submissions = _run_with_indexnow(monkeypatch, tmp_path, key="0123456789abcdef")
+
+    assert len(submissions) == 1
+    assert submissions[0]["urls"] == [
+        "https://adjudica.test/",
+        "https://adjudica.test/organism/ANEP",
+        "https://adjudica.test/company/RUT/1",
+    ]
+    assert submissions[0]["site_url"] == "https://adjudica.test"
+    assert submissions[0]["key"] == "0123456789abcdef"
+
+
+def test_run_skips_indexnow_when_no_key_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """An unconfigured key leaves the feature off and touches no database."""
+
+    assert _run_with_indexnow(monkeypatch, tmp_path, key=None) == []
+
+
+def test_run_survives_a_failing_indexnow_notification(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A search engine being unreachable never turns a good scrape into a failure.
+
+    The notification is a courtesy hint layered on a completed scrape. If it could
+    propagate, a search-engine outage would look like a data-loss incident.
+    """
+
+    last_run = tmp_path / "last-run.json"
+    monkeypatch.setenv("WORKER_LAST_RUN_FILE", str(last_run))
+    monkeypatch.setattr(scheduler, "run_scrape", lambda: 7)
+    monkeypatch.setattr(
+        scheduler,
+        "get_settings",
+        lambda: _SettingsStub(indexnow_key="0123456789abcdef"),
+    )
+    # The entity query is patched, so the session is never read: an empty
+    # context manager stands in for it instead of a hand-written double.
+    monkeypatch.setattr(scheduler, "get_session_factory", lambda: nullcontext)
+
+    def _boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("database is on fire")
+
+    monkeypatch.setattr(scheduler, "entities_active_between", _boom)
+
+    scheduler._run()
+
+    assert json.loads(last_run.read_text())["record_count"] == 7

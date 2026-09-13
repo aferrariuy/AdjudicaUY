@@ -33,6 +33,7 @@ _CACHEABLE_AGGREGATES = frozenset(
         "company_competitors",
         "company_summary",
         "top_articles",
+        "catalog_date_span",
         "sitemap_xml",
     }
 )

@@ -17,7 +17,6 @@ import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import quote
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import Response
@@ -29,18 +28,26 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.config import get_settings, trusted_host_allowlist
 from app.database import get_db, get_engine
 from app.formatting import (
+    company_path,
     format_count,
     format_percent,
     format_percent_adaptive,
     format_uyu,
+    organism_path,
 )
 from app.routes import router
 from app.routes._base import HeadAwareAPIRoute
-from app.services.catalog import all_companies, all_organisms
+from app.services.catalog import (
+    catalog_date_span,
+    companies_with_last_activity,
+    organisms_with_last_activity,
+)
 from app.services.filters import AdjudicationFilters
 from app.services.query_cache import cached_aggregate
 
 if TYPE_CHECKING:
+    from datetime import date
+
     from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -127,6 +134,19 @@ async def lifespan(app: FastAPI):
     logger.info("Application shutdown")
 
 
+def _url_entry(url: str, lastmod: date | None) -> str:
+    """Render one ``<url>`` element, with ``<lastmod>`` when a date is known.
+
+    ``url`` needs no XML escaping: it is built with ``quote(..., safe="")``, so it
+    cannot contain ``&``, ``<`` or ``>`` (see :func:`app.formatting.organism_path`).
+    A date is an ``isoformat`` output and is safe by construction.
+    """
+
+    if lastmod is None:
+        return f"  <url><loc>{url}</loc></url>"
+    return f"  <url><loc>{url}</loc><lastmod>{lastmod.isoformat()}</lastmod></url>"
+
+
 def _build_sitemap_body(session: Session, site_url: str) -> str:
     """Build the complete sitemap XML body from the unfiltered catalogs.
 
@@ -134,19 +154,30 @@ def _build_sitemap_body(session: Session, site_url: str) -> str:
     ``sitemap_xml`` aggregate so a warm response is byte-identical and
     performs no catalog queries. The URL set, order, quoting, XML
     declaration, namespace, and indentation mirror the original route.
+
+    Every URL carries the newest publication date recorded for that page, which
+    is what a crawler uses to decide when to come back. Dating each page on its
+    own is the point: a single catalogue-wide date would claim all ~28.7k pages
+    changed whenever any page did, which is worse than publishing no date.
+    ``catalog_date_span`` is read directly rather than through
+    ``cached_aggregate`` — the whole body is already cached, so it runs only on a
+    cold body. A URL with no known date omits ``<lastmod>`` entirely: an empty
+    catalogue has nothing to date, and an unmeasured span must stay unasserted.
     """
 
-    organisms = all_organisms(session)
-    companies = all_companies(session)
-    urls = [f"{site_url}/"]
-    for name in organisms:
-        urls.append(f"{site_url}/organism/{quote(name, safe='')}")
-    for company_type, company_number in companies:
-        urls.append(
-            f"{site_url}/company/{quote(company_type, safe='')}/"
-            f"{quote(company_number, safe='')}"
-        )
-    url_entries = "\n".join(f"  <url><loc>{url}</loc></url>" for url in urls)
+    entries: list[tuple[str, date | None]] = [
+        (f"{site_url}/", catalog_date_span(session)[1])
+    ]
+    entries.extend(
+        (f"{site_url}{organism_path(name)}", lastmod)
+        for name, lastmod in organisms_with_last_activity(session)
+    )
+    company_urls = companies_with_last_activity(session)
+    entries.extend(
+        (f"{site_url}{company_path(company_type, company_number)}", lastmod)
+        for company_type, company_number, lastmod in company_urls
+    )
+    url_entries = "\n".join(_url_entry(url, lastmod) for url, lastmod in entries)
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
@@ -284,6 +315,19 @@ def create_app() -> FastAPI:
 
         body = f"User-agent: *\nAllow: /\nSitemap: {settings.site_url}/sitemap.xml\n"
         return Response(content=body, media_type="text/plain")
+
+    if settings.indexnow_key:
+        # IndexNow verifies domain ownership by fetching the key back from a file
+        # at the site root, so this route exists only when a key is configured.
+        # Registering it unconditionally would serve an empty body on an
+        # unconfigured deployment: a file that cannot verify anything.
+        indexnow_key = settings.indexnow_key
+
+        @app.get(f"/{indexnow_key}.txt", include_in_schema=False)
+        async def indexnow_key_file() -> Response:
+            """Serve the IndexNow key so the endpoint can verify ownership."""
+
+            return Response(content=indexnow_key, media_type="text/plain")
 
     @app.get("/sitemap.xml", include_in_schema=False)
     async def sitemap_xml(db=Depends(get_db)) -> Response:  # noqa: ANN001

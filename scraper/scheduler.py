@@ -28,10 +28,15 @@ import os
 import signal
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import schedule
 
+from app.config import get_settings
+from app.database import get_session_factory
+from app.formatting import company_path, organism_path
+from app.services.catalog import entities_active_between
+from scraper.indexnow import submit_urls
 from scraper.main import _configure_logging, run_scrape
 
 logger = logging.getLogger(__name__)
@@ -146,6 +151,51 @@ def _parse_schedule_component(
     return value
 
 
+def _notify_indexnow() -> None:
+    """Announce the pages the finished scrape touched, best-effort.
+
+    The notification is a courtesy hint to search engines, so it is deliberately
+    isolated from the run's outcome: a missing key, an unreachable endpoint or a
+    database hiccup is logged and swallowed. A scrape that stored its records must
+    never be reported as failed because a search engine was unavailable.
+
+    The window is assumed to be today, matching ``run_scrape``'s default of
+    scraping the current day. A run that crosses midnight could notify a slightly
+    stale window, which costs nothing: IndexNow is a hint, and the sitemap carries
+    the authoritative per-page dates.
+    """
+
+    try:
+        settings = get_settings()
+        if not settings.indexnow_key:
+            return
+
+        today = date.today()
+        with get_session_factory()() as session:
+            organisms, companies = entities_active_between(
+                session, start_date=today, end_date=today
+            )
+        urls = [
+            f"{settings.site_url}/",
+            *(f"{settings.site_url}{organism_path(name)}" for name in organisms),
+            *(
+                f"{settings.site_url}{company_path(company_type, company_number)}"
+                for company_type, company_number in companies
+            ),
+        ]
+        result = submit_urls(
+            urls, site_url=settings.site_url, key=settings.indexnow_key
+        )
+        logger.info(
+            "IndexNow notification: status=%s urls=%d dropped=%d",
+            result.status,
+            result.url_count,
+            result.dropped_count,
+        )
+    except Exception:
+        logger.exception("IndexNow notification failed")
+
+
 def _run() -> None:
     """Run one scheduled scrape, recording a last-run marker on success."""
     try:
@@ -160,6 +210,11 @@ def _run() -> None:
         _write_last_run(path, inserted)
     except Exception:
         logger.exception("Last-run marker write failed at %s", path)
+
+    # After the marker: the notification can spend ~13s in retries, and the marker
+    # is the signal an operator reads, so it must not wait on a courtesy call to a
+    # search engine.
+    _notify_indexnow()
 
 
 def main() -> None:

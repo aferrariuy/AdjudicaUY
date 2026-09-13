@@ -114,3 +114,52 @@ def test_cache_max_entries_requires_at_least_one(base_env, monkeypatch: Any) -> 
     monkeypatch.setenv("CACHE_MAX_ENTRIES", "0")
     with pytest.raises(ValueError):
         _make_settings()
+
+
+# ── IndexNow key ──────────────────────────────────────────────────────────
+
+
+def test_indexnow_key_defaults_to_none(base_env, monkeypatch: Any) -> None:
+    """The feature is off unless a deployment opts in."""
+
+    monkeypatch.delenv("INDEXNOW_KEY", raising=False)
+
+    assert _make_settings().indexnow_key is None
+
+
+def test_indexnow_key_blank_means_unset(base_env, monkeypatch: Any) -> None:
+    """A declared-but-empty variable disables the feature instead of half-enabling it.
+
+    Keeping the variable visible in a compose file or an env template while
+    leaving it empty is common; that must not serve an empty key file that could
+    never verify ownership.
+    """
+
+    for blank in ("", "   "):
+        monkeypatch.setenv("INDEXNOW_KEY", blank)
+
+        assert _make_settings().indexnow_key is None
+
+
+def test_indexnow_key_is_stripped(base_env, monkeypatch: Any) -> None:
+    """Surrounding whitespace does not reach the served file or the filename."""
+
+    monkeypatch.setenv("INDEXNOW_KEY", "  0123456789abcdef  ")
+
+    assert _make_settings().indexnow_key == "0123456789abcdef"
+
+
+def test_indexnow_key_rejects_values_the_route_could_not_serve(
+    base_env, monkeypatch: Any
+) -> None:
+    """The key doubles as a filename, so its shape is validated at startup.
+
+    Anything outside [A-Za-z0-9-] would produce a path the key route cannot serve,
+    and a key shorter than 8 characters is below what IndexNow accepts.
+    """
+
+    for invalid in ("short", "has spaces here", "bad!chars", "x" * 129):
+        monkeypatch.setenv("INDEXNOW_KEY", invalid)
+
+        with pytest.raises(ValueError):
+            _make_settings()

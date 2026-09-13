@@ -21,6 +21,7 @@ assert they cannot drift apart.
 from __future__ import annotations
 
 import json
+from datetime import date
 from typing import Any
 
 from bs4 import BeautifulSoup
@@ -255,8 +256,28 @@ def test_dataset_claims_no_license(client: Any) -> None:
     assert "license" not in block
 
 
-def test_dataset_claims_no_temporal_coverage_yet(client: Any) -> None:
-    """The span is not measured yet, so it is not asserted."""
+def test_dataset_claims_the_measured_temporal_coverage(
+    client: Any, make_adjudication: Any
+) -> None:
+    """The catalogue's real span, in schema.org's ISO 8601 ``start/end`` form.
+
+    The span was a deliberate omission while it was unmeasured, and a guessed one
+    would have been a fabrication. It is now read from the same query that dates
+    the sitemap, so publishing it costs nothing extra and stops being a guess.
+    """
+
+    make_adjudication(compra_overrides={"fecha_pub_adj": date(2021, 3, 4)})
+    make_adjudication(compra_overrides={"fecha_pub_adj": date(2026, 9, 13)})
+
+    block = _blocks_of_type(client.get("/").text, "Dataset")[0]
+
+    assert block["temporalCoverage"] == "2021-03-04/2026-09-13"
+
+
+def test_dataset_omits_temporal_coverage_on_an_empty_catalogue(
+    client: Any,
+) -> None:
+    """An unmeasured span stays unasserted rather than guessed."""
 
     block = _blocks_of_type(client.get("/").text, "Dataset")[0]
 

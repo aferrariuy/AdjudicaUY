@@ -7,6 +7,7 @@ organism pages.
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 # ---------------------------------------------------------------------------
@@ -152,11 +153,27 @@ def test_sitemap_warm_hit_is_byte_identical_and_skips_catalog_queries(
 
     from unittest.mock import patch
 
-    organisms = ["Ministerio de Salud", "ANEP"]
-    companies = [("RUT", "1"), ("RUT/X &", "00 1/2?")]
+    organisms = [
+        ("Ministerio de Salud", date(2024, 1, 15)),
+        ("ANEP", date(2023, 6, 1)),
+    ]
+    companies = [
+        ("RUT", "1", date(2022, 1, 2)),
+        ("RUT/X &", "00 1/2?", date(2021, 3, 4)),
+    ]
     with (
-        patch("app.main.all_organisms", return_value=organisms) as organisms_mock,
-        patch("app.main.all_companies", return_value=companies) as companies_mock,
+        patch(
+            "app.main.organisms_with_last_activity",
+            return_value=organisms,
+        ) as organisms_mock,
+        patch(
+            "app.main.companies_with_last_activity",
+            return_value=companies,
+        ) as companies_mock,
+        patch(
+            "app.main.catalog_date_span",
+            return_value=(date(2020, 1, 1), date(2026, 9, 13)),
+        ),
     ):
         first = client.get("/sitemap.xml")
         second = client.get("/sitemap.xml")
@@ -181,8 +198,18 @@ def test_sitemap_expiry_regenerates_catalog(monkeypatch, client: Any) -> None:
     now = [100.0]
     monkeypatch.setattr("app.services.query_cache.time.monotonic", lambda: now[0])
     with (
-        patch("app.main.all_organisms", return_value=["Org A"]) as organisms_mock,
-        patch("app.main.all_companies", return_value=[("RUT", "1")]) as companies_mock,
+        patch(
+            "app.main.organisms_with_last_activity",
+            return_value=[("Org A", date(2024, 1, 15))],
+        ) as organisms_mock,
+        patch(
+            "app.main.companies_with_last_activity",
+            return_value=[("RUT", "1", date(2022, 1, 2))],
+        ) as companies_mock,
+        patch(
+            "app.main.catalog_date_span",
+            return_value=(date(2020, 1, 1), date(2026, 9, 13)),
+        ),
     ):
         first = client.get("/sitemap.xml")
         now[0] = 699.9  # still inside the 600s TTL.
@@ -221,8 +248,18 @@ def test_sitemap_zero_ttl_disables_storage_and_advertises_max_age_0(
 
     app.dependency_overrides[get_db] = _override_get_db
     with (
-        patch("app.main.all_organisms", return_value=["Org A"]) as organisms_mock,
-        patch("app.main.all_companies", return_value=[("RUT", "1")]) as companies_mock,
+        patch(
+            "app.main.organisms_with_last_activity",
+            return_value=[("Org A", date(2024, 1, 15))],
+        ) as organisms_mock,
+        patch(
+            "app.main.companies_with_last_activity",
+            return_value=[("RUT", "1", date(2022, 1, 2))],
+        ) as companies_mock,
+        patch(
+            "app.main.catalog_date_span",
+            return_value=(date(2020, 1, 1), date(2026, 9, 13)),
+        ),
         TestClient(app) as zero_ttl_client,
     ):
         first = zero_ttl_client.get("/sitemap.xml")
