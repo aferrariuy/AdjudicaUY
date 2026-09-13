@@ -24,6 +24,7 @@ import json
 from datetime import date
 from typing import Any
 
+import pytest
 from bs4 import BeautifulSoup
 
 ORGANISM = "Ministerio de Interior"
@@ -65,8 +66,8 @@ def _visible_trail(html: str) -> list[str]:
 # ── The builder ────────────────────────────────────────────────────────
 
 
-def test_breadcrumb_builder_requires_at_least_two_items() -> None:
-    """Google needs two ListItems for a breadcrumb trail to be eligible."""
+def test_breadcrumb_builder_accepts_the_two_item_trail_the_routes_pass() -> None:
+    """The trail both call sites build is accepted, complete and well formed."""
 
     from app.presenters import _build_breadcrumb_json_ld
 
@@ -74,7 +75,21 @@ def test_breadcrumb_builder_requires_at_least_two_items() -> None:
 
     assert node["@context"] == "https://schema.org"
     assert node["@type"] == "BreadcrumbList"
-    assert len(node["itemListElement"]) >= 2
+    assert len(node["itemListElement"]) == 2
+
+
+def test_breadcrumb_builder_rejects_a_trail_shorter_than_two_items() -> None:
+    """Google needs two ListItems, so a one-item trail is a caller bug.
+
+    The builder used to accept it and emit a trail that can never be eligible, while
+    its docstring claimed the two-item minimum. Failing here turns an invisible SEO
+    regression into a loud one.
+    """
+
+    from app.presenters import _build_breadcrumb_json_ld
+
+    with pytest.raises(ValueError, match="at least 2 items"):
+        _build_breadcrumb_json_ld([("Inicio", "/")])
 
 
 def test_breadcrumb_builder_positions_are_sequential_from_one() -> None:

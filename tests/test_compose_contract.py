@@ -44,17 +44,30 @@ def _worker_config() -> dict[str, Any]:
 
 
 def _documented_settings() -> set[str]:
-    """Return the ``Settings`` fields ``.env.example`` tells an operator to set.
+    """Return the ``Settings`` fields ``.env.example`` tells an operator about.
 
     ``.env.example`` is the operator-facing contract: it is where someone looks to
-    learn which knobs the deployment exposes. Commented-out lines are excluded,
-    since they document intent rather than an active invitation to set the value.
+    learn which knobs the deployment exposes. Both active assignments and commented
+    placeholders count, because a placeholder is still an invitation to set the value.
+    Matching only active lines made the contract shrinkable in the worst direction:
+    commenting a line out deleted the obligation, so the check could be silenced by an
+    edit to the very file it audits. ``SITE_URL`` and ``INDEXNOW_KEY`` are both
+    documented as placeholders and both must reach both containers.
+
+    The intersection with ``Settings.model_fields`` is what keeps the reachability
+    assertion below sound instead of over-broad. It drops Compose-only variables such
+    as ``POSTGRES_PASSWORD``, and it drops the worker-scoped knobs
+    (``SCRAPE_HOUR``, ``WORKER_HEARTBEAT_FILE``, ...) because the scheduler reads those
+    with ``os.environ`` directly rather than through ``Settings``.
     """
 
+    # Imported lazily, and only for ``model_fields``: ``app/config.py`` builds the
+    # ``Settings`` class at import and instantiates nothing, so this reads field names
+    # without resolving any environment value.
     from app.config import Settings
 
     documented = set(
-        re.findall(r"^([A-Z0-9_]+)=", ENV_EXAMPLE_PATH.read_text(), re.MULTILINE)
+        re.findall(r"^#?\s*([A-Z0-9_]+)=", ENV_EXAMPLE_PATH.read_text(), re.MULTILINE)
     )
     return documented & {name.upper() for name in Settings.model_fields}
 
@@ -130,14 +143,51 @@ def test_every_documented_setting_is_wired_into_both_containers() -> None:
         assert missing == [], f"the {service} container cannot receive {missing}"
 
 
-def test_indexnow_key_is_wired_with_a_blank_safe_default() -> None:
-    """Both containers receive the key, defaulting to empty when unset.
+def _compose_fallback(expression: str) -> str:
+    """Return the value Compose substitutes for ``${NAME:-fallback}`` when unset."""
 
-    The explicit empty default matters: without it Compose warns about an unset
-    variable, and with it an unconfigured deployment passes ``""``, which the
-    settings validator treats as "off".
+    match = re.fullmatch(r"\$\{([A-Z0-9_]+):-(.*)\}", expression)
+    assert match is not None, f"not a defaulted Compose substitution: {expression!r}"
+    return match.group(2)
+
+
+def test_indexnow_key_reaches_both_containers_with_a_blank_default() -> None:
+    """Both containers receive the key, and an unset one resolves to blank.
+
+    Asserting the *resolved* fallback rather than the literal expression is what makes
+    this test about the behaviour instead of about the spelling. The chain it relies on:
+    an operator who never set the key gets ``""`` in both containers, and ``Settings``
+    reads a blank key as unset, so the feature stays off
+    (``tests/app/test_config.py::test_indexnow_key_blank_means_unset``). Without an
+    explicit default Compose warns and passes nothing at all.
     """
 
     for service in ("app", "worker"):
         environment = _service_config(service)["environment"]
-        assert environment["INDEXNOW_KEY"] == "${INDEXNOW_KEY:-}"
+        assert _compose_fallback(environment["INDEXNOW_KEY"]) == ""
+
+
+def test_worker_scoped_knobs_are_not_settings_fields() -> None:
+    """The reachability assertion is sound only while these stay outside ``Settings``.
+
+    ``test_every_documented_setting_is_wired_into_both_containers`` demands every
+    documented ``Settings`` field in *both* containers, which is correct rather than
+    over-broad: both processes construct ``Settings`` (``app.main`` and both scraper
+    entry points call ``get_settings``), so a field one of them reads must be in both.
+    The worker-only knobs are wired into ``worker`` alone but bypass ``Settings``
+    entirely, which is why the filter excludes them. Promoting one to a ``Settings``
+    field would make it genuinely required in both, and this test is what reports that
+    instead of leaving the reachability loop to fail confusingly.
+    """
+
+    from app.config import Settings
+
+    fields = {name.upper() for name in Settings.model_fields}
+    worker_scoped = {
+        "SCRAPE_HOUR",
+        "SCRAPE_MINUTE",
+        "WORKER_HEARTBEAT_FILE",
+        "WORKER_LAST_RUN_FILE",
+    }
+
+    assert worker_scoped & fields == set()

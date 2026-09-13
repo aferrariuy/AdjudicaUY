@@ -194,11 +194,13 @@ def test_rejected_response_fails_without_raising() -> None:
 
 
 def test_transport_error_fails_without_raising(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A network error is reported, never propagated into the scrape."""
+    """A network error is retried, reported, and never propagated into the scrape."""
 
     monkeypatch.setattr(retry_module.time, "sleep", lambda _seconds: None)
+    call_log: list[httpx.Request] = []
 
     def _handler(request: httpx.Request) -> httpx.Response:
+        call_log.append(request)
         raise httpx.ConnectError("connection refused", request=request)
 
     transport = httpx.MockTransport(_handler)
@@ -213,6 +215,10 @@ def test_transport_error_fails_without_raising(monkeypatch: pytest.MonkeyPatch) 
     assert result.status == "failed"
     assert result.url_count == 0
     assert result.detail is not None
+    # The backoff schedule is 1s/3s/9s, so a transient transport failure is attempted
+    # once plus three retries. The count is the only thing that makes this test about
+    # the retry at all: without it, deleting retry_with_backoff keeps it green.
+    assert len(call_log) == 4
 
 
 def test_key_location_normalizes_a_trailing_slash() -> None:

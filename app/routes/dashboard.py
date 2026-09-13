@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import dataclass
+from datetime import date
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import APIRouter, Depends, Request
@@ -204,13 +205,14 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
 
     params = cast("dict[str, str | None]", dict(request.query_params))
     _inject_default_year_params(params)
+    today = date.today()
     try:
-        validate_date_params(params)
+        validate_date_params(params, today=today)
     except ValidationError as exc:
         return _full_page_validation_error(
             "index.html", request, exc.message, raw_params=params
         )
-    filters = filters_from_query_params(params)
+    filters = filters_from_query_params(params, today=today)
 
     result = _build_dashboard_context(
         db, filters, page_value=params.get("page"), include_organisms=True
@@ -262,11 +264,12 @@ def adjudications_partial(request: Request, db: Session = Depends(get_db)) -> Re
 
     params = cast("dict[str, str | None]", dict(request.query_params))
     _inject_default_year_params(params)
+    today = date.today()
     try:
-        validate_date_params(params)
+        validate_date_params(params, today=today)
     except ValidationError as exc:
         return _validation_error_response(exc.message)
-    filters = filters_from_query_params(params)
+    filters = filters_from_query_params(params, today=today)
 
     # When ``partial=table`` is present, the request comes from a
     # pagination link that only needs the table + pagination bar.
@@ -317,12 +320,13 @@ def export_adjudications(request: Request) -> Response:
 
     params = cast("dict[str, str | None]", dict(request.query_params))
     _inject_default_year_params(params)
+    today = date.today()
     try:
-        validate_date_params(params)
+        validate_date_params(params, today=today)
     except ValidationError as exc:
         return Response(exc.message, status_code=422, media_type="text/plain")
 
-    return _stream_csv_response(filters_from_query_params(params))
+    return _stream_csv_response(filters_from_query_params(params, today=today))
 
 
 __all__ = ["router"]

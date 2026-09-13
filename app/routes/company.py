@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 from dataclasses import replace
+from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, unquote
@@ -97,10 +98,11 @@ def _company_filters(
     raw_type: str,
     raw_number: str,
     params: dict[str, str | None],
+    today: date | None = None,
 ) -> AdjudicationFilters:
     """Build filters for a company document identity and shared query filters."""
 
-    parsed = filters_from_query_params(params)
+    parsed = filters_from_query_params(params, today=today)
     return replace(
         parsed,
         company=None,
@@ -120,8 +122,9 @@ def _build_company_context(
     decoded_type = unquote(raw_type)
     decoded_number = unquote(raw_number)
     _inject_default_year_params(raw_params)
-    validate_date_params(raw_params)
-    filters = _company_filters(raw_type, raw_number, raw_params)
+    today = date.today()
+    validate_date_params(raw_params, today=today)
+    filters = _company_filters(raw_type, raw_number, raw_params, today)
     page = max(_coerce_page(raw_params.get("page")), 1)
 
     # One guard for the incomplete-identity path: no identity lookup,
@@ -362,12 +365,15 @@ def export_company_adjudications(
     _validated_company_identity(tipo_doc_prov, nro_doc_prov)
     params = cast("dict[str, str | None]", dict(request.query_params))
     _inject_default_year_params(params)
+    today = date.today()
     try:
-        validate_date_params(params)
+        validate_date_params(params, today=today)
     except ValidationError as exc:
         return Response(exc.message, status_code=422, media_type="text/plain")
 
-    return _stream_csv_response(_company_filters(tipo_doc_prov, nro_doc_prov, params))
+    return _stream_csv_response(
+        _company_filters(tipo_doc_prov, nro_doc_prov, params, today)
+    )
 
 
 @router.get(

@@ -104,6 +104,9 @@ def _build_concentration_chart_payload(
     }
 
 
+_MIN_BREADCRUMB_ITEMS = 2
+
+
 def _build_breadcrumb_json_ld(
     items: list[tuple[str, str | None]],
 ) -> dict[str, Any]:
@@ -111,13 +114,21 @@ def _build_breadcrumb_json_ld(
 
     Google requires ``name``, ``position`` and ``item`` on every ``ListItem``
     **except the last one**, where ``item`` may be omitted and the containing
-    page's URL is used instead; it also requires at least two items. Its
+    page's URL is used instead; it also requires at least two items, so a shorter
+    trail is rejected here rather than published as markup that can never be
+    eligible. Its
     guidelines recommend a trail that follows a real user path rather than
     mirroring the URL structure, which is why the trail here is
     "Inicio > <page>": an intermediate "Organismos" level would need a URL of
     its own, and this site has no such page, so inventing one would be invalid
     markup rather than a richer trail.
     """
+
+    if len(items) < _MIN_BREADCRUMB_ITEMS:
+        raise ValueError(
+            "a BreadcrumbList needs at least "
+            f"{_MIN_BREADCRUMB_ITEMS} items, got {len(items)}"
+        )
 
     site_url = get_settings().site_url
     elements: list[dict[str, Any]] = []
@@ -178,11 +189,12 @@ def _build_catalog_dataset_json_ld(
         "description": (
             "Adjudicaciones publicadas por los organismos del Estado uruguayo, "
             "recopiladas de los reportes XML diarios de Compras Estatales y "
-            "presentadas como un buscador publico. Cada registro incluye el "
-            "organismo comprador, la empresa adjudicataria, el articulo "
+            "presentadas como un buscador público. Cada registro incluye el "
+            "organismo comprador, la empresa adjudicataria, el artículo "
             "adjudicado, la cantidad, el monto en la moneda de origen con su "
-            "equivalente en pesos uruguayos, y la fecha de publicacion de la "
-            "adjudicacion. Los datos se actualizan a diario."
+            "equivalente en pesos uruguayos cuando la moneda es convertible, y "
+            "la fecha de publicación de la adjudicación. Los datos se actualizan "
+            "a diario."
         ),
         "url": f"{site_url}/",
         "creator": {

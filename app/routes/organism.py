@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import quote, unquote
 
@@ -72,12 +73,13 @@ def _build_organism_context(
     """
 
     _inject_default_year_params(raw_params)
-    validate_date_params(raw_params)
+    today = date.today()
+    validate_date_params(raw_params, today=today)
     # Parse the user-supplied secondary filters (date / article / id) but
     # override the organism slot with the exact name decoded from the
     # path. The service treats ``organism_exact`` as a strict equality
     # predicate — see ``_build_predicates`` in the service layer.
-    filters = filters_from_query_params(raw_params)
+    filters = filters_from_query_params(raw_params, today=today)
     filters = AdjudicationFilters(
         company=filters.company,
         organism_exact=decoded_name,

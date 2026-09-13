@@ -147,8 +147,16 @@ def effective_date_window(
     return None, None
 
 
-def validate_date_params(params: dict[str, str | None]) -> None:
+def validate_date_params(
+    params: dict[str, str | None], *, today: date | None = None
+) -> None:
     """Validate raw ``date_from``/``date_to`` query parameters.
+
+    ``today`` is the clock the effective window is measured against. A caller that
+    goes on to build filters must pass the same value to
+    :func:`filters_from_query_params`, so that a request straddling midnight cannot be
+    validated against one derivation and materialized with another. Omitting it reads
+    the clock here, which is what a caller with no materialization step wants.
 
     Raises :class:`DateValidationError` when either value is present but
     not a valid ISO 8601 ``YYYY-MM-DD`` date, or when both are present
@@ -176,8 +184,9 @@ def validate_date_params(params: dict[str, str | None]) -> None:
     # distinct value, and a fresh aggregate-cache miss for each one. The cap
     # must hold whether the caller supplied both bounds or only one.
     single_sided = (date_from is None) != (date_to is None)
+    resolved_today = today if today is not None else date.today()
     effective_from, effective_to = effective_date_window(
-        date_from, date_to, today=date.today()
+        date_from, date_to, today=resolved_today
     )
     if effective_from is None or effective_to is None:  # pragma: no cover - defensive
         return
@@ -196,8 +205,14 @@ def validate_date_params(params: dict[str, str | None]) -> None:
         raise DateValidationError("El rango de fechas no puede superar los 5 años.")
 
 
-def filters_from_query_params(params: dict[str, str | None]) -> AdjudicationFilters:
+def filters_from_query_params(
+    params: dict[str, str | None], *, today: date | None = None
+) -> AdjudicationFilters:
     """Build an :class:`AdjudicationFilters` from raw query parameters.
+
+    ``today`` is the anchor for a window missing one bound. Pass the same value that
+    was given to :func:`validate_date_params` so both steps measure the same day;
+    omitting it reads the clock here.
 
     Empty strings and missing keys are normalized to ``None`` so the
     service layer can treat them uniformly. Date strings that cannot be
@@ -220,7 +235,7 @@ def filters_from_query_params(params: dict[str, str | None]) -> AdjudicationFilt
     _window = effective_date_window(
         _maybe_date(params.get("date_from")),
         _maybe_date(params.get("date_to")),
-        today=date.today(),
+        today=today if today is not None else date.today(),
     )
 
     return AdjudicationFilters(

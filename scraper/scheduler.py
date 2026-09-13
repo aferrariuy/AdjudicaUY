@@ -199,11 +199,13 @@ def _notify_indexnow(day: date) -> None:
 def _run() -> None:
     """Run one scheduled scrape, recording a last-run marker on success."""
 
-    # One clock for the whole run: the scrape and the IndexNow window must agree on
-    # which day was covered. The container's local clock is not that day — it runs in
-    # UTC while the reports are dated in Montevideo.
-    day = scrape_day()
     try:
+        # One clock for the whole run: the scrape and the IndexNow window must agree on
+        # which day was covered. The container's local clock is not that day — it runs
+        # in UTC while the reports are dated in Montevideo. Resolved inside the guard so
+        # that a failure here is reported like any other run failure instead of escaping
+        # the scheduler loop.
+        day = scrape_day()
         inserted = run_scrape(start_date=day, end_date=day)
     except Exception:
         logger.exception("Scheduled scrape failed")
