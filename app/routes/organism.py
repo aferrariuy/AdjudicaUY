@@ -180,6 +180,9 @@ def organism_detail(
         ),
         og_type="GovernmentOrganization",
         path=f"/organism/{quote(decoded_name, safe='')}",
+        # Two levels only: an intermediate "Organismos" node would need a
+        # URL of its own, and this site has no such page.
+        breadcrumb=[("Inicio", "/"), (decoded_name, None)],
     )
     context.update(seo)
     return _render("organism_detail.html", request, context)

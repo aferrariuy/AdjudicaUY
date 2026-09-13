@@ -1,0 +1,26 @@
+{# Visible breadcrumb trail for an entity page.
+
+   Rendered from ``breadcrumb_items``, which ``_build_seo_context`` derives in
+   ``app/presenters.py`` from the SAME list it turns into the BreadcrumbList
+   JSON-LD — so the trail the visitor sees and the trail Google reads cannot
+   drift apart.
+
+   The entity page keeps its own "Volver al buscador" link below this: that
+   link is the only navigation available on the 422 full-page render, which
+   has no breadcrumb context. #}
+
+{% if breadcrumb_items %}
+  <nav aria-label="Ruta de navegación" class="mb-3">
+    <ol class="flex flex-wrap items-center gap-1 text-sm text-texto-sec">
+      {% for item in breadcrumb_items %}
+        {% if not loop.first %}<li aria-hidden="true">&rsaquo;</li>{% endif %}
+        {% if item.href %}
+          <li><a href="{{ item.href }}" class="text-sello hover:underline">{{ item.name }}</a></li>
+        {% else %}
+          {# No href means the current page, which carries its own aria-current. #}
+          <li aria-current="page"><span class="text-ink">{{ item.name }}</span></li>
+        {% endif %}
+      {% endfor %}
+    </ol>
+  </nav>
+{% endif %}

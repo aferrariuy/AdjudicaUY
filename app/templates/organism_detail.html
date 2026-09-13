@@ -30,9 +30,14 @@
   "url": {{ canonical_url | default(site_url ~ '/organism/' ~ organism_name, true) | tojson }}
 }
 </script>
+{% if breadcrumb_json_ld is defined and breadcrumb_json_ld %}
+<script type="application/ld+json">{{ breadcrumb_json_ld | tojson }}</script>
+{% endif %}
 {% endblock %}
 
 {% block content %}
+  {% include "partials/_breadcrumb.html" %}
+
   <div class="mb-4">
     <a
       href="/"

@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from app.database import get_db
 from app.presenters import (
+    _build_catalog_dataset_json_ld,
     _build_concentration_chart_payload,
     _build_page_numbers,
     _build_seo_context,
@@ -232,6 +233,7 @@ def index(request: Request, db: Session = Depends(get_db)) -> Response:
                 ),
                 og_type="website",
                 path="/",
+                dataset=_build_catalog_dataset_json_ld(),
             ),
             **result.context,
         },

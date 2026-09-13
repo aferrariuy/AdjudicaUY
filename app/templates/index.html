@@ -29,6 +29,13 @@
   }
 }
 </script>
+{# The catalogue itself, for Google Dataset Search. Emitted after the WebSite
+   node: several JSON-LD scripts per page are valid, and the WebSite node must
+   stay first because existing tests and rich-result tooling read the first
+   one. #}
+{% if dataset_json_ld is defined and dataset_json_ld %}
+<script type="application/ld+json">{{ dataset_json_ld | tojson }}</script>
+{% endif %}
 {% endblock %}
 
 {% block content %}

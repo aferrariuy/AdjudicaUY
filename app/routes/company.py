@@ -340,6 +340,9 @@ def company_detail(
                 f"/company/{quote(context['company_type'], safe='')}/"
                 f"{quote(context['company_number'], safe='')}"
             ),
+            # Two levels only: an intermediate "Empresas" node would need a URL
+            # of its own, and this site has no such page.
+            breadcrumb=[("Inicio", "/"), (display_name, None)],
         )
     )
     return _render("company_detail.html", request, context)

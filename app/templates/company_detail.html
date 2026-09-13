@@ -23,9 +23,14 @@
   "url": {{ canonical_url | default(site_url ~ '/company/' ~ company_type ~ '/' ~ company_number, true) | tojson }}
 }
 </script>
+{% if breadcrumb_json_ld is defined and breadcrumb_json_ld %}
+<script type="application/ld+json">{{ breadcrumb_json_ld | tojson }}</script>
+{% endif %}
 {% endblock %}
 
 {% block content %}
+  {% include "partials/_breadcrumb.html" %}
+
   <div class="mb-4">
     <a href="/" class="text-sm text-sello hover:underline">&larr; Volver al buscador</a>
   </div>

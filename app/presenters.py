@@ -104,12 +104,113 @@ def _build_concentration_chart_payload(
     }
 
 
+def _build_breadcrumb_json_ld(
+    items: list[tuple[str, str | None]],
+) -> dict[str, Any]:
+    """Build a ``BreadcrumbList`` node for Google's breadcrumb rich result.
+
+    Google requires ``name``, ``position`` and ``item`` on every ``ListItem``
+    **except the last one**, where ``item`` may be omitted and the containing
+    page's URL is used instead; it also requires at least two items. Its
+    guidelines recommend a trail that follows a real user path rather than
+    mirroring the URL structure, which is why the trail here is
+    "Inicio > <page>": an intermediate "Organismos" level would need a URL of
+    its own, and this site has no such page, so inventing one would be invalid
+    markup rather than a richer trail.
+    """
+
+    site_url = get_settings().site_url
+    elements: list[dict[str, Any]] = []
+    for position, (name, item_path) in enumerate(items, start=1):
+        element: dict[str, Any] = {
+            "@type": "ListItem",
+            "position": position,
+            "name": name,
+        }
+        if item_path is not None:
+            element["item"] = f"{site_url}{item_path}"
+        elements.append(element)
+
+    return {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList",
+        "itemListElement": elements,
+    }
+
+
+def _build_catalog_dataset_json_ld() -> dict[str, Any]:
+    """Build the ``Dataset`` node describing the whole catalogue.
+
+    Google requires only ``name`` and ``description`` (50-5000 characters);
+    everything else comes from its recommended list and is stated only where
+    the project can back it up. Two deliberate omissions:
+
+    * no ``license`` — the project declares none, and publishing terms it does
+      not grant would misrepresent how the data may be reused;
+    * no ``temporalCoverage`` — the span has not been measured yet, and an
+      assumed one would be a guess published as fact.
+
+    The ``distribution`` points at the CSV export. That endpoint answers
+    ``X-Robots-Tag: noindex`` (it is a download, not a page), which is
+    compatible: Dataset Search reads the markup on this landing page and
+    follows ``contentUrl`` as a file link.
+    """
+
+    site_url = get_settings().site_url
+    return {
+        "@context": "https://schema.org",
+        "@type": "Dataset",
+        "name": "Adjudicaciones del Estado uruguayo",
+        "description": (
+            "Adjudicaciones publicadas por los organismos del Estado uruguayo, "
+            "recopiladas de los reportes XML diarios de Compras Estatales y "
+            "presentadas como un buscador publico. Cada registro incluye el "
+            "organismo comprador, la empresa adjudicataria, el articulo "
+            "adjudicado, la cantidad, el monto en la moneda de origen con su "
+            "equivalente en pesos uruguayos, y la fecha de publicacion de la "
+            "adjudicacion. Los datos se actualizan a diario."
+        ),
+        "url": f"{site_url}/",
+        "creator": {
+            "@type": "Organization",
+            "name": "AdjudicaUY",
+            "url": f"{site_url}/",
+        },
+        "isAccessibleForFree": True,
+        "keywords": [
+            "compras publicas",
+            "contrataciones del Estado",
+            "adjudicaciones",
+            "transparencia",
+            "gobierno abierto",
+            "Uruguay",
+        ],
+        "spatialCoverage": {"@type": "Place", "name": "Uruguay"},
+        "variableMeasured": [
+            "Organismo comprador",
+            "Empresa adjudicataria",
+            "Articulo adjudicado",
+            "Monto adjudicado en pesos uruguayos",
+            "Fecha de publicacion de la adjudicacion",
+        ],
+        "distribution": [
+            {
+                "@type": "DataDownload",
+                "encodingFormat": "text/csv",
+                "contentUrl": f"{site_url}/adjudications/export",
+            }
+        ],
+    }
+
+
 def _build_seo_context(
     *,
     meta_title: str,
     meta_description: str,
     og_type: str,
     path: str,
+    breadcrumb: list[tuple[str, str | None]] | None = None,
+    dataset: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the SEO context dict passed to every full-page template.
 
@@ -119,11 +220,17 @@ def _build_seo_context(
     stripping any query parameters so the canonical is stable. The
     ``og_image`` and ``og_site_name`` are shared across every page so
     social shares use the same branded card regardless of the route.
+
+    ``breadcrumb`` and ``dataset`` are opt-in: a page that passes neither gets
+    exactly the context it got before. When ``breadcrumb`` is given (as
+    ``(name, path)`` pairs, the last one with ``path=None``) the context also
+    carries the visible trail and its matching JSON-LD, both derived from the
+    same list so the markup and the screen cannot drift apart.
     """
 
     settings = get_settings()
     canonical_url = f"{settings.site_url}{path}"
-    return {
+    context: dict[str, Any] = {
         "meta_title": meta_title,
         "meta_description": meta_description,
         "og_type": og_type,
@@ -131,6 +238,14 @@ def _build_seo_context(
         "og_image": f"{settings.site_url}/static/og-image.png",
         "og_site_name": "AdjudicaUY",
     }
+    if breadcrumb is not None:
+        context["breadcrumb_items"] = [
+            {"name": name, "href": item_path} for name, item_path in breadcrumb
+        ]
+        context["breadcrumb_json_ld"] = _build_breadcrumb_json_ld(breadcrumb)
+    if dataset is not None:
+        context["dataset_json_ld"] = dataset
+    return context
 
 
 @dataclass(frozen=True)
@@ -224,6 +339,8 @@ def _build_page_numbers(current: int, total: int) -> list[int | str]:
 
 __all__ = [
     "EmptyWindowView",
+    "_build_breadcrumb_json_ld",
+    "_build_catalog_dataset_json_ld",
     "_build_concentration_chart_payload",
     "_build_empty_window_view",
     "_build_page_numbers",
