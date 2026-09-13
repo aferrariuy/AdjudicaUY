@@ -251,10 +251,16 @@ def test_derived_bound_is_visible_in_the_filter_form(
 
     make_adjudication(organism="Organismo Visible")
 
+    before = date.today()
     response = client.get("/organism/Organismo%20Visible?date_from=2024-01-01")
+    after = date.today()
 
     assert response.status_code == 200
-    assert f'value="{date.today().isoformat()}"' in response.text
+    # The route reads the clock itself, so a midnight crossing between the request and
+    # this assertion is the one ambiguity no HTTP-level test can remove. Accepting
+    # either side of it keeps the assertion exact without leaving a flake that would
+    # fire once in a long enough CI history.
+    assert any(f'value="{day.isoformat()}"' in response.text for day in (before, after))
     assert 'value="2024-01-01"' in response.text
 
 
@@ -309,6 +315,9 @@ def test_materialization_anchors_on_the_injected_day() -> None:
 def test_omitting_the_clock_reads_the_real_one() -> None:
     """The parameter is optional, and its absence means "read the clock now"."""
 
+    before = date.today()
     filters = filters_from_query_params({"date_from": "2024-01-01"})
+    after = date.today()
 
-    assert filters.date_to == date.today()
+    # Same caveat: only a midnight crossing can make these two disagree.
+    assert filters.date_to in (before, after)
