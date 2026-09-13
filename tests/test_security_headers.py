@@ -6,6 +6,7 @@ on every response, and conditionally adds HSTS based on debug mode.
 
 from __future__ import annotations
 
+import json
 from typing import Any
 from unittest.mock import patch
 
@@ -225,6 +226,37 @@ def test_rendered_partials_have_no_inline_scripts(
         if not script.get("src") and script.get("type") != "application/ld+json"
     ]
     assert inline_scripts == []
+
+
+def test_htmx_config_switches_off_the_runtime_style_it_cannot_nonce(
+    client: TestClient,
+) -> None:
+    """HTMX must be told not to append the indicator styles it builds at runtime.
+
+    ``test_html_responses_include_exact_nonce_csp_and_inline_coverage`` proves every
+    ``<style>`` in the response carries the nonce. It cannot prove anything about one
+    a script appends afterwards, which is what Lighthouse found: HTMX 1.9 builds a
+    style element on load, ``style-src`` blocks it, and the browser logs a CSP
+    violation on every page.
+
+    HTMX reads this meta before it decides to append, and its guard is
+    ``includeIndicatorStyles !== false``, so only the JSON boolean switches it off —
+    the string ``"false"`` would append exactly as before. Asserting ``is False`` is
+    therefore about behaviour rather than spelling.
+
+    What this cannot check is whether HTMX honours the meta. That follows from HTMX's
+    own guard, and the end-to-end confirmation is a browser console with no CSP error.
+    """
+
+    response = client.get("/")
+    soup = BeautifulSoup(response.text, "html.parser")
+    meta = soup.find("meta", attrs={"name": "htmx-config"})
+
+    assert meta is not None, "the page does not configure HTMX"
+
+    content = meta.get("content")
+    assert isinstance(content, str)
+    assert json.loads(content)["includeIndicatorStyles"] is False
 
 
 # ---------------------------------------------------------------------------

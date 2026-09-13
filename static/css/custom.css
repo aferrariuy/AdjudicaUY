@@ -26,10 +26,13 @@
 }
 
 /* ---------------------------------------------------------------------
- * HTMX indicator visibility. HTMX 1.9 does not ship default styles for
- * ``.htmx-indicator``: the element must be hidden by default and shown
- * while an ancestor carries the ``.htmx-request`` class. This keeps the
- * spinner invisible until an HTMX request is in flight.
+ * HTMX indicator visibility. HTMX 1.9 builds rules for ``.htmx-indicator``
+ * and appends them as a <style> element at runtime, where they cannot carry
+ * the per-request nonce that ``style-src`` requires — so they never applied,
+ * and base.html now switches them off at the source. These are the rules
+ * that actually hide the spinner and reveal it while an ancestor carries the
+ * ``.htmx-request`` class. They control visibility with ``display`` where
+ * HTMX uses ``opacity``.
  * -------------------------------------------------------------------- */
 .htmx-indicator {
   display: none;

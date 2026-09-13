@@ -53,7 +53,17 @@
   <link rel="stylesheet" href="/static/css/style.css">
 
   {# HTMX 1.9 — partial page swaps, no SPA framework needed.
-     Self-hosted to eliminate external DNS lookup. #}
+     Self-hosted to eliminate external DNS lookup.
+
+     includeIndicatorStyles is off because HTMX 1.9 appends its indicator
+     style as an element at runtime, where it cannot carry the per-request
+     nonce, so
+     style-src 'self' 'nonce-...' blocks it and the browser logs a CSP
+     violation on every page load. The rules it appends only hide and reveal
+     the spinner, and custom.css already does that with .htmx-indicator, so
+     the blocked copy was unreachable anyway. HTMX reads this meta before it
+     decides to inject, and a meta needs no nonce because it is not script. #}
+  <meta name="htmx-config" content='{"includeIndicatorStyles": false}'>
   <script src="/static/vendor/htmx.min.js" defer></script>
 
   <style nonce="{{ request.state.csp_nonce }}">
@@ -68,8 +78,8 @@
 </head>
 <body class="bg-paper text-ink min-h-screen flex flex-col font-ibm-plex">
   {# Anti-FOUC bootstrap. Runs synchronously before any content renders,
-     so the ``.dark`` class is present on ``<html>`` when CSS applies.
-     Placed in <body> (not <head>) so it doesn't block first paint. #}
+     so the ``.dark`` class is present on the html element when CSS applies.
+     Placed in the body rather than the head so it doesn't block first paint. #}
   <script nonce="{{ request.state.csp_nonce }}">
     (function() {
       try {
@@ -195,12 +205,19 @@
         var icon = document.getElementById('theme-toggle-icon');
         if (!btn) return;
 
-        var SUN_PATH = 'M12 3v1m0 16v1m8.66-13.66l-.71.71M4.05 4.05l-.71.71M21 12h-1M4 12H3m16.66 7.34l-.71-.71M4.05 19.95l-.71-.71M12 8a4 4 0 100 8 4 4 0 000-8z';
-        var MOON_PATH = 'M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z';
 
         function setLabel(dark) {
           btn.setAttribute('aria-label', dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
-          icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="' + (dark ? SUN_PATH : MOON_PATH) + '"/>';
+          // Each branch assigns markup fixed at author time. Writing the two
+          // literals out rather than concatenating a shared prefix with a path
+          // constant is what keeps this a static assignment: a computed right-hand
+          // side is the shape injected content would take, and it is the shape the
+          // no-inner-html rule flags.
+          if (dark) {
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m8.66-13.66l-.71.71M4.05 4.05l-.71.71M21 12h-1M4 12H3m16.66 7.34l-.71-.71M4.05 19.95l-.71-.71M12 8a4 4 0 100 8 4 4 0 000-8z"/>';
+          } else {
+            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>';
+          }
         }
 
         function toggle() {

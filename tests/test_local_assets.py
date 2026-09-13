@@ -149,6 +149,36 @@ def test_bigshoulders_not_preloaded(client: Any) -> None:
         )
 
 
+def test_theme_toggle_ships_both_icon_paths(client: Any) -> None:
+    """GET / still carries both shapes for the theme toggle.
+
+    The toggle assigns its icon markup from two literals written out in the script
+    instead of concatenating a shared prefix with a path constant, because a computed
+    right-hand side is the shape injected content would take. What this pins is that
+    both shapes are still shipped, so that rewrite did not silently drop or mistype
+    one of them.
+
+    Each path is asserted against the branch that assigns it, so a swapped pair or an
+    inverted condition fails here rather than shipping. What it cannot check is that a
+    browser paints the result: the equivalence of the two spellings was established by
+    comparing the produced markup byte for byte when the rewrite was made.
+    """
+
+    response = client.get("/")
+    text = response.text
+
+    assert "SUN_PATH" not in text
+    assert "MOON_PATH" not in text
+
+    picks_sun = re.search(r"if \(dark\) \{\s*icon\.innerHTML = '([^']*)'", text)
+    picks_moon = re.search(r"else \{\s*icon\.innerHTML = '([^']*)'", text)
+
+    assert picks_sun is not None, "the dark branch no longer assigns an icon"
+    assert picks_moon is not None, "the light branch no longer assigns an icon"
+    assert "M12 3v1m0 16v1m8.66-13.66l-.71.71" in picks_sun.group(1)
+    assert "M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" in picks_moon.group(1)
+
+
 def test_scripts_block_present(client: Any) -> None:
     """GET / has a scripts block with chart wiring (theme:changed reference)."""
 
