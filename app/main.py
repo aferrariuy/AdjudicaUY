@@ -170,6 +170,13 @@ def create_app() -> FastAPI:
     # middlewares below share the same instance.
     settings = get_settings()
 
+    # Single source of truth for absolute URLs in templates. ``presenters``
+    # already builds the canonical/OG values from ``settings.site_url``;
+    # exposing the same value as a template global keeps the per-block
+    # fallbacks correct when a route forgets to inject the SEO context,
+    # instead of publishing a domain that belongs to another project.
+    app.state.templates.env.globals["site_url"] = settings.site_url
+
     # Reject untrusted Host headers before any route/database work. This
     # is registered after GZip but before the custom ``@app.middleware``
     # decorators, so a Host-400 response passes back through the security

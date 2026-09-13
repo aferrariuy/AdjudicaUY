@@ -14,15 +14,15 @@
 {% block og_title %}{{ meta_title | default('Sobre AdjudicaUY', true) }}{% endblock %}
 {% block og_description %}{{ meta_description | default('AdjudicaUY es una plataforma de búsqueda y visualización de adjudicaciones del Estado uruguayo. Datos públicos, abiertos y actualizados.', true) }}{% endblock %}
 {% block og_type %}website{% endblock %}
-{% block og_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/about', true) }}{% endblock %}
-{% block canonical_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/about', true) }}{% endblock %}
+{% block og_url %}{{ canonical_url | default(site_url ~ '/about', true) }}{% endblock %}
+{% block canonical_url %}{{ canonical_url | default(site_url ~ '/about', true) }}{% endblock %}
 {% block json_ld %}
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "WebSite",
   "name": "AdjudicaUY",
-  "url": {{ canonical_url | default('https://adjudica.digitales.gub.uy/about', true) | tojson }},
+  "url": {{ canonical_url | default(site_url ~ '/about', true) | tojson }},
   "description": "Plataforma de búsqueda de adjudicaciones del Estado uruguayo"
 }
 </script>

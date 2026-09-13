@@ -12,19 +12,19 @@
 {% block og_title %}{{ meta_title | default('AdjudicaUY', true) }}{% endblock %}
 {% block og_description %}{{ meta_description | default('Buscador de adjudicaciones del Estado uruguayo. Filtrá por organismo, empresa, artículo y fecha.', true) }}{% endblock %}
 {% block og_type %}website{% endblock %}
-{% block og_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/', true) }}{% endblock %}
-{% block canonical_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/', true) }}{% endblock %}
+{% block og_url %}{{ canonical_url | default(site_url ~ '/', true) }}{% endblock %}
+{% block canonical_url %}{{ canonical_url | default(site_url ~ '/', true) }}{% endblock %}
 {% block json_ld %}
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "WebSite",
   "name": "AdjudicaUY",
-  "url": {{ canonical_url | default('https://adjudica.digitales.gub.uy/', true) | tojson }},
+  "url": {{ canonical_url | default(site_url ~ '/', true) | tojson }},
   "description": "Buscador de adjudicaciones del Estado uruguayo",
   "potentialAction": {
     "@type": "SearchAction",
-    "target": {{ (canonical_url | default('https://adjudica.digitales.gub.uy/', true) ~ '?article={search_term_string}') | tojson }},
+    "target": {{ (canonical_url | default(site_url ~ '/', true) ~ '?article={search_term_string}') | tojson }},
     "query-input": "required name=search_term_string"
   }
 }

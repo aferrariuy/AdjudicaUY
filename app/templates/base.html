@@ -20,9 +20,9 @@
   <meta property="og:title" content="{% block og_title %}{{ meta_title | default('AdjudicaUY', true) }}{% endblock %}">
   <meta property="og:description" content="{% block og_description %}{{ meta_description | default('Adjudicaciones del Estado uruguayo', true) }}{% endblock %}">
   <meta property="og:type" content="{% block og_type %}{{ og_type | default('website', true) }}{% endblock %}">
-  <meta property="og:url" content="{% block og_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/', true) }}{% endblock %}">
+  <meta property="og:url" content="{% block og_url %}{{ canonical_url | default(site_url ~ '/', true) }}{% endblock %}">
   <meta property="og:site_name" content="{% block og_site_name %}{{ og_site_name | default('AdjudicaUY', true) }}{% endblock %}">
-  <meta property="og:image" content="{% block og_image %}{{ og_image | default('https://adjudica.digitales.gub.uy/static/og-image.png', true) }}{% endblock %}">
+  <meta property="og:image" content="{% block og_image %}{{ og_image | default(site_url ~ '/static/og-image.png', true) }}{% endblock %}">
 
   {# Twitter Card #}
   <meta name="twitter:card" content="summary">
@@ -30,7 +30,7 @@
   <meta name="twitter:description" content="{{ meta_description | default('Adjudicaciones del Estado uruguayo', true) }}">
 
   {# Canonical URL — strips query params, built from site_url + path #}
-  <link rel="canonical" href="{% block canonical_url %}{{ canonical_url | default('https://adjudica.digitales.gub.uy/', true) }}{% endblock %}">
+  <link rel="canonical" href="{% block canonical_url %}{{ canonical_url | default(site_url ~ '/', true) }}{% endblock %}">
 
   {# JSON-LD structured data.
      Default: renders from the json_ld context variable (dict → JSON).

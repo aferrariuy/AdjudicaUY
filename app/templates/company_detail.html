@@ -7,8 +7,8 @@
 {% block og_title %}{{ meta_title | default(profile_label ~ ' — AdjudicaUY', true) }}{% endblock %}
 {% block og_description %}{{ meta_description | default('Perfil de actividad de ' ~ profile_label ~ ' en AdjudicaUY.', true) }}{% endblock %}
 {% block og_type %}Corporation{% endblock %}
-{% block og_url %}{{ canonical_url | default('/company/' ~ company_type ~ '/' ~ company_number, true) }}{% endblock %}
-{% block canonical_url %}{{ canonical_url | default('/company/' ~ company_type ~ '/' ~ company_number, true) }}{% endblock %}
+{% block og_url %}{{ canonical_url | default(site_url ~ '/company/' ~ company_type ~ '/' ~ company_number, true) }}{% endblock %}
+{% block canonical_url %}{{ canonical_url | default(site_url ~ '/company/' ~ company_type ~ '/' ~ company_number, true) }}{% endblock %}
 {% block json_ld %}
 <script type="application/ld+json">
 {
@@ -20,7 +20,7 @@
     "propertyID": {{ company_type | tojson }},
     "value": {{ company_number | tojson }}
   },
-  "url": {{ canonical_url | default('/company/' ~ company_type ~ '/' ~ company_number, true) | tojson }}
+  "url": {{ canonical_url | default(site_url ~ '/company/' ~ company_type ~ '/' ~ company_number, true) | tojson }}
 }
 </script>
 {% endblock %}

@@ -4,11 +4,29 @@ Verifies that templates render correct meta tags, OG tags, Twitter cards,
 canonical URLs, JSON-LD structured data, and crawlable pagination hrefs.
 """
 
+import re
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from jinja2.runtime import Context
+
+TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "app" / "templates"
+
+# Absolute URLs that may legitimately appear literally in a template. Every
+# other absolute URL must be built from the injected SEO context (the values
+# ``app.presenters.build_seo_context`` derives from ``settings.site_url``) or
+# from the ``site_url`` global installed by ``create_app``.
+ALLOWED_ABSOLUTE_URLS = {"https://schema.org"}
+
+_ABSOLUTE_URL = re.compile(r"https?://[^\s\"'<>)]+")
+
+# Stand-in for the configured ``SITE_URL`` while rendering templates here. It
+# deliberately differs from any deployed host, so a hardcoded domain in a
+# template fallback fails these tests instead of passing unnoticed.
+TEST_SITE_URL = "https://test.example"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -16,11 +34,19 @@ from jinja2.runtime import Context
 
 
 def _make_jinja_env():
-    """Create a Jinja2 Environment pointing at the app templates dir."""
-    return Environment(
+    """Create a Jinja2 Environment pointing at the app templates dir.
+
+    The ``site_url`` global mirrors the one ``create_app`` installs on
+    ``app.state.templates.env``, so template fallbacks resolve here exactly
+    as they do in production.
+    """
+
+    env = Environment(
         loader=FileSystemLoader("app/templates"),
         autoescape=select_autoescape(["html"]),
     )
+    env.globals["site_url"] = TEST_SITE_URL
+    return env
 
 
 def _make_mock_filters():
@@ -81,8 +107,12 @@ def _render_block(env, template_name, block_name, context=None):
     if block_func is None:
         raise ValueError(f"Block '{block_name}' not found in {template_name}")
 
-    # Build a proper Jinja2 runtime context
-    parent = {**context}
+    # Build a proper Jinja2 runtime context. ``Template.render`` merges the
+    # environment globals into the parent context (``new_context`` does
+    # ``parent = dict(globals).update(vars)``); constructing the Context by
+    # hand has to mirror that, or globals such as ``site_url`` resolve as
+    # undefined here while working in production.
+    parent = {**env.globals, **context}
     ctx = Context(env, parent=parent, name=template.name, blocks=template.blocks)
     # Call the block function — it's a generator that yields strings
     return "".join(block_func(ctx))
@@ -99,7 +129,7 @@ def _index_seo_context(**overrides):
         "meta_title": "AdjudicaUY",
         "meta_description": "Buscador de adjudicaciones del Estado uruguayo",
         "og_type": "website",
-        "canonical_url": "https://adjudica.digitales.gub.uy/",
+        "canonical_url": "https://test.example/",
         "json_ld": {
             "@context": "https://schema.org",
             "@type": "WebSite",
@@ -117,7 +147,7 @@ def _organism_seo_context(**overrides):
         "meta_title": "MSP — AdjudicaUY",
         "meta_description": "Adjudicaciones del organismo MSP",
         "og_type": "GovernmentOrganization",
-        "canonical_url": "https://adjudica.digitales.gub.uy/organism/MSP",
+        "canonical_url": "https://test.example/organism/MSP",
         "json_ld": {
             "@context": "https://schema.org",
             "@type": "GovernmentOrganization",
@@ -270,7 +300,7 @@ class TestIndexTemplateSEO:
         html = _render_block(
             self.env, "index.html", "canonical_url", _index_seo_context()
         )
-        assert "https://adjudica.digitales.gub.uy/" in html
+        assert "https://test.example/" in html
 
     def test_website_json_ld(self):
         html = _render_block(self.env, "index.html", "json_ld", _index_seo_context())
@@ -363,7 +393,7 @@ class TestAboutPageSEO:
                 "Plataforma de búsqueda de adjudicaciones estatales del Uruguay"
             ),
             "og_type": "website",
-            "canonical_url": "https://adjudica.digitales.gub.uy/about",
+            "canonical_url": "https://test.example/about",
             "json_ld": {
                 "@context": "https://schema.org",
                 "@type": "WebSite",
@@ -452,3 +482,89 @@ class TestPaginationHref:
         )
         assert 'hx-get="/adjudications?page=1&partial=table"' in html
         assert 'href="/adjudications?page=1"' in html
+
+
+# ---------------------------------------------------------------------------
+# Regression guard: templates must not hardcode the site's own domain
+# ---------------------------------------------------------------------------
+
+
+class TestTemplatesDoNotHardcodeTheSiteDomain:
+    """Absolute site URLs must come from configuration, never from a literal.
+
+    Every SEO block falls back to the injected ``canonical_url``/``og_image``
+    and then to the ``site_url`` global installed by ``create_app``. A
+    hardcoded domain anywhere in that chain means a route that forgets to
+    inject the SEO context publishes a foreign canonical URL and can get the
+    page deindexed.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        self.env = _make_jinja_env()
+
+    def test_no_template_hardcodes_an_absolute_url_outside_the_allowlist(self):
+        offenders = []
+        for path in sorted(TEMPLATE_DIR.rglob("*.html")):
+            relative = path.relative_to(TEMPLATE_DIR)
+            for lineno, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                for match in _ABSOLUTE_URL.finditer(line):
+                    if match.group(0) in ALLOWED_ABSOLUTE_URLS:
+                        continue
+                    offenders.append(f"{relative}:{lineno}: {match.group(0)}")
+
+        assert offenders == [], (
+            "Templates must build absolute URLs from the injected SEO context "
+            "or the ``site_url`` global, never from a literal:\n" + "\n".join(offenders)
+        )
+
+    def test_base_canonical_fallback_uses_the_configured_site_url(self):
+        html = _render_block(self.env, "base.html", "canonical_url", _base_context())
+
+        assert html.strip() == f"{TEST_SITE_URL}/"
+
+    def test_base_og_url_fallback_uses_the_configured_site_url(self):
+        html = _render_block(self.env, "base.html", "og_url", _base_context())
+
+        assert html.strip() == f"{TEST_SITE_URL}/"
+
+    def test_base_og_image_fallback_uses_the_configured_site_url(self):
+        html = _render_block(self.env, "base.html", "og_image", _base_context())
+
+        assert html.strip() == f"{TEST_SITE_URL}/static/og-image.png"
+
+    def test_index_canonical_fallback_uses_the_configured_site_url(self):
+        html = _render_block(self.env, "index.html", "canonical_url", _base_context())
+
+        assert html.strip() == f"{TEST_SITE_URL}/"
+
+    def test_index_json_ld_target_fallback_uses_the_configured_site_url(self):
+        html = _render_block(self.env, "index.html", "json_ld", _base_context())
+
+        assert f"{TEST_SITE_URL}/?article={{search_term_string}}" in html
+
+    def test_organism_canonical_fallback_uses_the_configured_site_url(self):
+        html = _render_block(
+            self.env, "organism_detail.html", "canonical_url", {"organism_name": "MSP"}
+        )
+
+        assert html.strip() == f"{TEST_SITE_URL}/organism/MSP"
+
+    def test_about_canonical_fallback_uses_the_configured_site_url(self):
+        html = _render_block(
+            self.env, "pages/about.html", "canonical_url", _base_context()
+        )
+
+        assert html.strip() == f"{TEST_SITE_URL}/about"
+
+    def test_company_canonical_fallback_uses_the_configured_site_url(self):
+        html = _render_block(
+            self.env,
+            "company_detail.html",
+            "canonical_url",
+            {"company_type": "RUC", "company_number": "210000010017"},
+        )
+
+        assert html.strip() == f"{TEST_SITE_URL}/company/RUC/210000010017"
