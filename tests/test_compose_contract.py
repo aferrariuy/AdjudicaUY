@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from typing import Any, cast
+from urllib.parse import urlparse
 
 import yaml  # type: ignore[import-untyped]
 
@@ -191,3 +192,29 @@ def test_worker_scoped_knobs_are_not_settings_fields() -> None:
     }
 
     assert worker_scoped & fields == set()
+
+
+def test_environment_example_documents_an_absolute_https_site_url() -> None:
+    """The documented ``SITE_URL`` must be an absolute https URL, not a placeholder.
+
+    ``SITE_URL`` becomes the canonical URLs, the OG tags, every sitemap ``<loc>``, and
+    the ``host`` IndexNow is told these URLs belong to — and ``app/config.py`` only
+    strips a trailing slash, it does not enforce a scheme. So an ``http://`` example, or
+    a bare domain, teaches an operator to publish canonical URLs for a scheme the site
+    does not serve.
+
+    What this does NOT check is whether the domain is the right one. That value lives in
+    the deployment, not in this repository, so nothing here can catch a stale domain —
+    only a human reading the file can. This test was written because a stale domain had
+    gone unnoticed, and it would not have caught it.
+    """
+
+    match = re.search(
+        r"^#?\s*SITE_URL=(.*)$", ENV_EXAMPLE_PATH.read_text(), re.MULTILINE
+    )
+    assert match is not None, "SITE_URL must be documented in .env.example"
+
+    parsed = urlparse(match.group(1).strip())
+
+    assert parsed.scheme == "https", match.group(1)
+    assert parsed.netloc, match.group(1)
