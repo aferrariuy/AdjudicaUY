@@ -59,6 +59,19 @@ from scraper.xml_report import (
 
 _UY_TZ = ZoneInfo("America/Montevideo")
 
+
+def scrape_day() -> date:
+    """Return the Uruguayan calendar day a default :func:`run_scrape` covers.
+
+    The worker container sets no ``TZ`` and so runs in UTC, while the government
+    reports are dated in Montevideo. At the default 02:00 UTC schedule those are
+    different calendar days. Every consumer of "the day this run scraped" must read
+    it from here rather than from the process-local clock.
+    """
+
+    return datetime.now(_UY_TZ).date()
+
+
 if TYPE_CHECKING:
     from sqlalchemy.orm import Session
 
@@ -324,7 +337,7 @@ def run_scrape(
     # Resolve date range
     # ------------------------------------------------------------------
     if start_date is None and end_date is None:
-        start_date = end_date = datetime.now(_UY_TZ).date()
+        start_date = end_date = scrape_day()
     elif start_date is None:
         start_date = end_date  # type: ignore[assignment]
     elif end_date is None:

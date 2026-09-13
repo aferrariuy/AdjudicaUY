@@ -22,8 +22,9 @@ import json
 import logging
 import os
 from contextlib import nullcontext
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import NamedTuple
 from unittest.mock import Mock
 
 import pytest
@@ -354,7 +355,7 @@ def test_marker_path_overrides_used_and_defaults_never_written(
     assert scheduler._heartbeat_path() == str(heartbeat)
     assert scheduler._last_run_path() == str(last_run)
 
-    monkeypatch.setattr(scheduler, "run_scrape", lambda: 1234)
+    monkeypatch.setattr(scheduler, "run_scrape", lambda **_kwargs: 1234)
     scheduler._run()
 
     assert last_run.exists()
@@ -371,7 +372,7 @@ def test_run_success_writes_utc_marker_with_exact_count(
 
     last_run = tmp_path / "last-run.json"
     monkeypatch.setenv("WORKER_LAST_RUN_FILE", str(last_run))
-    monkeypatch.setattr(scheduler, "run_scrape", lambda: 1234)
+    monkeypatch.setattr(scheduler, "run_scrape", lambda **_kwargs: 1234)
 
     scheduler._run()
 
@@ -440,7 +441,7 @@ def test_run_failure_leaves_no_marker(
     last_run = tmp_path / "last-run.json"
     monkeypatch.setenv("WORKER_LAST_RUN_FILE", str(last_run))
 
-    def failing_scrape() -> int:
+    def failing_scrape(**_kwargs: object) -> int:
         raise RuntimeError("upstream exploded")
 
     monkeypatch.setattr(scheduler, "run_scrape", failing_scrape)
@@ -469,7 +470,7 @@ def test_run_failure_preserves_prior_marker(
     prior_bytes = last_run.read_bytes()
     monkeypatch.setenv("WORKER_LAST_RUN_FILE", str(last_run))
 
-    def failing_scrape() -> int:
+    def failing_scrape(**_kwargs: object) -> int:
         raise RuntimeError("upstream exploded")
 
     monkeypatch.setattr(scheduler, "run_scrape", failing_scrape)
@@ -492,7 +493,7 @@ def test_marker_write_failure_does_not_fail_scrape(
 
     last_run = tmp_path / "last-run.json"
     monkeypatch.setenv("WORKER_LAST_RUN_FILE", str(last_run))
-    monkeypatch.setattr(scheduler, "run_scrape", lambda: 1234)
+    monkeypatch.setattr(scheduler, "run_scrape", lambda **_kwargs: 1234)
 
     def failing_marker_write(_path: str, _count: int) -> None:
         raise OSError("no space left")
@@ -556,38 +557,57 @@ class _SettingsStub:
         self.site_url = "https://adjudica.test"
 
 
+class _RunOutcome(NamedTuple):
+    """What one ``_run()`` did, as observed through its patched collaborators."""
+
+    submissions: list[dict[str, object]]
+    windows: list[tuple[date, date]]
+    scrape_calls: list[dict[str, object]]
+
+
 def _run_with_indexnow(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     *,
     key: str | None,
     entities: tuple[list[str], list[tuple[str, str]]] = (["ANEP"], [("RUT", "1")]),
-) -> list[dict[str, object]]:
-    """Drive one ``_run()`` and return the submission calls it produced."""
+) -> _RunOutcome:
+    """Drive one ``_run()`` and report its submissions, windows and scrape args."""
 
     submissions: list[dict[str, object]] = []
+    windows: list[tuple[date, date]] = []
+    scrape_calls: list[dict[str, object]] = []
+
+    def _scrape(**kwargs: object) -> int:
+        scrape_calls.append(kwargs)
+        return 7
 
     def _record(urls: list[str], *, site_url: str, key: str) -> Mock:
         submissions.append({"urls": list(urls), "site_url": site_url, "key": key})
         return Mock(status="submitted", url_count=len(urls), dropped_count=0)
 
     monkeypatch.setenv("WORKER_LAST_RUN_FILE", str(tmp_path / "last-run.json"))
-    monkeypatch.setattr(scheduler, "run_scrape", lambda: 7)
+    monkeypatch.setattr(scheduler, "run_scrape", _scrape)
     monkeypatch.setattr(
         scheduler, "get_settings", lambda: _SettingsStub(indexnow_key=key)
     )
     # The entity query is patched, so the session is never read: an empty
     # context manager stands in for it instead of a hand-written double.
     monkeypatch.setattr(scheduler, "get_session_factory", lambda: nullcontext)
-    monkeypatch.setattr(
-        scheduler,
-        "entities_active_between",
-        lambda session, *, start_date, end_date: entities,
-    )
+
+    def _entities(
+        session: object, *, start_date: date, end_date: date
+    ) -> tuple[list[str], list[tuple[str, str]]]:
+        windows.append((start_date, end_date))
+        return entities
+
+    monkeypatch.setattr(scheduler, "entities_active_between", _entities)
     monkeypatch.setattr(scheduler, "submit_urls", _record)
 
     scheduler._run()
-    return submissions
+    return _RunOutcome(
+        submissions=submissions, windows=windows, scrape_calls=scrape_calls
+    )
 
 
 def test_run_notifies_indexnow_with_the_urls_the_scrape_touched(
@@ -596,7 +616,8 @@ def test_run_notifies_indexnow_with_the_urls_the_scrape_touched(
 ) -> None:
     """The index plus every page the run touched is announced once."""
 
-    submissions = _run_with_indexnow(monkeypatch, tmp_path, key="0123456789abcdef")
+    outcome = _run_with_indexnow(monkeypatch, tmp_path, key="0123456789abcdef")
+    submissions = outcome.submissions
 
     assert len(submissions) == 1
     assert submissions[0]["urls"] == [
@@ -608,13 +629,48 @@ def test_run_notifies_indexnow_with_the_urls_the_scrape_touched(
     assert submissions[0]["key"] == "0123456789abcdef"
 
 
+def test_run_notifies_indexnow_for_the_day_the_scrape_covered(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """The query window is the scraped day, not whatever the local clock reads.
+
+    The container runs in UTC while the reports are dated in Montevideo, so those
+    are different calendar days at the default 02:00 UTC schedule. A window read
+    from the local clock names a day the run did not scrape, and the query then
+    returns nothing.
+    """
+
+    scraped = date(2026, 9, 12)
+    monkeypatch.setattr(scheduler, "scrape_day", lambda: scraped)
+
+    outcome = _run_with_indexnow(monkeypatch, tmp_path, key="0123456789abcdef")
+
+    assert outcome.windows == [(scraped, scraped)]
+
+
+def test_run_scrapes_the_same_day_it_notifies_for(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """One clock for the run: the scrape and the notification cannot disagree."""
+
+    scraped = date(2026, 9, 12)
+    monkeypatch.setattr(scheduler, "scrape_day", lambda: scraped)
+
+    outcome = _run_with_indexnow(monkeypatch, tmp_path, key="0123456789abcdef")
+
+    assert outcome.scrape_calls == [{"start_date": scraped, "end_date": scraped}]
+    assert outcome.windows == [(scraped, scraped)]
+
+
 def test_run_skips_indexnow_when_no_key_is_configured(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     """An unconfigured key leaves the feature off and touches no database."""
 
-    assert _run_with_indexnow(monkeypatch, tmp_path, key=None) == []
+    assert _run_with_indexnow(monkeypatch, tmp_path, key=None).submissions == []
 
 
 def test_run_survives_a_failing_indexnow_notification(
@@ -629,7 +685,7 @@ def test_run_survives_a_failing_indexnow_notification(
 
     last_run = tmp_path / "last-run.json"
     monkeypatch.setenv("WORKER_LAST_RUN_FILE", str(last_run))
-    monkeypatch.setattr(scheduler, "run_scrape", lambda: 7)
+    monkeypatch.setattr(scheduler, "run_scrape", lambda **_kwargs: 7)
     monkeypatch.setattr(
         scheduler,
         "get_settings",

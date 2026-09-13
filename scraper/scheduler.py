@@ -37,7 +37,7 @@ from app.database import get_session_factory
 from app.formatting import company_path, organism_path
 from app.services.catalog import entities_active_between
 from scraper.indexnow import submit_urls
-from scraper.main import _configure_logging, run_scrape
+from scraper.main import _configure_logging, run_scrape, scrape_day
 
 logger = logging.getLogger(__name__)
 
@@ -151,18 +151,19 @@ def _parse_schedule_component(
     return value
 
 
-def _notify_indexnow() -> None:
-    """Announce the pages the finished scrape touched, best-effort.
+def _notify_indexnow(day: date) -> None:
+    """Announce the pages the scrape of ``day`` touched, best-effort.
 
     The notification is a courtesy hint to search engines, so it is deliberately
     isolated from the run's outcome: a missing key, an unreachable endpoint or a
     database hiccup is logged and swallowed. A scrape that stored its records must
     never be reported as failed because a search engine was unavailable.
 
-    The window is assumed to be today, matching ``run_scrape``'s default of
-    scraping the current day. A run that crosses midnight could notify a slightly
-    stale window, which costs nothing: IndexNow is a hint, and the sitemap carries
-    the authoritative per-page dates.
+    ``day`` is the day the run actually scraped, handed in by the caller so that the
+    query window and the stored rows share one clock. Reading the local clock here
+    instead compares a Montevideo day against a UTC one: at the default 02:00 UTC
+    schedule the container is still on the previous Uruguayan day, so the window
+    would never overlap the rows just written and only the index would be announced.
     """
 
     try:
@@ -170,10 +171,9 @@ def _notify_indexnow() -> None:
         if not settings.indexnow_key:
             return
 
-        today = date.today()
         with get_session_factory()() as session:
             organisms, companies = entities_active_between(
-                session, start_date=today, end_date=today
+                session, start_date=day, end_date=day
             )
         urls = [
             f"{settings.site_url}/",
@@ -198,8 +198,13 @@ def _notify_indexnow() -> None:
 
 def _run() -> None:
     """Run one scheduled scrape, recording a last-run marker on success."""
+
+    # One clock for the whole run: the scrape and the IndexNow window must agree on
+    # which day was covered. The container's local clock is not that day — it runs in
+    # UTC while the reports are dated in Montevideo.
+    day = scrape_day()
     try:
-        inserted = run_scrape()
+        inserted = run_scrape(start_date=day, end_date=day)
     except Exception:
         logger.exception("Scheduled scrape failed")
         return
@@ -214,7 +219,7 @@ def _run() -> None:
     # After the marker: the notification can spend ~13s in retries, and the marker
     # is the signal an operator reads, so it must not wait on a courtesy call to a
     # search engine.
-    _notify_indexnow()
+    _notify_indexnow(day)
 
 
 def main() -> None:

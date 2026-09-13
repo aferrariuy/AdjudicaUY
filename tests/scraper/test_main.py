@@ -15,7 +15,7 @@ documented in the ``compra-normalization`` spec:
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import UTC, date, datetime, tzinfo
 from decimal import Decimal
 from typing import Any
 
@@ -24,6 +24,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 
+import scraper.main as scraper_main
 from app.models.compra import Compra
 from scraper.bcu_client import BcuClient
 from scraper.main import _run_scrape_for_day, enrich_xml_compra
@@ -674,3 +675,34 @@ def test_run_scrape_intermediate_flush_failure_rolls_back_and_fails_hard(
 
     assert "rollback" in events
     assert "client.close" in events
+
+
+def test_scrape_day_uses_the_montevideo_calendar(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``scrape_day`` reports the Uruguayan day, not the container's local one.
+
+    The worker container sets no ``TZ``, so it runs in UTC. At the default 02:00 UTC
+    schedule Montevideo is still on the previous calendar day, which makes a
+    process-local date name a day the run did not scrape.
+    """
+
+    class _FrozenClock:
+        """Stand-in for ``datetime`` pinned to one instant.
+
+        Deliberately not a ``datetime`` subclass: narrowing ``now``'s signature is a
+        type error, and this stub only ever needs ``now``.
+        """
+
+        _INSTANT = datetime(2026, 9, 13, 2, 0, tzinfo=UTC)
+
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> datetime:
+            return cls._INSTANT.astimezone(tz) if tz is not None else cls._INSTANT
+
+    monkeypatch.setattr(scraper_main, "datetime", _FrozenClock)
+
+    # The two calendars genuinely differ at this instant, so the assertion below
+    # cannot pass by accident.
+    assert _FrozenClock.now().date() == date(2026, 9, 13)
+    assert scraper_main.scrape_day() == date(2026, 9, 12)
