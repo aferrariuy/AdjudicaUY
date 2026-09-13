@@ -106,5 +106,16 @@ EXPOSE 8000
 # Entrypoint runs database migrations before the CMD.
 # The ``worker`` service in ``docker-compose.yml`` overrides CMD
 # with ``python -m scraper.main``; migrations still run first.
+#
+# ``--proxy-headers`` together with ``--forwarded-allow-ips`` is required
+# because TLS terminates at the reverse proxy (Traefik), which then forwards
+# plaintext HTTP over the container network. Without them uvicorn never looks
+# at ``X-Forwarded-Proto``, so ``request.url.scheme`` stays ``http`` and every
+# absolute URL built from the request -- starting with Starlette's
+# trailing-slash redirect -- is published with the wrong scheme. The proxy is
+# a container on ``dokploy-network``, so its address is not stable and the
+# wildcard is used; uvicorn's default trusts only 127.0.0.1, which would
+# discard the header. Trusting it is safe here because no authorization or
+# rate-limiting decision reads the client address.
 ENTRYPOINT ["bash", "scripts/entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
