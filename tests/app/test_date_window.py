@@ -240,16 +240,19 @@ def test_in_cap_single_sided_request_still_works(client: Any, path: str) -> None
     assert response.status_code == 200
 
 
-def test_derived_bound_is_visible_in_the_filter_form(
-    client: Any, make_adjudication: Any
-) -> None:
+def test_derived_bound_is_visible_in_the_filter_form(client: Any) -> None:
     """The window that was queried is shown, never applied silently.
 
     The form renders from the filters object, so materializing the missing
     bound there is what keeps "lo que ves es lo que se consultó" true.
-    """
 
-    make_adjudication(organism="Organismo Visible")
+    The organism deliberately has no awards. The filter form is the reader's only
+    way out of a window that matched nothing — the empty state links back to this
+    page so the form reloads with the window it is describing — so the form has to
+    render, and still name the window, when the listing is empty. An earlier version
+    created an award the assertions never looked at, which only made it ambiguous
+    whether the form needed one.
+    """
 
     before = date.today()
     response = client.get("/organism/Organismo%20Visible?date_from=2024-01-01")
