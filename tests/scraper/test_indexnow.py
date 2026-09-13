@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from typing import TYPE_CHECKING
 
 import httpx
@@ -246,3 +247,33 @@ def test_injected_client_is_not_closed() -> None:
         )
         assert result.status == "submitted"
         assert http_client.is_closed is False
+
+
+def test_success_log_does_not_claim_key_verification(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A 200 or 202 means the payload was received; it does not confirm the key.
+
+    Measured against the live API: a key that is not served at its declared
+    ``keyLocation`` answers 202 exactly like a valid one, so the response status
+    carries no information about key validity at all. The log therefore has to
+    send the operator to the key file — the one check that means something —
+    instead of reading as confirmation of a working setup.
+    """
+
+    transport = httpx.MockTransport(_make_handler())
+    with (
+        httpx.Client(transport=transport) as http_client,
+        caplog.at_level(logging.INFO),
+    ):
+        submit_urls(
+            ["https://example.test/a"],
+            site_url=_SITE_URL,
+            key=_KEY,
+            client=http_client,
+        )
+
+    message = caplog.text.lower()
+    assert "accepted" not in message
+    assert f"{_SITE_URL}/{_KEY}.txt" in caplog.text
+    assert "pending" in message or "deferred" in message

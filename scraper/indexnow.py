@@ -7,6 +7,13 @@ an unreachable search engine, a missing key, or a rejected payload must never
 propagate into the worker. Every failure path therefore returns an
 :class:`IndexNowResult` instead of raising, so callers can invoke
 :func:`submit_urls` unconditionally at the end of a run.
+
+Response codes carry less information than they appear to. ``202`` is documented
+as "URL received. IndexNow key validation pending.", and a key that is not served
+at its declared ``keyLocation`` answers ``202`` exactly like a valid one (measured
+against the live API). Neither 200 nor 202 confirms that the key verified, and the
+endpoint offers no status query. The only meaningful check is that ``keyLocation``
+serves the key as its body, which is why the success log points there.
 """
 
 from __future__ import annotations
@@ -42,8 +49,10 @@ _INDEXNOW_BACKOFF_JITTER = 1.0
 # that request cannot change the outcome.
 _INDEXNOW_RETRYABLE_EXCEPTIONS: tuple[type[Exception], ...] = (httpx.HTTPError,)
 
-# IndexNow acknowledges a valid submission with 200 (accepted) or 202
-# (accepted, validation pending).
+# The two non-error codes. 200 means "URL submitted successfully"; 202 means
+# "URL received. IndexNow key validation pending." Neither proves the key
+# verified, and 202 comes back for an unserved key as well, so these are
+# "the endpoint took it" codes, not "this works" codes.
 _SUCCESS_STATUS_CODES = frozenset({200, 202})
 
 
@@ -146,10 +155,13 @@ def submit_urls(
             )
         batch = unique_urls[:MAX_URLS_PER_REQUEST]
 
+        # The key file is the only thing that can prove the setup works, so it is
+        # built once and both sent and reported.
+        key_location = f"{site_root.rstrip('/')}/{key}.txt"
         payload: dict[str, object] = {
             "host": urlsplit(site_root).netloc,
             "key": key,
-            "keyLocation": f"{site_root.rstrip('/')}/{key}.txt",
+            "keyLocation": key_location,
             "urlList": batch,
         }
         response = _send(payload, client=client, timeout=timeout)
@@ -173,10 +185,18 @@ def submit_urls(
             detail=str(exc),
         )
 
+    # 200 and 202 both mean "the endpoint took the payload". 202 says so
+    # explicitly ("IndexNow key validation pending"), and a key that is not served
+    # at its declared location answers 202 exactly like a valid one -- measured
+    # against the live API. The status therefore says nothing about whether the key
+    # verifies, so the log must not read as confirmation: name the check that
+    # actually means something instead.
     logger.info(
-        "IndexNow accepted %d URL(s): HTTP %s",
+        "IndexNow received %d URL(s) (HTTP %s); key validation is deferred, "
+        "so confirm the key file is served at %s",
         len(batch),
         response.status_code,
+        key_location,
     )
     return IndexNowResult(
         status="submitted",
