@@ -52,6 +52,40 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 # other compiled bundles have a stable, framework-agnostic home.
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
+# Crawler directives: endpoints that render a fragment or a non-HTML
+# download must never be indexed. They are not pages — the HTMX
+# ``/partial`` responses are the same content as their full-page
+# counterparts without a ``<head>``, ``/adjudications`` duplicates
+# exactly what ``/`` already serves, and the CSV exports are downloads.
+# Leaving them crawlable doubles the crawler-visible surface of the site
+# (~28.7k organisms/companies => ~57.5k URLs) and splits the crawl
+# budget of a young site across duplicate fragments.
+#
+# We emit ``X-Robots-Tag: noindex`` rather than a ``robots.txt``
+# ``Disallow`` on purpose: a disallowed URL is never fetched, so Google
+# can never see the directive that removes what is already indexed.
+# ``noindex`` (without ``nofollow``) keeps link discovery from these
+# fragments intact while dropping them from the index.
+NON_INDEXABLE_PATHS = frozenset({"/adjudications"})
+NON_INDEXABLE_SUFFIXES = ("/partial", "/export")
+
+ROBOTS_NOINDEX = "noindex"
+
+
+def is_non_indexable_path(path: str) -> bool:
+    """Return whether ``path`` must never appear in a search index.
+
+    Only fragment and download endpoints qualify. The predicate is kept
+    deliberately narrow (an exact path plus two suffixes) so a future real
+    page can never be de-indexed by accident; the companion tests assert
+    that every full-page route is unaffected.
+    """
+
+    normalized = path.rstrip("/") or "/"
+    if normalized in NON_INDEXABLE_PATHS:
+        return True
+    return normalized.endswith(NON_INDEXABLE_SUFFIXES)
+
 
 def _validate_environment() -> None:
     """Fail fast at startup if the environment is not configured.
@@ -221,6 +255,17 @@ def create_app() -> FastAPI:
         response = await call_next(request)
         if request.url.path.startswith("/static/"):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+    # Crawler directives for fragment/download endpoints. Applied as a
+    # middleware (not per route) so the directive also covers redirects
+    # and error responses for those same paths, and so a new fragment
+    # endpoint only has to match the predicate above.
+    @app.middleware("http")
+    async def add_crawler_directives(request, call_next):  # noqa: ANN001, ANN202
+        response = await call_next(request)
+        if is_non_indexable_path(request.url.path):
+            response.headers["X-Robots-Tag"] = ROBOTS_NOINDEX
         return response
 
     @app.get("/healthz", include_in_schema=False)
