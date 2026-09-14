@@ -206,10 +206,20 @@ def test_declared_licence_is_the_one_this_page_links(client: Any) -> None:
     assert _dataset_block(body)["license"] == _licence_href(body)
 
 
+@pytest.mark.usefixtures("seed")
 def test_every_page_links_the_same_licence(client: Any) -> None:
-    """One licence across the footer and the about page.
+    """One licence across every page, read from pages that have content.
 
-    A site that names two different licences in two places contradicts itself.
+    A site that names two different licences in two places contradicts
+    itself.
+
+    The seed matters for the two entity routes, and its absence was a real
+    defect rather than a technicality: unseeded, they still answer 200 with
+    the full chrome and the footer, so this test passed while actually
+    reading the shell of a page whose entity does not exist. It named the
+    organism and company pages and covered neither. That is the same shape
+    of error as asserting a constant against itself - green for a reason
+    other than the one it claims.
     """
 
     hrefs = {_licence_href(client.get(path).text) for path in FULL_PAGES}
