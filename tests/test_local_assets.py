@@ -11,7 +11,10 @@ scoping, and theme:changed event wiring.
 from __future__ import annotations
 
 import re
-from typing import Any
+from pathlib import Path
+from typing import Any, cast
+
+import lxml.html
 
 
 def test_index_references_local_htmx(client: Any) -> None:
@@ -159,52 +162,109 @@ SUN_ICON = (
 
 MOON_ICON = "M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"
 
+# The two visibility rules the icons use, named for what each one does rather than for
+# the icon that happens to carry it. Both come from Tailwind's own vocabulary, read
+# through ``darkMode: 'class'``: ``dark:inline`` means "visible once ``.dark`` is set",
+# and ``dark:hidden`` means the shape disappears there.
+DARK_ONLY = frozenset({"hidden", "dark:inline"})
+LIGHT_ONLY = frozenset({"dark:hidden"})
 
-def test_theme_toggle_ships_both_icon_paths(client: Any) -> None:
-    """GET / still pairs each theme with its icon.
 
-    The toggle assigns its icon markup from two literals written out in the script
-    instead of concatenating a shared prefix with a path constant, because a computed
-    right-hand side is the shape injected content would take.
+def _theme_document(page: str) -> lxml.html.HtmlElement:
+    """Parse a rendered page.
 
-    Every separator here is matched with flexible whitespace, because what is under
-    test is which icon each branch draws, not how the script is laid out. An earlier
-    version pinned the braces and the spacing, so reformatting the function made this
-    fail for a reason that had nothing to do with the icons.
-
-    What it cannot check is that a browser paints the result: that needs a browser, and
-    the equivalence of the two spellings was established by comparing the produced
-    markup byte for byte when the rewrite was made.
+    Cast rather than assert: lxml's html helpers carry no annotations, so mypy infers
+    ``_Element`` from the ``etree.fromstring`` call inside them. What they return at
+    runtime is an ``HtmlElement``, which is where ``get_element_by_id`` lives.
     """
 
-    response = client.get("/")
-    text = response.text
+    return cast("lxml.html.HtmlElement", lxml.html.document_fromstring(page))
 
-    assert "SUN_PATH" not in text
-    assert "MOON_PATH" not in text
 
-    # Scoped to setLabel first: the page carries other if/else pairs (the 422 retry, for
-    # one), and an unscoped search happily matches whichever comes first.
-    set_label = re.search(r"function setLabel\s*\([^)]*\)\s*\{(?P<body>.*)", text, re.S)
-    assert set_label is not None, "setLabel is gone from the page"
+def _theme_icons(document: lxml.html.HtmlElement) -> dict[frozenset[str], str]:
+    """Map each theme icon's CSS classes to the path data it draws.
 
-    # Matched token by token, with every separator flexible, so neither reformatting the
-    # function nor moving a brace can change what this asserts. It pins the pairing: the
-    # sun is drawn when the flag is set and the moon by the ``else``. Two independent
-    # ``if`` statements, or an inverted condition, must fail here.
-    branch = re.search(
-        r"if\s*\(\s*(?P<cond>[^)]*)\)\s*\{(?P<then>.*?)\}\s*else\s*\{(?P<else>.*?)\}",
-        set_label["body"],
-        re.S,
+    Reads the page as a document, through lxml, instead of as text. The earlier version
+    of this test re-derived the theme-to-icon mapping by matching the source of the
+    inline script's ``if``/``else``, and three reviews each found a different defect in
+    that: it pinned the script's layout, then it lost the ``else`` binding, then its
+    function capture ran to the end of the document. The mapping is a property of the
+    markup now, so there is no control flow left to parse.
+    """
+
+    svg = document.get_element_by_id("theme-toggle-icon")
+    icons: dict[frozenset[str], str] = {}
+    for node in svg.iter("path"):
+        data = node.get("d")
+        assert data, "a theme toggle icon carries no path data"
+        icons[frozenset(node.get("class", "").split())] = data
+    return icons
+
+
+def test_theme_toggle_draws_the_mode_a_click_would_switch_to(client: Any) -> None:
+    """GET / pairs each theme with the symbol of the other one.
+
+    The button advertises the inverse action in two places at once: ``aria-label`` names
+    the mode a click switches to, and the icon draws that mode's symbol. Both are read
+    here from the default markup, which is what the browser paints before any script
+    runs: light is the theme then, because the anti-FOUC script only adds the ``.dark``
+    class when storage asks for it, so the label must offer dark mode and the visible
+    icon must be the moon.
+
+    Two assertions carry this, and neither is enough alone. The first pins the
+    visibility contract: each path carries exactly one of the two rules, so neither can
+    lose its rule and stay visible in both themes. The second pins the meaning the first
+    cannot see, by asking which shape sits behind the rule for dark mode. An earlier
+    version asserted only ``icons[SUN_CLASSES] == SUN_ICON``, with ``SUN_CLASSES`` named
+    after the sun, which read the markup back to itself and passed while the two icons
+    were inverted.
+    """
+
+    document = _theme_document(client.get("/").text)
+    label = document.get_element_by_id("theme-toggle").get("aria-label")
+    assert label == "Cambiar a modo oscuro", (
+        "the markup must offer dark mode before any script runs"
     )
-    assert branch is not None, "the icon is no longer chosen by an if/else pair"
-    # Compared whole, not by substring: ``!dark`` contains ``dark``, so a membership
-    # check would wave an inverted condition straight through.
-    assert branch["cond"].strip() == "dark", (
-        "the condition no longer reads the theme flag"
+
+    icons = _theme_icons(document)
+    assert set(icons) == {DARK_ONLY, LIGHT_ONLY}, (
+        f"expected a dark-only and a light-only icon, got {sorted(map(sorted, icons))}"
     )
-    assert SUN_ICON in branch["then"], "the branch taken in dark mode must draw the sun"
-    assert MOON_ICON in branch["else"], "the else branch must draw the moon"
+    assert icons[DARK_ONLY] == SUN_ICON, "dark mode must offer the sun"
+    assert icons[LIGHT_ONLY] == MOON_ICON, "light mode must offer the moon"
+
+
+def test_page_does_not_build_markup_at_runtime(client: Any) -> None:
+    """GET / never assigns to ``innerHTML``.
+
+    The toggle used to write its icon in from one of two literals in the script. That
+    is a small detail with a large blast radius: a computed right-hand side is the
+    shape injected content takes, and nothing else in these templates builds markup at
+    runtime. ``hx-swap="innerHTML"`` is an attribute value rather than an assignment,
+    so the pattern is anchored on the ``=``. A literal check for the forms these
+    templates could use, not a taint analysis: it catches this pattern coming back, not
+    every way markup can be built.
+    """
+
+    page = client.get("/").text
+    assert not re.search(r"\.(?:inner|outer)HTML\s*=|insertAdjacentHTML", page), (
+        "the page builds element markup at runtime"
+    )
+
+
+def test_tailwind_dark_mode_is_class_based() -> None:
+    """``tailwind.config.js`` keeps ``darkMode: 'class'``.
+
+    The ``dark:`` variants on the icons only mean anything with this setting. Under
+    ``darkMode: 'media'`` Tailwind emits ``@media (prefers-color-scheme: dark)``
+    instead, the button keeps flipping a class nothing reads, and the icons stop
+    following the toggle without anything else on the page looking broken.
+    """
+
+    config = (Path(__file__).resolve().parents[1] / "tailwind.config.js").read_text()
+    assert re.search(r"darkMode\s*:\s*['\"]class['\"]", config), (
+        "dark: variants need darkMode: 'class' to follow the .dark class"
+    )
 
 
 def test_scripts_block_present(client: Any) -> None:

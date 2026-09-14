@@ -94,10 +94,15 @@
         <h1 class="font-big-shoulders text-3xl font-bold tracking-tight text-ink">AdjudicaUY</h1>
         <p class="text-sm text-texto-sec">Adjudicaciones del Estado uruguayo</p>
       </div>
-      {# Theme toggle. Sun/moon SVG swaps at runtime via the IIFE at
-         the bottom of the file; ``aria-label`` is kept in sync so
-         screen readers announce the action the button will take, not
-         the state it currently represents. #}
+      {# Theme toggle. Both icons ship here, and CSS picks one from the ``.dark``
+         class that the anti-FOUC script sets on the document root before this
+         markup is parsed, so the correct shape is in the first paint and no script
+         builds markup. Each icon is the symbol of the mode a click will switch to,
+         matching the ``aria-label`` next to it: light is the theme with no
+         ``.dark`` class, so the moon is the one visible here and the sun appears
+         once the class lands. ``aria-label`` is kept in sync by the script below
+         so screen readers announce the action the button will take, not the state
+         it currently represents. #}
       <button
         id="theme-toggle"
         type="button"
@@ -106,7 +111,8 @@
         title="Cambiar tema"
       >
         <svg class="w-5 h-5" id="theme-toggle-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m8.66-13.66l-.71.71M4.05 4.05l-.71.71M21 12h-1M4 12H3m16.66 7.34l-.71-.71M4.05 19.95l-.71-.71M12 8a4 4 0 100 8 4 4 0 000-8z"/>
+          <path class="hidden dark:inline" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m8.66-13.66l-.71.71M4.05 4.05l-.71.71M21 12h-1M4 12H3m16.66 7.34l-.71-.71M4.05 19.95l-.71-.71M12 8a4 4 0 100 8 4 4 0 000-8z"/>
+          <path class="dark:hidden" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
         </svg>
       </button>
     </div>
@@ -191,31 +197,21 @@
       });
 
       /* ---------------------------------------------------------------
-       * Theme toggle. Flips the ``.dark`` class on ``<html>``,
-       * persists the choice in localStorage (with a try/catch for
-       * private-mode browsers), and swaps the icon + aria-label so
-       * the next click advertises the inverse action. The class is
-       * already on ``<html>`` by the time this script runs, courtesy
-       * of the anti-FOUC script in the head, so ``setLabel`` is
-       * called once at init to render the right icon for the
-       * stored theme.
+       * Theme toggle. Flips the ``.dark`` class on ``<html>``, persists
+       * the choice in localStorage (with a try/catch for private-mode
+       * browsers), and keeps ``aria-label`` describing the inverse
+       * action. Which icon is drawn is CSS's job: both shapes are in the
+       * markup and the ``.dark`` class selects one, so this script never
+       * touches the SVG and the icon is already correct on the first
+       * paint. ``setLabel`` runs once at init for the theme the anti-FOUC
+       * script already applied.
        * --------------------------------------------------------------- */
       (function initThemeToggle() {
         var btn = document.getElementById('theme-toggle');
-        var icon = document.getElementById('theme-toggle-icon');
         if (!btn) return;
-
 
         function setLabel(dark) {
           btn.setAttribute('aria-label', dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
-          // Each branch assigns markup fixed at author time. The two literals are
-          // written out rather than concatenated into a shared prefix, because a
-          // computed right-hand side is the shape injected content can take.
-          if (dark) {
-            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m8.66-13.66l-.71.71M4.05 4.05l-.71.71M21 12h-1M4 12H3m16.66 7.34l-.71-.71M4.05 19.95l-.71-.71M12 8a4 4 0 100 8 4 4 0 000-8z"/>';
-          } else {
-            icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>';
-          }
         }
 
         function toggle() {
@@ -225,8 +221,8 @@
           document.dispatchEvent(new Event('theme:changed'));
         }
 
-        // Set initial icon state from whatever the anti-FOUC script
-        // decided, then wire the click handler.
+        // Label the button for the theme the anti-FOUC script already applied,
+        // then wire the click handler.
         setLabel(document.documentElement.classList.contains('dark'));
         btn.addEventListener('click', toggle);
       })();
