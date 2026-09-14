@@ -228,8 +228,17 @@ def test_rendered_partials_have_no_inline_scripts(
     assert inline_scripts == []
 
 
-def test_htmx_config_switches_off_the_runtime_style_it_cannot_nonce(
-    client: TestClient,
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/",
+        "/about",
+        "/organism/SECURITY-ORG",
+        "/company/RUT/42",
+    ],
+)
+def test_page_declares_the_htmx_config_that_disables_style_injection(
+    client: TestClient, path: str
 ) -> None:
     """HTMX must be told not to append the indicator styles it builds at runtime.
 
@@ -244,19 +253,24 @@ def test_htmx_config_switches_off_the_runtime_style_it_cannot_nonce(
     the string ``"false"`` would append exactly as before. Asserting ``is False`` is
     therefore about behaviour rather than spelling.
 
-    What this cannot check is whether HTMX honours the meta. That follows from HTMX's
-    own guard, and the end-to-end confirmation is a browser console with no CSP error.
+    The name says *declares* on purpose: this reads the config the page ships and
+    nothing more. Whether HTMX acts on it is HTMX's guard, not this assertion, and the
+    only end-to-end confirmation is a browser console with no CSP violation.
     """
 
-    response = client.get("/")
+    response = client.get(path)
     soup = BeautifulSoup(response.text, "html.parser")
-    meta = soup.find("meta", attrs={"name": "htmx-config"})
+    metas = soup.find_all("meta", attrs={"name": "htmx-config"})
 
-    assert meta is not None, "the page does not configure HTMX"
+    # One declaration, not several: which of two conflicting metas wins is a parser
+    # detail, and the reader of this test should not have to know it.
+    assert len(metas) == 1, f"{path} declares {len(metas)} HTMX configs"
 
-    content = meta.get("content")
+    content = metas[0].get("content")
     assert isinstance(content, str)
-    assert json.loads(content)["includeIndicatorStyles"] is False
+    assert json.loads(content)["includeIndicatorStyles"] is False, (
+        f"{path} would let HTMX inject a style it cannot nonce"
+    )
 
 
 # ---------------------------------------------------------------------------

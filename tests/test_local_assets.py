@@ -149,19 +149,32 @@ def test_bigshoulders_not_preloaded(client: Any) -> None:
         )
 
 
+# The full path data for each icon, so a typo anywhere in a shape is caught and not
+# just one near its start.
+SUN_ICON = (
+    "M12 3v1m0 16v1m8.66-13.66l-.71.71M4.05 4.05l-.71.71M21 12h-1M4"
+    " 12H3m16.66 7.34l-.71-.71M4.05 19.95l-.71-.71M12 8a4 4 0 100 8"
+    " 4 4 0 000-8z"
+)
+
+MOON_ICON = "M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"
+
+
 def test_theme_toggle_ships_both_icon_paths(client: Any) -> None:
-    """GET / still carries both shapes for the theme toggle.
+    """GET / still pairs each theme with its icon.
 
     The toggle assigns its icon markup from two literals written out in the script
     instead of concatenating a shared prefix with a path constant, because a computed
-    right-hand side is the shape injected content would take. What this pins is that
-    both shapes are still shipped, so that rewrite did not silently drop or mistype
-    one of them.
+    right-hand side is the shape injected content would take.
 
-    Each path is asserted against the branch that assigns it, so a swapped pair or an
-    inverted condition fails here rather than shipping. What it cannot check is that a
-    browser paints the result: the equivalence of the two spellings was established by
-    comparing the produced markup byte for byte when the rewrite was made.
+    Every separator here is matched with flexible whitespace, because what is under
+    test is which icon each branch draws, not how the script is laid out. An earlier
+    version pinned the braces and the spacing, so reformatting the function made this
+    fail for a reason that had nothing to do with the icons.
+
+    What it cannot check is that a browser paints the result: that needs a browser, and
+    the equivalence of the two spellings was established by comparing the produced
+    markup byte for byte when the rewrite was made.
     """
 
     response = client.get("/")
@@ -170,13 +183,28 @@ def test_theme_toggle_ships_both_icon_paths(client: Any) -> None:
     assert "SUN_PATH" not in text
     assert "MOON_PATH" not in text
 
-    picks_sun = re.search(r"if \(dark\) \{\s*icon\.innerHTML = '([^']*)'", text)
-    picks_moon = re.search(r"else \{\s*icon\.innerHTML = '([^']*)'", text)
+    # Scoped to setLabel first: the page carries other if/else pairs (the 422 retry, for
+    # one), and an unscoped search happily matches whichever comes first.
+    set_label = re.search(r"function setLabel\s*\([^)]*\)\s*\{(?P<body>.*)", text, re.S)
+    assert set_label is not None, "setLabel is gone from the page"
 
-    assert picks_sun is not None, "the dark branch no longer assigns an icon"
-    assert picks_moon is not None, "the light branch no longer assigns an icon"
-    assert "M12 3v1m0 16v1m8.66-13.66l-.71.71" in picks_sun.group(1)
-    assert "M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" in picks_moon.group(1)
+    # Matched token by token, with every separator flexible, so neither reformatting the
+    # function nor moving a brace can change what this asserts. It pins the pairing: the
+    # sun is drawn when the flag is set and the moon by the ``else``. Two independent
+    # ``if`` statements, or an inverted condition, must fail here.
+    branch = re.search(
+        r"if\s*\(\s*(?P<cond>[^)]*)\)\s*\{(?P<then>.*?)\}\s*else\s*\{(?P<else>.*?)\}",
+        set_label["body"],
+        re.S,
+    )
+    assert branch is not None, "the icon is no longer chosen by an if/else pair"
+    # Compared whole, not by substring: ``!dark`` contains ``dark``, so a membership
+    # check would wave an inverted condition straight through.
+    assert branch["cond"].strip() == "dark", (
+        "the condition no longer reads the theme flag"
+    )
+    assert SUN_ICON in branch["then"], "the branch taken in dark mode must draw the sun"
+    assert MOON_ICON in branch["else"], "the else branch must draw the moon"
 
 
 def test_scripts_block_present(client: Any) -> None:

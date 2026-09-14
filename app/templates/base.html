@@ -208,11 +208,9 @@
 
         function setLabel(dark) {
           btn.setAttribute('aria-label', dark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro');
-          // Each branch assigns markup fixed at author time. Writing the two
-          // literals out rather than concatenating a shared prefix with a path
-          // constant is what keeps this a static assignment: a computed right-hand
-          // side is the shape injected content would take, and it is the shape the
-          // no-inner-html rule flags.
+          // Each branch assigns markup fixed at author time. The two literals are
+          // written out rather than concatenated into a shared prefix, because a
+          // computed right-hand side is the shape injected content can take.
           if (dark) {
             icon.innerHTML = '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 3v1m0 16v1m8.66-13.66l-.71.71M4.05 4.05l-.71.71M21 12h-1M4 12H3m16.66 7.34l-.71-.71M4.05 19.95l-.71-.71M12 8a4 4 0 100 8 4 4 0 000-8z"/>';
           } else {
