@@ -89,24 +89,27 @@ def _own_content_text(html: str) -> str:
     return " ".join(main.get_text(" ", strip=True).split())
 
 
-def _licence_href(html: str) -> str:
-    """The URL behind whichever link carries the licence's name.
+def _licence_hrefs(html: str) -> set[str]:
+    """Every URL a reader can follow to reach the licence, page-wide.
 
-    Reading the link rather than restating a constant is deliberate: this is
-    the value the ``Dataset`` markup is compared against, and two copies of a
-    constant would agree with each other while disagreeing with the page.
+    Returning all of them rather than the first is the point. "There is a link
+    to the licence somewhere on this page" is satisfied by a page that also
+    links a different one, so it stays green while the site tells two readers
+    two different things. Collecting them makes the universal claim checkable:
+    one page, one licence, or the test reports how many it found.
+
+    Reading the links rather than restating a constant is deliberate: these are
+    the values the ``Dataset`` markup is compared against, and a second copy of
+    a constant would agree with the first while disagreeing with the page.
     """
 
-    soup = BeautifulSoup(html, "html.parser")
-    for anchor in soup.find_all("a"):
+    hrefs: set[str] = set()
+    for anchor in BeautifulSoup(html, "html.parser").find_all("a"):
         if LICENCE_NAME in anchor.get_text():
             href = anchor.get("href")
             assert href, "the licence link must carry an href"
-            return str(href)
-    raise AssertionError(
-        "the licence must be linked, not merely mentioned; "
-        f"no anchor is labelled with {LICENCE_NAME!r}"
-    )
+            hrefs.add(str(href))
+    return hrefs
 
 
 def _dataset_block(html: str) -> dict[str, Any]:
@@ -167,11 +170,13 @@ def test_every_full_page_cites_the_three_nota_de_origen_elements(
 
     html = client.get(path).text
     footer = _footer_text(html)
+    hrefs = _licence_hrefs(html)
 
     assert PROVIDER_NAME in footer
     assert LICENCE_NAME in footer
     assert DATA_SET_MARKER in footer
-    assert _licence_href(html).startswith("https://")
+    assert hrefs, "a full page must link the licence"
+    assert all(href.startswith("https://") for href in hrefs)
 
 
 def test_about_page_explains_the_licence_in_its_own_content(client: Any) -> None:
@@ -194,37 +199,46 @@ def test_about_page_explains_the_licence_in_its_own_content(client: Any) -> None
 
 
 def test_declared_licence_is_the_one_this_page_links(client: Any) -> None:
-    """The ``Dataset`` licence and the visible link are one document, not two.
+    """The ``Dataset`` licence and the visible links are one document, not two.
 
     Comparing each against its own constant would pass while one of them
-    pointed somewhere else entirely. Comparing them against each other is the
-    assertion that cannot be satisfied by two copies of the same mistake.
+    pointed somewhere else entirely. Comparing the declared value against the
+    set of links the page actually offers is the assertion that cannot be
+    satisfied by two copies of the same mistake - and, because it is the set
+    and not the first match, a second licence link on the same page fails it.
     """
 
     body = client.get("/").text
 
-    assert _dataset_block(body)["license"] == _licence_href(body)
+    assert {_dataset_block(body)["license"]} == _licence_hrefs(body)
 
 
 @pytest.mark.usefixtures("seed")
 def test_every_page_links_the_same_licence(client: Any) -> None:
-    """One licence across every page, read from pages that have content.
+    """One licence per page, and one licence across all of them.
 
-    A site that names two different licences in two places contradicts
-    itself.
+    Two claims, and the first is the one this test was missing. Looking for *a*
+    link to the licence on each page is satisfied by a page that also points
+    somewhere else, so the assertion stayed green while the site could have
+    been telling two readers two different things. Collapsing each page's
+    licence links to a single URL, and then all pages to the same one, is what
+    makes the claim universal instead of existential.
 
     The seed matters for the two entity routes, and its absence was a real
-    defect rather than a technicality: unseeded, they still answer 200 with
-    the full chrome and the footer, so this test passed while actually
-    reading the shell of a page whose entity does not exist. It named the
-    organism and company pages and covered neither. That is the same shape
-    of error as asserting a constant against itself - green for a reason
-    other than the one it claims.
+    defect rather than a technicality: unseeded, they still answer 200 with the
+    full chrome and the footer, so the test passed while actually reading the
+    shell of a page whose entity does not exist. It named the organism and
+    company pages and covered neither.
     """
 
-    hrefs = {_licence_href(client.get(path).text) for path in FULL_PAGES}
+    per_page = {path: _licence_hrefs(client.get(path).text) for path in FULL_PAGES}
 
-    assert len(hrefs) == 1, hrefs
+    for path, hrefs in per_page.items():
+        assert len(hrefs) == 1, f"{path} links {len(hrefs)} licences: {sorted(hrefs)}"
+
+    combined = set().union(*per_page.values())
+
+    assert len(combined) == 1, {path: sorted(h) for path, h in per_page.items()}
 
 
 def test_licence_url_points_at_the_uruguayan_governments_document(
