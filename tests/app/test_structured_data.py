@@ -265,16 +265,25 @@ def test_dataset_distribution_points_at_an_absolute_url(client: Any) -> None:
     assert distribution["contentUrl"].startswith(f"{get_settings().site_url}/")
 
 
-def test_dataset_claims_no_license(client: Any) -> None:
-    """The project declares no license, so none may be published.
+def test_dataset_declares_the_source_license(client: Any) -> None:
+    """The catalogue names the licence its data is published under.
 
-    Structured data must not misrepresent how the data may be reused; adding a
-    `license` here would grant terms nobody granted.
+    This test used to assert the opposite, reasoning that the project declared
+    no licence and that naming one would grant terms nobody granted. The
+    reasoning was sound and the premise was false: the source data is published
+    by the Uruguayan state under the "Licencia de Datos Abiertos - Uruguay",
+    which Decreto N° 54/017 makes mandatory for public bodies publishing open
+    data, and whose article 2 requires the licence to be identified on the site
+    that uses it. Omitting it was the misstatement.
+
+    The provenance of the URL is pinned by literal in
+    ``tests/test_data_attribution.py``, together with the assertion that this
+    value and the link a reader can click are the same document.
     """
 
     block = _blocks_of_type(client.get("/").text, "Dataset")[0]
 
-    assert "license" not in block
+    assert block["license"].startswith("https://")
 
 
 def test_dataset_claims_the_measured_temporal_coverage(

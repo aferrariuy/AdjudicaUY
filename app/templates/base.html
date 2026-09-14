@@ -126,7 +126,12 @@
 
   <footer class="bg-folio border-t border-linea mt-auto">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 text-xs text-texto-sec">
-      Datos publicados por la Agencia de Compras y Contrataciones del Estado (ACCE). Conversión a UYU según cotización del BCU en la fecha de adjudicación.
+      Datos publicados por la
+      <a href="{{ data_attribution.provider_url }}" class="underline underline-offset-2 hover:text-ink">{{ data_attribution.provider_name }}</a>,
+      conjunto de datos «{{ data_attribution.data_set_name }}», bajo la
+      <a href="{{ data_attribution.license_url }}" class="underline underline-offset-2 hover:text-ink">{{ data_attribution.license_name }}</a>
+      ({{ data_attribution.license_basis }}). La conversión de los montos a pesos uruguayos (UYU) es un aporte propio,
+      según la cotización del Banco Central del Uruguay (BCU) en la fecha de adjudicación.
     </div>
   </footer>
 

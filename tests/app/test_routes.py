@@ -948,7 +948,7 @@ def test_full_page_index_renders_422_with_page_chrome_on_excessive_range(
     # The header from base.html is rendered (the brand title).
     assert ">AdjudicaUY<" in body
     # The footer is rendered too — full chrome, not a fragment.
-    assert "Agencia de Compras y Contrataciones" in body
+    assert "<footer" in body
     # The filter form is still present so the user can correct the dates.
     assert 'name="date_from"' in body
     assert 'name="date_to"' in body
@@ -971,7 +971,7 @@ def test_full_page_index_renders_422_with_page_chrome_on_invalid_format(
     assert "AAAA-MM-DD" in body
     # The header/footer are present.
     assert ">AdjudicaUY<" in body
-    assert "Agencia de Compras y Contrataciones" in body
+    assert "<footer" in body
 
 
 def test_full_page_index_renders_422_with_page_chrome_on_reversed_range(
@@ -1025,7 +1025,7 @@ def test_full_page_organism_renders_422_with_page_chrome_on_excessive_range(
     assert "5 años" in body
     # Header + footer present.
     assert ">AdjudicaUY<" in body
-    assert "Agencia de Compras y Contrataciones" in body
+    assert "<footer" in body
     # The "Volver al buscador" link is still rendered (full chrome).
     assert "Volver al buscador" in body
 
@@ -1051,7 +1051,7 @@ def test_full_page_organism_renders_422_with_page_chrome_on_invalid_format(
     assert 'role="alert"' in body
     assert "AAAA-MM-DD" in body
     assert ">AdjudicaUY<" in body
-    assert "Agencia de Compras y Contrataciones" in body
+    assert "<footer" in body
 
 
 def test_htmx_partial_still_returns_bare_fragment_on_excessive_range(
@@ -1081,7 +1081,7 @@ def test_htmx_partial_still_returns_bare_fragment_on_excessive_range(
     # ``#results`` container.
     assert "<html" not in body
     assert "<header" not in body
-    assert "Agencia de Compras y Contrataciones" not in body
+    assert "<footer" not in body
 
 
 def test_organism_htmx_partial_still_returns_bare_fragment_on_excessive_range(
@@ -1243,7 +1243,7 @@ def test_company_profile_partial_contains_body_without_page_chrome(
     assert response.status_code == 200
     assert "PARTIAL-ACME" in response.text
     assert "<html" not in response.text
-    assert "Agencia de Compras y Contrataciones" not in response.text
+    assert "<footer" not in response.text
 
 
 def test_company_profile_renders_top_articles_widget_scoped_to_document(

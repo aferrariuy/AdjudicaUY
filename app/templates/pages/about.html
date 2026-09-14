@@ -42,18 +42,45 @@
         <h2 class="font-big-shoulders text-xl font-bold text-ink mb-3">¿Qué es AdjudicaUY?</h2>
         <p class="text-sm leading-relaxed">
           AdjudicaUY es una herramienta que facilita el acceso a la información pública sobre
-          adjudicaciones estatales en Uruguay. Recopila datos publicados por la Agencia de Compras
-          y Contrataciones del Estado (ACCE) y los presenta en un formato accesible, permitiendo
-          buscar, filtrar y visualizar las adjudicaciones realizadas por los organismos del Estado.
+          adjudicaciones estatales en Uruguay. Recopila datos publicados por la
+          <a
+            href="{{ data_attribution.provider_url }}"
+            class="underline underline-offset-2"
+          >{{ data_attribution.provider_name }}</a>
+          y los presenta en un formato accesible, permitiendo buscar, filtrar y visualizar las
+          adjudicaciones realizadas por los organismos del Estado.
         </p>
       </section>
 
       <section>
         <h2 class="font-big-shoulders text-xl font-bold text-ink mb-3">Fuentes de datos</h2>
         <p class="text-sm leading-relaxed">
-          Los datos provienen de los reportes XML publicados por Compras Estatales
-          (comprasestatales.gub.uy). La conversión de montos a Pesos Uruguayos (UYU) se realiza
-          según la cotización del Banco Central del Uruguay (BCU) en la fecha de adjudicación.
+          Los datos provienen de los {{ data_attribution.data_set_name }} publicados por Compras
+          Estatales (comprasestatales.gub.uy). La conversión de montos a pesos uruguayos (UYU) se
+          realiza según la cotización del Banco Central del Uruguay (BCU) en la fecha de
+          adjudicación.
+        </p>
+      </section>
+
+      <section>
+        <h2 class="font-big-shoulders text-xl font-bold text-ink mb-3">Licencia de los datos</h2>
+        <p class="text-sm leading-relaxed">
+          Los datos de origen se publican bajo la
+          <a
+            href="{{ data_attribution.license_url }}"
+            class="underline underline-offset-2"
+          >{{ data_attribution.license_name }}</a>
+          (versión 0.1), incluida como Anexo I del Decreto 54/017, reglamentario del artículo 82 de
+          la Ley 19.355. Es una licencia de datos abiertos: autoriza el uso comercial y no
+          comercial, así como adaptar, transformar y combinar los datos, incluso integrándolos en
+          productos y aplicaciones. Su adopción es obligatoria para todos los organismos del Estado
+          uruguayo que publiquen datos abiertos, y exige citar el proveedor, la licencia y el
+          conjunto de datos utilizado.
+        </p>
+        <p class="text-sm leading-relaxed">
+          Esos tres elementos se citan en el pie de página de todas las páginas del sitio. Los
+          aportes propios —la conversión de los montos a pesos uruguayos, la normalización de los
+          registros y las agregaciones— se ofrecen bajo la misma licencia.
         </p>
       </section>
 

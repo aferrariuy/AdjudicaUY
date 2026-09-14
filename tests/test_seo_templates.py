@@ -12,6 +12,8 @@ import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from jinja2.runtime import Context
 
+from app.presenters import DATA_ATTRIBUTION
+
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "app" / "templates"
 
 # Absolute URLs that may legitimately appear literally in a template. Every
@@ -36,9 +38,12 @@ TEST_SITE_URL = "https://test.example"
 def _make_jinja_env():
     """Create a Jinja2 Environment pointing at the app templates dir.
 
-    The ``site_url`` global mirrors the one ``create_app`` installs on
-    ``app.state.templates.env``, so template fallbacks resolve here exactly
-    as they do in production.
+    The ``site_url`` and ``data_attribution`` globals mirror the ones
+    ``create_app`` installs on ``app.state.templates.env``, so template
+    fallbacks resolve here exactly as they do in production. A global that
+    ``create_app`` installs and this harness forgets does not fall back to
+    empty: reading an attribute off an undefined name raises, so every
+    ``base.html`` render in this module would fail rather than degrade.
     """
 
     env = Environment(
@@ -46,6 +51,7 @@ def _make_jinja_env():
         autoescape=select_autoescape(["html"]),
     )
     env.globals["site_url"] = TEST_SITE_URL
+    env.globals["data_attribution"] = DATA_ATTRIBUTION
     return env
 
 

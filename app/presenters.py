@@ -153,6 +153,58 @@ def _build_breadcrumb_json_ld(
     }
 
 
+@dataclass(frozen=True)
+class DataAttribution:
+    """The citation the licence of the source data requires, in one object.
+
+    The data behind this site is published by the Uruguayan state under the
+    "Licencia de Datos Abiertos - Uruguay", annex I of Decreto N° 54/017, which
+    regulates article 82 of Ley N° 19.355. Adopting that licence is mandatory
+    for every public body publishing open data, and article 2 of the same
+    decree reaches whoever *uses* the data: the licence "deberá estar
+    identificada en el sitio web, aplicación o sistema que use datos abiertos".
+    The licence's own "Nota de Origen" clause then lists what the citation has
+    to contain:
+
+    * the name of the provider,
+    * the reference to the "Licencia de Datos Abiertos - Uruguay",
+    * the reference to the data set being used.
+
+    Holding the three together, and handing this same object to the templates
+    that render them, is what keeps the visible citation and the ``Dataset``
+    markup from describing two different licences.
+
+    On the provider's name: the body was created by Ley N° 18.362 (2008) as the
+    "Agencia de Compras y Contrataciones del Estado" and transformed into the
+    "Agencia Reguladora de Compras Estatales" by article 329 of Ley N° 19.889,
+    in force since 2020. The current name is the fact, not a preference.
+    """
+
+    provider_name: str
+    provider_url: str
+    data_set_name: str
+    license_name: str
+    license_url: str
+    license_basis: str
+
+
+DATA_ATTRIBUTION = DataAttribution(
+    provider_name="Agencia Reguladora de Compras Estatales (ARCE)",
+    provider_url="https://www.comprasestatales.gub.uy/",
+    data_set_name="reportes XML diarios de adjudicaciones",
+    license_name="Licencia de Datos Abiertos - Uruguay",
+    # IMPO publishes the decree and its annex; this is the annex text itself.
+    license_url=(
+        "https://www.impo.com.uy/wp_impo/wp-content/uploads/2018/06/"
+        "licencia-de-datos-abiertos.pdf"
+    ),
+    license_basis=(
+        "Anexo I del Decreto 54/017, reglamentario del art. 82 de la Ley 19.355"
+    ),
+)
+"""The single source for the citation, shared by the JSON-LD and the pages."""
+
+
 def _build_catalog_dataset_json_ld(
     *,
     date_span: tuple[date | None, date | None] | None = None,
@@ -161,10 +213,19 @@ def _build_catalog_dataset_json_ld(
 
     Google requires only ``name`` and ``description`` (50-5000 characters);
     everything else comes from its recommended list and is stated only where
-    the project can back it up. One deliberate omission remains:
+    the project can back it up.
 
-    * no ``license`` — the project declares none, and publishing terms it does
-      not grant would misrepresent how the data may be reused.
+    ``license`` states the terms the underlying data is published under, taken
+    from :data:`DATA_ATTRIBUTION`. An earlier version of this builder omitted
+    it, reasoning that the project declared no licence and that naming one
+    would grant terms nobody granted. The reasoning was sound and the premise
+    was false: the source data is published under the "Licencia de Datos
+    Abiertos - Uruguay", which Decreto N° 54/017 makes mandatory for state
+    bodies publishing open data, and whose article 2 requires the licence to be
+    identified on the site that uses it. Declaring it is the obligation. What
+    this node must still not do is present the source's licence as one the
+    project itself grants, so no separate terms are asserted over the
+    compilation.
 
     ``date_span`` is the catalogue's oldest and newest publication date, read
     from the same query that dates the sitemap, so the two can never disagree.
@@ -206,6 +267,7 @@ def _build_catalog_dataset_json_ld(
             "name": "AdjudicaUY",
             "url": f"{site_url}/",
         },
+        "license": DATA_ATTRIBUTION.license_url,
         "isAccessibleForFree": True,
         "keywords": [
             "compras publicas",

@@ -35,6 +35,7 @@ from app.formatting import (
     format_uyu,
     organism_path,
 )
+from app.presenters import DATA_ATTRIBUTION
 from app.routes import router
 from app.routes._base import HeadAwareAPIRoute
 from app.services.catalog import (
@@ -241,6 +242,14 @@ def create_app() -> FastAPI:
     # fallbacks correct when a route forgets to inject the SEO context,
     # instead of publishing a domain that belongs to another project.
     app.state.templates.env.globals["site_url"] = settings.site_url
+
+    # The citation the source licence requires, exposed the same way. The
+    # licence is stated twice on the site — as the link a citizen can click and
+    # as the ``license`` field of the catalogue's ``Dataset`` markup — and both
+    # must name the same document. Handing the templates the same object the
+    # JSON-LD builder reads is what makes that a single fact rather than two
+    # that have to be kept in step by hand.
+    app.state.templates.env.globals["data_attribution"] = DATA_ATTRIBUTION
 
     # Reject untrusted Host headers before any route/database work. This
     # is registered after GZip but before the custom ``@app.middleware``
