@@ -52,3 +52,33 @@ def test_seo_context_has_no_double_slash_when_site_url_has_trailing_slash(
     assert context["og_image"] == (
         "https://adjudicauy.appuy.dedyn.io/static/og-image.png"
     )
+
+
+def test_seo_context_offers_the_lowercase_host_as_an_alternate_site_name(
+    monkeypatch: Any,
+) -> None:
+    """The context names the site's own host so Google has a fallback name.
+
+    When Google does not select a site's preferred name it may show the
+    domain-level name instead, and its documented remedy is ``alternateName``
+    with the host in all lowercase. This host sits under deSEC's shared
+    ``dedyn.io`` dynamic-DNS namespace, whose parent resolves to a different
+    product, so the name Google substitutes is a foreign brand rather than a
+    near miss of this one.
+
+    The name must come from the same ``site_url`` that builds ``canonical_url``:
+    an alternate name for a host the site does not publish would be worse than
+    none, so the two values are asserted together here.
+    """
+
+    monkeypatch.setenv("SITE_URL", "https://AdjudicaUY.AppUY.dedyn.io/")
+
+    context = _build_seo_context(
+        meta_title="AdjudicaUY",
+        meta_description="Adjudicaciones del Estado uruguayo",
+        og_type="website",
+        path="/",
+    )
+
+    assert context["alternate_site_names"] == ["adjudicauy.appuy.dedyn.io"]
+    assert context["canonical_url"] == "https://AdjudicaUY.AppUY.dedyn.io/"

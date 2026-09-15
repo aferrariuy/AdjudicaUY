@@ -4,6 +4,7 @@ Verifies that templates render correct meta tags, OG tags, Twitter cards,
 canonical URLs, JSON-LD structured data, and crawlable pagination hrefs.
 """
 
+import json
 import re
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -23,6 +24,10 @@ TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "app" / "templates"
 ALLOWED_ABSOLUTE_URLS = {"https://schema.org"}
 
 _ABSOLUTE_URL = re.compile(r"https?://[^\s\"'<>)]+")
+
+_JSON_LD_SCRIPT = re.compile(
+    r'<script type="application/ld\+json">(.*?)</script>', flags=re.DOTALL
+)
 
 # Stand-in for the configured ``SITE_URL`` while rendering templates here. It
 # deliberately differs from any deployed host, so a hardcoded domain in a
@@ -129,6 +134,17 @@ def _base_context():
     return {}
 
 
+def _json_ld_nodes(html):
+    """Parse every ``application/ld+json`` block out of ``html``.
+
+    A search engine drops the whole node when the block does not parse, so
+    "the property is present" only means something once the block it lives in
+    still parses. Every assertion about JSON-LD content goes through here.
+    """
+
+    return [json.loads(block) for block in _JSON_LD_SCRIPT.findall(html)]
+
+
 def _index_seo_context(**overrides):
     """SEO context for index page blocks."""
     ctx = {
@@ -136,6 +152,7 @@ def _index_seo_context(**overrides):
         "meta_description": "Buscador de adjudicaciones del Estado uruguayo",
         "og_type": "website",
         "canonical_url": "https://test.example/",
+        "alternate_site_names": ["test.example"],
         "json_ld": {
             "@context": "https://schema.org",
             "@type": "WebSite",
@@ -291,6 +308,60 @@ class TestIndexTemplateSEO:
     def test_title_is_adjudicauy(self):
         html = _render_block(self.env, "index.html", "title", _index_seo_context())
         assert "AdjudicaUY" in html
+
+    def test_title_leads_with_the_brand(self):
+        """The home page ``<title>`` is one of Google's site-name sources.
+
+        A title that opens with the page subject makes the brand compete with
+        the page topic for the site-name slot, and a lost competition is what
+        lets a search result advertise a name the site never chose. The page
+        subject still follows the brand, so the title keeps telling a reader
+        what the page is.
+        """
+
+        html = _render_block(self.env, "index.html", "title", _index_seo_context())
+
+        title = html.strip()
+        assert title.startswith("AdjudicaUY")
+        assert "Adjudicaciones del Estado uruguayo" in title
+
+    def test_website_json_ld_declares_the_host_as_an_alternate_name(self):
+        """The ``WebSite`` node carries ``alternateName`` with the bare host.
+
+        ``alternateName`` is Google's documented remedy when it does not select
+        a site's preferred name: the lowercase host is one of the two forms it
+        strongly considers, and the host here sits under deSEC's shared
+        ``dedyn.io`` namespace, whose domain-level name would otherwise be shown
+        on every result. The property only helps while the node it lives in
+        still parses, so the parsed value is asserted, not just the substring.
+        """
+
+        html = _render_block(self.env, "index.html", "json_ld", _index_seo_context())
+
+        assert '"alternateName": ["test.example"]' in html
+        nodes = _json_ld_nodes(html)
+        assert nodes[0]["@type"] == "WebSite"
+        assert nodes[0]["alternateName"] == ["test.example"]
+        assert nodes[0]["name"] == "AdjudicaUY"
+
+    def test_website_json_ld_omits_alternate_name_when_there_is_none(self):
+        """A context without alternate names must not emit an empty array.
+
+        An empty ``alternateName`` asserts nothing, and the branch that emits
+        it is also where a dangling comma would break the block — taking the
+        ``WebSite`` node, the primary site-name source, down with it.
+        """
+
+        html = _render_block(
+            self.env,
+            "index.html",
+            "json_ld",
+            _index_seo_context(alternate_site_names=None),
+        )
+
+        assert "alternateName" not in html
+        nodes = _json_ld_nodes(html)
+        assert nodes[0]["@type"] == "WebSite"
 
     def test_meta_description_mentions_adjudications(self):
         html = _render_block(

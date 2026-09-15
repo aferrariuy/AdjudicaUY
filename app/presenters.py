@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 from app.config import get_settings
 
@@ -316,6 +317,15 @@ def _build_seo_context(
     ``og_image`` and ``og_site_name`` are shared across every page so
     social shares use the same branded card regardless of the route.
 
+    ``alternate_site_names`` carries this site's own host in all lowercase,
+    which is what Google documents as the ``alternateName`` it strongly
+    considers when it does not select a site's preferred name: without it the
+    domain-level name can be used instead, and a host under someone else's
+    shared namespace (this one sits under deSEC's ``dedyn.io``) surfaces a
+    foreign brand. The host is read from the same ``settings.site_url`` that
+    builds ``canonical_url``, so the name offered as an alternate is always the
+    host the site actually publishes.
+
     ``breadcrumb`` and ``dataset`` are opt-in: a page that passes neither gets
     exactly the context it got before. When ``breadcrumb`` is given (as
     ``(name, path)`` pairs, the last one with ``path=None``) the context also
@@ -325,6 +335,7 @@ def _build_seo_context(
 
     settings = get_settings()
     canonical_url = f"{settings.site_url}{path}"
+    site_hostname = urlparse(settings.site_url).hostname or ""
     context: dict[str, Any] = {
         "meta_title": meta_title,
         "meta_description": meta_description,
@@ -332,6 +343,7 @@ def _build_seo_context(
         "canonical_url": canonical_url,
         "og_image": f"{settings.site_url}/static/og-image.png",
         "og_site_name": "AdjudicaUY",
+        "alternate_site_names": [site_hostname.lower()] if site_hostname else [],
     }
     if breadcrumb is not None:
         context["breadcrumb_items"] = [

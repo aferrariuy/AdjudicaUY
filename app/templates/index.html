@@ -5,7 +5,7 @@
    swapped into #results. The chart canvases are also inside #results
    so they re-render with the new data after every filter change. #}
 
-{% block title %}Adjudicaciones — AdjudicaUY{% endblock %}
+{% block title %}AdjudicaUY — Adjudicaciones del Estado uruguayo{% endblock %}
 
 {# ── SEO overrides for the index/search page ──────────────────────── #}
 {% block meta_description %}{{ meta_description | default('Buscador de adjudicaciones del Estado uruguayo. Filtrá por organismo, empresa, artículo y fecha.', true) }}{% endblock %}
@@ -20,6 +20,9 @@
   "@context": "https://schema.org",
   "@type": "WebSite",
   "name": "AdjudicaUY",
+{% if alternate_site_names %}
+  "alternateName": {{ alternate_site_names | tojson }},
+{% endif %}
   "url": {{ canonical_url | default(site_url ~ '/', true) | tojson }},
   "description": "Buscador de adjudicaciones del Estado uruguayo",
   "potentialAction": {

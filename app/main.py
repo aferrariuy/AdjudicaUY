@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, FastAPI
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.gzip import GZipMiddleware
@@ -59,6 +59,10 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 # under ``app/templates/static`` so the Tailwind build output and any
 # other compiled bundles have a stable, framework-agnostic home.
 STATIC_DIR = Path(__file__).resolve().parent / "static"
+# Served at the site root as well, because browsers and crawlers probe
+# ``/favicon.ico`` by convention without reading the ``<link rel="icon">``
+# tags first.
+FAVICON_PATH = STATIC_DIR / "favicon.ico"
 
 # Crawler directives: endpoints that render a fragment or a non-HTML
 # download must never be indexed. They are not pages — the HTMX
@@ -313,6 +317,31 @@ def create_app() -> FastAPI:
         """Lightweight liveness probe for container orchestrators."""
 
         return {"status": "ok"}
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    async def favicon() -> Response:
+        """Serve the site icon at the root path browsers and crawlers probe.
+
+        Every page already links ``/static/favicon.ico``, but an icon fetch
+        that never reads the markup (a browser tab before the document parses,
+        a crawler probing the conventional path) goes to the site root, which
+        answered 404. Google counts a successful favicon fetch as one of the
+        signals tying a search result to a site, so the probe has to resolve.
+
+        This path deliberately stays outside the immutable ``/static/`` cache
+        rule: that rule is justified by content-hashed filenames and
+        ``favicon.ico`` carries no hash, so a year-long cache would pin an icon
+        that is meant to be replaceable.
+
+        ``FileResponse`` streams the file and sends headers only on HEAD, which
+        is what the shared route class makes this path answer as well.
+        """
+
+        if not FAVICON_PATH.is_file():
+            # Same guard style as the ``/static`` mount above: a checkout or image
+            # without the icon answers 404 instead of crashing.
+            return Response(status_code=404)
+        return FileResponse(FAVICON_PATH, media_type="image/vnd.microsoft.icon")
 
     # ------------------------------------------------------------------
     # Crawler directives: robots.txt + sitemap.xml
